@@ -3,7 +3,7 @@
 **The Stoics on your Omarchy screensaver.** When the screen goes idle, Marcus
 Aurelius looks back at you out of the Munich Glyptothek and reminds you that the
 thing bothering you is your opinion of the thing. A minute later it is Seneca, or
-Epictetus, or the man who founded the whole school on a Athenian porch.
+Epictetus, or the man who founded the whole school on an Athenian porch.
 
 ![Omastoic on the Omarchy screensaver](preview.png)
 
@@ -20,21 +20,39 @@ cd omastoic
 ./bin/omastoic install
 ```
 
-That backs up whatever screensaver art you had, writes the first canvas, and
-starts a small user service that swaps in a new quote every 20 seconds while the
-screensaver is actually on screen. See it right now:
+That backs up whatever screensaver art you had, writes the first canvas, puts
+`omastoic` on your PATH, adds a row to the Omarchy menu, and starts a small user
+service that swaps in a new quote every 20 seconds while the screensaver is
+actually on screen. See it right now:
 
 ```bash
-./bin/omastoic preview
+omastoic preview
 ```
 
-To hand the screensaver back:
+## Switching screensavers
+
+The screensaver art is one slot, and Omarchy already has a place for it, so
+that's where the switch lives: **Style → Screensaver → Stoics** in the Omarchy
+menu, next to Edit Text, Set From Image and Restore Default. The row carries a
+✓ when the Stoics have it. Or from a terminal:
 
 ```bash
-./bin/omastoic uninstall
+omastoic off      # back to whatever art was there before
+omastoic on       # the Stoics again
+omastoic toggle   # whichever of the two you are not on
 ```
 
-which stops the service and restores your old art.
+**Omarchy's own commands win.** Set the art with `omarchy branding screensaver
+image` (or `text`, or `reset`) and omastoic notices the slot is no longer its
+own, turns itself off and leaves the new art alone — rather than quietly
+reverting you on the next rotation, which would look like a bug in Omarchy. Turn
+the Stoics back on whenever you want them.
+
+`omastoic uninstall` removes all of it — service, menu row, launcher — and
+restores your old art.
+
+State lives where Omarchy keeps its own: the on/off flag is
+`omarchy-toggle omastoic`, which is what the menu row's ✓ reads.
 
 ## How it works
 
@@ -57,12 +75,15 @@ short terminal, mostly — the quote is laid out on its own instead.
 
 | Command | Does |
 | --- | --- |
-| `omastoic install` | back up your art, write the first canvas, start the rotation service |
-| `omastoic uninstall` | stop the service and put your old art back |
+| `omastoic on` | hand the screensaver to the Stoics |
+| `omastoic off` | give it back to whatever art was there before |
+| `omastoic toggle` | whichever of the two you are not on |
 | `omastoic preview` | write a new canvas and start the screensaver now |
+| `omastoic status` | who has the screensaver, and what's in the quote book |
+| `omastoic install` | set up the rotation service, the menu row and the launcher |
+| `omastoic uninstall` | take all of it back out |
 | `omastoic show` | print one canvas at this terminal's size |
 | `omastoic next` | put a new canvas in the screensaver file |
-| `omastoic status` | what's installed, and what's in the quote book |
 
 ## Making it yours
 
@@ -110,7 +131,10 @@ bun test
 
 Checks the quote book parses, every author has a portrait and dates, and every
 quote in the book lays out inside the smallest grid the layout claims to
-support — including the fallback when there is no room for a portrait.
+support — including the fallback when there is no room for a portrait. The menu
+tests cover the part most likely to hurt someone: that adding and removing the
+menu row leaves the rest of `omarchy-menu.jsonc` — comments, and other tools'
+blocks — exactly as it was found.
 
 ## Credits
 
