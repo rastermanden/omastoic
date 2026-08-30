@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Thin launcher. The rotation service and the Omarchy menu both start this
+# without an interactive shell, where a version manager's shim may resolve to
+# nothing (mise, for one, only answers for `bun` inside a directory that
+# declares it). So candidates are probed by actually running them, and a real
+# binary wins over a shim.
+set -euo pipefail
+
+root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+usable() {
+  [[ -n ${1:-} ]] && command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1
+}
+
+find_bun() {
+  local candidate
+
+  for candidate in \
+    "${OMASTOIC_BUN:-}" \
+    "$HOME/.bun/bin/bun" \
+    /usr/local/bin/bun \
+    /usr/bin/bun; do
+    if usable "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  # Newest version a version manager installed, reached directly rather than
+  # through its shim.
+  local installs="$HOME/.local/share/mise/installs/bun"
+  if [[ -d $installs ]]; then
+    while read -r candidate; do
+      if usable "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    done < <(find "$installs" -mindepth 2 -maxdepth 3 \( -name bun -type f -o -name bun -type l \) 2>/dev/null | sort -Vr)
+  fi
+
+  if command -v mise >/dev/null 2>&1; then
+    candidate="$(cd "$root" && mise which bun 2>/dev/null || true)"
+    if usable "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+
+  if usable bun; then
+    printf '%s\n' bun
+    return 0
+  fi
+
+  return 1
+}
+
+if ! bun_bin="$(find_bun)"; then
+  echo "omastoic: no working bun found — install it with 'omarchy pkg add bun' or set OMASTOIC_BUN" >&2
+  exit 127
+fi
+
+exec "$bun_bin" "$root/src/cli.ts" "$@"

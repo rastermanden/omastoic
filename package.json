@@ -1,0 +1,11 @@
+{
+  "name": "omastoic",
+  "version": "1.0.0",
+  "description": "The Stoics on your Omarchy screensaver",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "test": "bun test",
+    "art": "bun scripts/fetch-sources.sh && bun scripts/transcode.ts"
+  }
+}

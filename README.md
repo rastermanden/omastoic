@@ -1,0 +1,120 @@
+# Omastoic
+
+**The Stoics on your Omarchy screensaver.** When the screen goes idle, Marcus
+Aurelius looks back at you out of the Munich Glyptothek and reminds you that the
+thing bothering you is your opinion of the thing. A minute later it is Seneca, or
+Epictetus, or the man who founded the whole school on a Athenian porch.
+
+![Omastoic on the Omarchy screensaver](preview.png)
+
+Six Stoics, each with a portrait transcoded from a museum photograph, and 64
+quotes from public-domain translations, every one cited by book and section.
+
+## Install
+
+Requires Omarchy 4+ and [bun](https://bun.sh) (`omarchy pkg add bun`).
+
+```bash
+git clone https://github.com/rastermanden/omastoic.git
+cd omastoic
+./bin/omastoic install
+```
+
+That backs up whatever screensaver art you had, writes the first canvas, and
+starts a small user service that swaps in a new quote every 20 seconds while the
+screensaver is actually on screen. See it right now:
+
+```bash
+./bin/omastoic preview
+```
+
+To hand the screensaver back:
+
+```bash
+./bin/omastoic uninstall
+```
+
+which stops the service and restores your old art.
+
+## How it works
+
+Omarchy's screensaver runs `ttfx` in a fullscreen terminal, in a loop, over
+`~/.config/omarchy/branding/screensaver.txt` — and it re-reads that file every
+time round the loop. So Omastoic replaces, shadows and patches nothing: it just
+keeps a freshly composed canvas in the file Omarchy already reads, and swaps it
+for another one between effects.
+
+The service listens on Hyprland's event socket rather than polling. It wakes when
+a window of class `org.omarchy.screensaver` opens, rotates quotes while one is up,
+writes one last canvas when the screensaver closes so the next one is already
+fresh, and then goes back to sleep. Nothing runs on a timer when you are working.
+
+The canvas is sized for the smallest attached monitor, from the cell size the
+screensaver terminal actually uses. If a screen is too small for a portrait — a
+short terminal, mostly — the quote is laid out on its own instead.
+
+## Commands
+
+| Command | Does |
+| --- | --- |
+| `omastoic install` | back up your art, write the first canvas, start the rotation service |
+| `omastoic uninstall` | stop the service and put your old art back |
+| `omastoic preview` | write a new canvas and start the screensaver now |
+| `omastoic show` | print one canvas at this terminal's size |
+| `omastoic next` | put a new canvas in the screensaver file |
+| `omastoic status` | what's installed, and what's in the quote book |
+
+## Making it yours
+
+**Your own quotes** go in `~/.config/omastoic/quotes.tsv`, in the same three
+tab-separated columns as `data/quotes.tsv` — author slug, citation, text. They
+are added to the book, not swapped in for it. An author slug with a portrait in
+`art/` gets that portrait; anything else renders as a quote on its own.
+
+**Settings** live in `~/.config/omastoic/config.json`:
+
+```json
+{
+  "interval": 20,
+  "authors": ["marcus", "epictetus"]
+}
+```
+
+`interval` is seconds between quotes while the screensaver is up. `authors`
+narrows the roster — leave it out for all six.
+
+**Portraits.** `art/*.txt` is generated, not hand-drawn. To change one, or add a
+seventh Stoic, add an entry to `assets/portraits.json` — source filename, crop,
+and the three tone numbers — then:
+
+```bash
+./scripts/fetch-sources.sh      # downloads the sources from Wikimedia Commons
+bun scripts/transcode.ts        # rebuilds art/, or one slug: ... transcode.ts zeno
+```
+
+A photograph needs more than the hard threshold a logo transcoder uses; a bust
+thresholded flat is a white blob. Each portrait is blurred just enough to lose
+the marble's grain, levelled so the sitter's own shadows survive, masked with a
+soft ellipse so the museum wall behind it does not, and halftoned with a
+clustered 4×4 pattern — which the braille grid renders as tone, where a
+diffusion dither at this size turns into static.
+
+`scripts/preview.sh <canvas.txt>` renders a canvas to a PNG at the terminal's
+cell aspect ratio, which is the quickest way to judge a new portrait.
+
+## Tests
+
+```bash
+bun test
+```
+
+Checks the quote book parses, every author has a portrait and dates, and every
+quote in the book lays out inside the smallest grid the layout claims to
+support — including the fallback when there is no room for a portrait.
+
+## Credits
+
+Portrait sources and translations are listed in [CREDITS.md](CREDITS.md). Every
+image is public domain or CC0, and every translation is out of copyright.
+
+MIT licensed.
