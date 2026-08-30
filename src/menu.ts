@@ -19,8 +19,8 @@ const FOOTER = `  ${END}`;
  */
 export function rows(): string[] {
   return [
-    `  "style.screensaver.stoics": {"icon":"󱄄","label":"Stoics","description":"Marcus Aurelius, Seneca, Epictetus and the founders of the school","aliases":["stoic","stoics"],"checked":"omarchy-toggle-enabled omastoic","action":"omastoic toggle"},`,
-    `  "style.screensaver.stoics-show": {"icon":"󰑐","label":"Show a Stoic","when":"omarchy-toggle-enabled omastoic","action":"omastoic preview"},`,
+    `  "style.screensaver.choose": {"icon":"󱄄","label":"Choose","description":"Pick a screensaver from a grid of previews","aliases":["screensaver","stoic","stoics"],"action":"omastoic choose"},`,
+    `  "style.screensaver.stoics": {"icon":"","label":"Stoics","description":"Marcus Aurelius, Seneca, Epictetus and the founders of the school","checked":"omarchy-toggle-enabled omastoic","action":"omastoic toggle"},`,
   ];
 }
 

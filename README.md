@@ -32,15 +32,32 @@ omastoic preview
 ## Switching screensavers
 
 The screensaver art is one slot, and Omarchy already has a place for it, so
-that's where the switch lives: **Style → Screensaver → Stoics** in the Omarchy
-menu, next to Edit Text, Set From Image and Restore Default. The row carries a
-✓ when the Stoics have it. Or from a terminal:
+that's where the switch lives: **Style → Screensaver** in the Omarchy menu, next
+to Edit Text, Set From Image and Restore Default.
+
+**Choose** opens a grid of previews — the same picker Omarchy uses for
+backgrounds and unlock screens — with a tile per screensaver. Each tile is drawn
+at the size it will really appear on your screen, so a short piece of art shows
+short rather than blown up to fill the frame. **Stoics** is a straight toggle
+alongside it, carrying a ✓ when they have the slot.
+
+From a terminal:
 
 ```bash
-omastoic off      # back to whatever art was there before
-omastoic on       # the Stoics again
-omastoic toggle   # whichever of the two you are not on
+omastoic choose        # the grid of previews
+omastoic slates        # list what you can switch between
+omastoic use Omarchy   # switch by name
+omastoic off           # back to the last fixed art you chose
+omastoic on            # the Stoics again
+omastoic toggle        # whichever of the two you are not on
 ```
+
+Out of the box there are three: **Stoics**, **Previous** (whatever was in the
+slot before omastoic arrived, kept once and never overwritten) and **Omarchy**
+(the stock logo). Drop any ASCII or braille art in as
+`~/.config/omastoic/screensavers/<Name>.txt` and it joins the grid under that
+name. Art that omastoic displaces later is kept as **Replaced**, so one undo is
+always on the grid.
 
 **Omarchy's own commands win.** Set the art with `omarchy branding screensaver
 image` (or `text`, or `reset`) and omastoic notices the slot is no longer its

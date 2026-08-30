@@ -17,6 +17,8 @@ import { dirname, join } from "node:path";
 import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents } from "./hyprland.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
+import { renderCanvasPng, themeForeground } from "./png.ts";
+import { buildPreviews, discover, find, type Slate, type SlatePaths } from "./slates.ts";
 
 const ROOT = dirname(import.meta.dir);
 const HOME = process.env.HOME ?? "";
@@ -31,6 +33,15 @@ const STATE = join(STATE_HOME, "omastoic");
 const WRITTEN = join(STATE, "written.sha");
 const UNIT = join(CONFIG_HOME, "systemd/user/omastoic.service");
 const LAUNCHER = join(HOME, ".local/bin/omastoic");
+const CACHE_HOME = process.env.XDG_CACHE_HOME ?? join(HOME, ".cache");
+const PREVIEWS = join(CACHE_HOME, "omastoic/slates");
+const LAST_SLATE = join(STATE, "last-slate");
+
+const SLATE_PATHS: SlatePaths = {
+  backup: BACKUP,
+  userDir: join(USER_CONFIG, "screensavers"),
+  omarchyLogo: join(process.env.OMARCHY_PATH ?? "/usr/share/omarchy", "logo.txt"),
+};
 
 // Omarchy keeps feature flags as files under ~/.local/state/omarchy/toggles.
 // Using its own commands means `checked` and `when` conditions in the menu read
@@ -147,18 +158,54 @@ async function writeBranding(): Promise<void> {
   await rememberWrite(canvas);
 }
 
-/** Keep whatever art is in the slot now, so `omastoic off` can put it back. */
-async function setAside(): Promise<void> {
+/**
+ * Never lose art omastoic is about to cover.
+ *
+ * The very first thing displaced becomes the "Previous" slate and is then left
+ * alone forever — it is the only copy of what the machine looked like before
+ * omastoic arrived. Anything displaced after that is kept as one undo level, so
+ * art set with `omarchy branding screensaver image` survives being replaced.
+ */
+async function preserveDisplaced(slates: Slate[]): Promise<void> {
   const current = Bun.file(BRANDING);
   if (!(await current.exists()) || (await ownsBranding())) return;
-  await Bun.write(BACKUP, current);
-  console.log(`→ kept your screensaver art at ${BACKUP}`);
+  const art = await current.text();
+
+  if (!(await Bun.file(BACKUP).exists())) {
+    await Bun.write(BACKUP, art);
+    console.log(`→ kept your screensaver art as the "Previous" slate`);
+    return;
+  }
+
+  // Already one of the slates on offer? Then it is not going anywhere.
+  for (const slate of slates) {
+    if (slate.kind === "art" && (await Bun.file(slate.path).text().catch(() => "")) === art) return;
+  }
+
+  const replaced = join(SLATE_PATHS.userDir, "Replaced.txt");
+  mkdirSync(SLATE_PATHS.userDir, { recursive: true });
+  await Bun.write(replaced, art);
+  console.log(`→ kept the art it replaced as the "Replaced" slate`);
 }
 
-// --- on, off, and standing aside --------------------------------------------
+const slateList = () => discover(SLATE_PATHS);
+
+async function rememberSlate(name: string): Promise<void> {
+  mkdirSync(STATE, { recursive: true });
+  await Bun.write(LAST_SLATE, name);
+}
+
+/** The slate showing now: the Stoics when they are on, else the last one chosen. */
+async function currentSlate(slates: Slate[]): Promise<Slate | undefined> {
+  if (enabled()) return slates[0];
+  const last = (await Bun.file(LAST_SLATE).text().catch(() => "")).trim();
+  return (last && find(slates, last)) || slates.find((s) => s.kind === "art");
+}
+
+// --- switching ----------------------------------------------------------------
 
 async function on(): Promise<number> {
-  await setAside();
+  await preserveDisplaced(await slateList());
   setEnabled(true);
   await writeBranding();
 
@@ -170,21 +217,54 @@ async function on(): Promise<number> {
   return 0;
 }
 
-async function off(): Promise<number> {
+/** Put a fixed piece of art in the slot and stand the Stoics down. */
+async function applyArt(slate: Slate & { kind: "art" }, slates: Slate[]): Promise<number> {
+  const art = await Bun.file(slate.path).text().catch(() => "");
+  if (!art.trim()) {
+    console.error(`omastoic: ${slate.name} has no art in it (${slate.path})`);
+    return 1;
+  }
+
+  await preserveDisplaced(slates);
   setEnabled(false);
   if (await Bun.file(UNIT).exists()) await run(["systemctl", "--user", "stop", "omastoic.service"]);
 
-  const backup = Bun.file(BACKUP);
-  if (await backup.exists()) {
-    const art = await backup.text();
-    await Bun.write(BRANDING, art);
-    await rememberWrite(art); // the slot is no longer ours, but nor is it a foreign edit
-    console.log("→ put your previous screensaver art back");
-  }
+  await Bun.write(BRANDING, art);
+  // The slot is deliberately not ours now, so drop the ownership record rather
+  // than claim art omastoic did not compose.
+  await Bun.file(WRITTEN).delete().catch(() => {});
+  await rememberSlate(slate.name);
 
-  console.log("→ the Stoics have stood down");
-  notify("Screensaver: Stoics off");
+  console.log(`→ screensaver: ${slate.name}`);
+  notify(`Screensaver: ${slate.name}`);
   return 0;
+}
+
+async function use(name: string): Promise<number> {
+  const slates = await slateList();
+  const slate = find(slates, name);
+  if (!slate) {
+    console.error(`omastoic: no screensaver called "${name}"`);
+    console.error(`          try one of: ${slates.map((s) => s.name).join(", ")}`);
+    return 1;
+  }
+  return slate.kind === "stoics" ? on() : applyArt(slate, slates);
+}
+
+async function off(): Promise<number> {
+  const slates = await slateList();
+  const last = (await Bun.file(LAST_SLATE).text().catch(() => "")).trim();
+  const target =
+    (last ? find(slates, last) : undefined) ?? slates.find((s) => s.kind === "art");
+
+  if (!target || target.kind !== "art") {
+    // Nothing to fall back to — stand down and leave the slot as it is.
+    setEnabled(false);
+    if (await Bun.file(UNIT).exists()) await run(["systemctl", "--user", "stop", "omastoic.service"]);
+    console.log("→ the Stoics have stood down");
+    return 0;
+  }
+  return applyArt(target, slates);
 }
 
 /**
@@ -196,6 +276,67 @@ function standAside(): void {
   setEnabled(false);
   console.error("omastoic: the screensaver art changed underneath us — standing aside");
   notify("Screensaver art changed — the Stoics stood aside");
+}
+
+// --- the picker ---------------------------------------------------------------
+
+/**
+ * A fixed canvas for the Stoics tile. Live-drawing it would show a different
+ * quote each time the picker opened, which reads as a different screensaver
+ * rather than as the same one sampled twice.
+ */
+async function stoicsSample(): Promise<string> {
+  const quotes = await quoteBook();
+  const shown =
+    quotes.find((q) => q.citation === "Meditations VIII.47") ?? quotes[0];
+  if (!shown) throw new Error("the quote book is empty");
+  const art = await loadArt(join(ROOT, "art"), shown.author);
+  return compose(shown, (await authors()).get(shown.author), { cols: 100, rows: 28, art });
+}
+
+/**
+ * Open Omarchy's own image picker — the one behind the background and unlock
+ * selectors — on a tile per screensaver, and switch to whatever comes back.
+ */
+async function switcher(): Promise<number> {
+  if (!Bun.which("omarchy-menu-images")) {
+    console.error("omastoic: omarchy-menu-images is missing — needs Omarchy 4+");
+    return 1;
+  }
+
+  const slates = await slateList();
+  const foreground = await themeForeground();
+  const grid = await screensaverSize();
+  const previews = await buildPreviews(slates, PREVIEWS, await stoicsSample(), (canvas, out) =>
+    renderCanvasPng(canvas, out, { foreground, grid }),
+  );
+  if (!previews.size) {
+    console.error("omastoic: nothing to choose between");
+    return 1;
+  }
+
+  const selected = previews.get((await currentSlate(slates))?.name ?? "");
+  const args = ["omarchy-menu-images", "--print-name", "--show-labels"];
+  if (selected) args.push("--selected", selected);
+  args.push(PREVIEWS);
+
+  const picker = Bun.spawn(args, { stdout: "pipe", stderr: "inherit" });
+  const chosen = (await new Response(picker.stdout).text()).trim();
+  await picker.exited;
+
+  if (!chosen) return 0; // dismissed
+  return use(chosen);
+}
+
+async function listSlates(): Promise<number> {
+  const slates = await slateList();
+  const current = await currentSlate(slates);
+  for (const slate of slates) {
+    const mark = slate.name === current?.name ? "✓" : " ";
+    const where = slate.kind === "stoics" ? "drawn fresh each time" : slate.path;
+    console.log(` ${mark} ${slate.name.padEnd(16)} ${where}`);
+  }
+  return 0;
 }
 
 // --- installation ------------------------------------------------------------
@@ -283,8 +424,8 @@ WantedBy=graphical-session.target
 
   await on();
   console.log(`→ a new quote every ${interval}s while the screensaver is up`);
-  console.log("\nTry it now:  omastoic preview");
-  console.log("Switch back: omastoic off  (or Style → Screensaver → Stoics in the menu)");
+  console.log("\nTry it now:    omastoic preview");
+  console.log("Switch away:   omastoic choose  (or Style → Screensaver in the menu)");
   return 0;
 }
 
@@ -366,8 +507,10 @@ async function status(): Promise<number> {
   const unit = Bun.spawnSync(["systemctl", "--user", "is-active", "omastoic.service"]);
   const on = enabled();
 
+  const slates = await slateList();
   console.log(`
-screensaver:      ${on ? "the Stoics" : "whatever art was there before"}`);
+screensaver:      ${(await currentSlate(slates))?.name ?? "unknown"}
+switchable:       ${slates.map((s) => s.name).join(", ")}`);
   // Only meaningful while the Stoics are on: off, the slot is the user's by
   // design, and saying omastoic holds it would read as a bug.
   if (on && !(await ownsBranding())) {
@@ -405,6 +548,30 @@ async function main(): Promise<number> {
       return off();
     case "toggle":
       return enabled() ? off() : on();
+    case "switcher":
+    case "choose":
+      return switcher();
+    case "use":
+      if (!rest[0]) {
+        console.error("usage: omastoic use <name>   (omastoic slates lists them)");
+        return 1;
+      }
+      return use(rest.join(" "));
+    case "slates":
+      return listSlates();
+    case "render-png": {
+      // Used by scripts/preview.sh so the dev tool and the picker share a renderer.
+      const [input, out = "/tmp/omastoic-preview.png"] = rest;
+      if (!input) {
+        console.error("usage: omastoic render-png <canvas.txt> [out.png]");
+        return 1;
+      }
+      await renderCanvasPng(await Bun.file(input).text(), out, {
+        foreground: await themeForeground(),
+      });
+      console.log(out);
+      return 0;
+    }
     case "next":
       if (!(await requireOn())) return 1;
       await writeBranding();
@@ -424,9 +591,12 @@ async function main(): Promise<number> {
     default:
       console.log(`omastoic — the Stoics on your Omarchy screensaver
 
+  omastoic choose       pick a screensaver from a grid of previews
   omastoic on           hand the screensaver to the Stoics
-  omastoic off          give it back to whatever art was there before
+  omastoic off          go back to the last fixed art you chose
   omastoic toggle       whichever of the two you are not on
+  omastoic use <name>   switch to one screensaver by name
+  omastoic slates       list the screensavers you can switch between
   omastoic preview      write a new canvas and start the screensaver now
   omastoic status       who has the screensaver, and what is in the quote book
 
@@ -436,7 +606,9 @@ async function main(): Promise<number> {
   omastoic next         put a new canvas in the screensaver file
   omastoic daemon       rotate quotes while the screensaver is up (the service)
 
-Switching is also in the Omarchy menu, under Style → Screensaver → Stoics.
+Switching is also in the Omarchy menu, under Style → Screensaver.
+Drop your own art as ~/.config/omastoic/screensavers/<Name>.txt and it
+joins the grid.
 Omarchy's own branding commands win: set the art with \`omarchy branding
 screensaver image\` and the Stoics stand aside on their own.
 

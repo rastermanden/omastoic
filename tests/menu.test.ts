@@ -31,8 +31,10 @@ test("comments and other tools' blocks survive", () => {
 
 test("the rows extend Omarchy's own screensaver submenu", () => {
   for (const row of rows()) expect(row).toContain(`"style.screensaver.`);
-  expect(rows().join("\n")).toContain(`"checked":"omarchy-toggle-enabled omastoic"`);
-  expect(rows().join("\n")).toContain(`"action":"omastoic toggle"`);
+  const all = rows().join("\n");
+  expect(all).toContain(`"action":"omastoic choose"`);
+  expect(all).toContain(`"checked":"omarchy-toggle-enabled omastoic"`);
+  expect(all).toContain(`"action":"omastoic toggle"`);
 });
 
 test("installing twice leaves one block, not two", () => {
@@ -48,7 +50,7 @@ test("a changed set of rows replaces the old ones in place", () => {
   const after = withBlock(before, [`  "style.screensaver.stoics": {"label":"Stoics"},`]);
   expect(after.split(BEGIN).length - 1).toBe(1);
   expect(after).toContain(`{"label":"Stoics"}`);
-  expect(after).not.toContain("stoics-show");
+  expect(after).not.toContain("style.screensaver.choose");
 });
 
 test("removing the block restores the file it was added to", () => {
