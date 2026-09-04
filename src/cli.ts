@@ -12,7 +12,7 @@
 // clobbering the new art.
 
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, renameSync, symlinkSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents } from "./hyprland.ts";
@@ -48,6 +48,8 @@ const SLATE_PATHS: SlatePaths = {
 // the same state omastoic writes.
 const TOGGLE = "omastoic";
 const GLYPH = "󱄄";
+const INSTALLED = join(STATE, "installed");
+const PLUGIN_HOME = join(CONFIG_HOME, "omarchy/plugins/omastoic");
 
 const DEFAULT_INTERVAL = 20;
 
@@ -360,17 +362,23 @@ async function removeMenuRows(): Promise<void> {
   console.log("→ removed the Stoics row from the Omarchy menu");
 }
 
-function linkLauncher(): void {
+function linkLauncher(quiet = false): void {
+  const target = join(ROOT, "bin/omastoic");
   try {
     mkdirSync(dirname(LAUNCHER), { recursive: true });
     try {
-      lstatSync(LAUNCHER);
+      if (readlinkSync(LAUNCHER) === target) return;
       unlinkSync(LAUNCHER);
     } catch {
-      // nothing there yet
+      try {
+        lstatSync(LAUNCHER);
+        unlinkSync(LAUNCHER);
+      } catch {
+        // nothing there yet
+      }
     }
-    symlinkSync(join(ROOT, "bin/omastoic"), LAUNCHER);
-    console.log(`→ ${LAUNCHER}`);
+    symlinkSync(target, LAUNCHER);
+    if (!quiet) console.log(`→ ${LAUNCHER}`);
   } catch (err) {
     console.error(`omastoic: could not link ${LAUNCHER}: ${(err as Error).message}`);
   }
@@ -384,25 +392,10 @@ function unlinkLauncher(): void {
   }
 }
 
-async function install(): Promise<number> {
-  if (!Bun.which("omarchy")) {
-    console.error("omastoic: omarchy is not on PATH — this needs Omarchy 4+");
-    return 1;
-  }
-  if (!Bun.which("ttfx")) {
-    console.error("omastoic: ttfx is missing, so the Omarchy screensaver cannot run");
-    console.error("          install it with: omarchy pkg add ttfx");
-    return 1;
-  }
+type SetupOpts = { onFirst?: boolean; quiet?: boolean };
 
-  linkLauncher();
-  await addMenuRows();
-
-  const interval = (await config()).interval ?? DEFAULT_INTERVAL;
-  mkdirSync(dirname(UNIT), { recursive: true });
-  await Bun.write(
-    UNIT,
-    `[Unit]
+function unitBody(): string {
+  return `[Unit]
 Description=Rotate the Stoic quote on the Omarchy screensaver
 PartOf=graphical-session.target
 After=graphical-session.target
@@ -415,21 +408,71 @@ RestartSec=5
 
 [Install]
 WantedBy=graphical-session.target
-`,
-  );
-  console.log(`→ ${UNIT}`);
+`;
+}
 
-  await run(["systemctl", "--user", "daemon-reload"]);
+async function requireOmarchy(): Promise<number> {
+  if (!Bun.which("omarchy")) {
+    console.error("omastoic: omarchy is not on PATH — this needs Omarchy 4+");
+    return 1;
+  }
+  if (!Bun.which("ttfx")) {
+    console.error("omastoic: ttfx is missing, so the Omarchy screensaver cannot run");
+    console.error("          install it with: omarchy pkg add ttfx");
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * Idempotent plumbing: launcher, menu row, systemd unit. Does not touch the
+ * screensaver slot unless this is the first setup and `--on-first` was passed
+ * — otherwise a shell restart would steal the slot back after `omastoic off`.
+ */
+async function setup(opts: SetupOpts = {}): Promise<number> {
+  const missing = await requireOmarchy();
+  if (missing) return missing;
+
+  const say = (line: string) => {
+    if (!opts.quiet) console.log(line);
+  };
+
+  const first = !(await Bun.file(INSTALLED).exists());
+  linkLauncher(opts.quiet);
+  await addMenuRows();
+
+  const next = unitBody();
+  const prev = await Bun.file(UNIT).text().catch(() => "");
+  mkdirSync(dirname(UNIT), { recursive: true });
+  if (prev !== next) {
+    await Bun.write(UNIT, next);
+    say(`→ ${UNIT}`);
+    await run(["systemctl", "--user", "daemon-reload"]);
+  }
+
   await run(["systemctl", "--user", "enable", "omastoic.service"]);
 
+  mkdirSync(STATE, { recursive: true });
+  await Bun.write(INSTALLED, ROOT);
+
+  if (opts.onFirst && first) return on();
+  if (enabled() && prev !== next) await run(["systemctl", "--user", "restart", "omastoic.service"]);
+
+  const interval = (await config()).interval ?? DEFAULT_INTERVAL;
+  say(`→ a new quote every ${interval}s while the screensaver is up`);
+  return 0;
+}
+
+async function install(): Promise<number> {
+  const code = await setup();
+  if (code) return code;
   await on();
-  console.log(`→ a new quote every ${interval}s while the screensaver is up`);
   console.log("\nTry it now:    omastoic preview");
   console.log("Switch away:   omastoic choose  (or Style → Screensaver in the menu)");
   return 0;
 }
 
-async function uninstall(): Promise<number> {
+async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
   await off();
 
   if (await Bun.file(UNIT).exists()) {
@@ -444,6 +487,19 @@ async function uninstall(): Promise<number> {
 
   const backup = Bun.file(BACKUP);
   if (await backup.exists()) await backup.delete();
+  await Bun.file(INSTALLED).delete().catch(() => {});
+
+  if (opts.purge) {
+    rmSync(USER_CONFIG, { recursive: true, force: true });
+    rmSync(STATE, { recursive: true, force: true });
+    rmSync(PREVIEWS, { recursive: true, force: true });
+    console.log(`→ removed ${USER_CONFIG}`);
+  }
+
+  if (await Bun.file(join(PLUGIN_HOME, "manifest.json")).exists()) {
+    console.log("→ plugin still enabled; it will set up again on the next shell start");
+    console.log("          omarchy plugin remove omastoic");
+  }
   return 0;
 }
 
@@ -582,10 +638,12 @@ async function main(): Promise<number> {
       return run(["omarchy-launch-screensaver", "force"]);
     case "daemon":
       return daemon();
+    case "setup":
+      return setup({ onFirst: rest.includes("--on-first"), quiet: rest.includes("--quiet") });
     case "install":
       return install();
     case "uninstall":
-      return uninstall();
+      return uninstall({ purge: rest.includes("--purge") });
     case "status":
       return status();
     default:
@@ -600,11 +658,16 @@ async function main(): Promise<number> {
   omastoic preview      write a new canvas and start the screensaver now
   omastoic status       who has the screensaver, and what is in the quote book
 
-  omastoic install      set up the rotation service and the menu row
-  omastoic uninstall    take all of it back out
+  omastoic setup        rotation service, menu row and launcher (idempotent)
+  omastoic install      setup, then hand the screensaver to the Stoics
+  omastoic uninstall    take the service, menu row and launcher back out
   omastoic show         print one canvas at this terminal's size
   omastoic next         put a new canvas in the screensaver file
   omastoic daemon       rotate quotes while the screensaver is up (the service)
+
+Install with:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable --yes
+Remove with:   omastoic uninstall && omarchy plugin remove omastoic
+               (omastoic uninstall --purge also drops your quotes and settings)
 
 Switching is also in the Omarchy menu, under Style → Screensaver.
 Drop your own art as ~/.config/omastoic/screensavers/<Name>.txt and it

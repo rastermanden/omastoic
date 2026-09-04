@@ -16,19 +16,30 @@ A longer clip is in [demo.mp4](demo.mp4).
 Requires Omarchy 4+ and [bun](https://bun.sh) (`omarchy pkg add bun`).
 
 ```bash
-git clone https://github.com/rastermanden/omastoic.git
-cd omastoic
-./bin/omastoic install
+omarchy plugin add https://github.com/rastermanden/omastoic.git --enable --yes
 ```
 
-That backs up whatever screensaver art you had, writes the first canvas, puts
-`omastoic` on your PATH, adds a row to the Omarchy menu, and starts a small user
-service that swaps in a new quote every 20 seconds while the screensaver is
-actually on screen. See it right now:
+That clones the plugin into `~/.config/omarchy/plugins/omastoic`, backs up
+whatever screensaver art you had, writes the first canvas, puts `omastoic` on
+your PATH, adds a row to the Omarchy menu, and starts a small user service that
+swaps in a new quote every 20 seconds while the screensaver is actually on
+screen. See it right now:
 
 ```bash
 omastoic preview
 ```
+
+From a checkout instead:
+
+```bash
+./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/omastoic and sets up
+./uninstall.sh        # removes service, menu row, launcher and the plugin; keeps your quotes
+```
+
+Update a published install with `omarchy plugin update omastoic`. Remove it
+with `omastoic uninstall && omarchy plugin remove omastoic` — that keeps
+your quotes and settings for a later reinstall; `omastoic uninstall --purge`
+removes those too.
 
 ## Switching screensavers
 
@@ -66,8 +77,9 @@ own, turns itself off and leaves the new art alone — rather than quietly
 reverting you on the next rotation, which would look like a bug in Omarchy. Turn
 the Stoics back on whenever you want them.
 
-`omastoic uninstall` removes all of it — service, menu row, launcher — and
-restores your old art.
+`omastoic uninstall` removes the service, menu row and launcher, and restores
+your old art. Follow it with `omarchy plugin remove omastoic` so the plugin
+does not set itself up again on the next shell start.
 
 State lives where Omarchy keeps its own: the on/off flag is
 `omarchy-toggle omastoic`, which is what the menu row's ✓ reads.
@@ -98,8 +110,9 @@ short terminal, mostly — the quote is laid out on its own instead.
 | `omastoic toggle` | whichever of the two you are not on |
 | `omastoic preview` | write a new canvas and start the screensaver now |
 | `omastoic status` | who has the screensaver, and what's in the quote book |
-| `omastoic install` | set up the rotation service, the menu row and the launcher |
-| `omastoic uninstall` | take all of it back out |
+| `omastoic setup` | rotation service, menu row and launcher (safe to re-run) |
+| `omastoic install` | setup, then hand the screensaver to the Stoics |
+| `omastoic uninstall` | take the service, menu row and launcher back out |
 | `omastoic show` | print one canvas at this terminal's size |
 | `omastoic next` | put a new canvas in the screensaver file |
 

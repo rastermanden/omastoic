@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "omastoic",
+  "name": "Omastoic",
+  "version": "1.1.0",
+  "author": "Martin Bjærge Jensen",
+  "license": "MIT",
+  "homepage": "https://github.com/rastermanden/omastoic",
+  "description": "The Stoics on your Omarchy screensaver — braille portraits and cited quotes from Marcus Aurelius, Seneca, Epictetus and the founders of the school.",
+  "kinds": ["service"],
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}
