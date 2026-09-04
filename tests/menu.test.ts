@@ -29,13 +29,13 @@ test("comments and other tools' blocks survive", () => {
   expect(next).toContain(`"personal"`);
 });
 
-test("the rows extend Omarchy's own screensaver submenu with one Stoics toggle", () => {
-  expect(rows()).toHaveLength(1);
-  const row = rows()[0];
-  expect(row).toContain(`"style.screensaver.stoics"`);
-  expect(row).toContain(`"checked":"omarchy-toggle-enabled omastoic"`);
-  expect(row).toContain(`"action":"omastoic toggle"`);
-  expect(row).not.toContain("omastoic choose");
+test("the rows extend Omarchy's own screensaver submenu with Stoics and Configure", () => {
+  expect(rows()).toHaveLength(2);
+  expect(rows().join("\n")).toContain(`"style.screensaver.stoics"`);
+  expect(rows().join("\n")).toContain(`"checked":"omarchy-toggle-enabled omastoic"`);
+  expect(rows().join("\n")).toContain(`"action":"omastoic toggle"`);
+  expect(rows().join("\n")).toContain(`"action":"omarchy-launch-tui omastoic config"`);
+  expect(rows().join("\n")).not.toContain("omastoic choose");
 });
 
 test("installing twice leaves one block, not two", () => {

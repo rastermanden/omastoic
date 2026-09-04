@@ -18,6 +18,14 @@ import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from ".
 import { screensaverSize, screensaverWindowEvents } from "./hyprland.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
+import {
+  compactSettings,
+  DEFAULT_INTERVAL,
+  describeSettings,
+  parseAuthorList,
+  parseInterval,
+  type Settings,
+} from "./settings.ts";
 
 const ROOT = dirname(import.meta.dir);
 const HOME = process.env.HOME ?? "";
@@ -44,18 +52,28 @@ const GLYPH = "󱄄";
 const INSTALLED = join(STATE, "installed");
 const PLUGIN_HOME = join(CONFIG_HOME, "omarchy/plugins/omastoic");
 
-const DEFAULT_INTERVAL = 20;
+const SETTINGS_FILE = join(USER_CONFIG, "config.json");
 
-type Config = { interval?: number; authors?: string[] };
-
-async function config(): Promise<Config> {
-  const file = Bun.file(join(USER_CONFIG, "config.json"));
+async function config(): Promise<Settings> {
+  const file = Bun.file(SETTINGS_FILE);
   if (!(await file.exists())) return {};
   try {
     return await file.json();
   } catch {
-    console.error(`omastoic: ignoring unreadable ${join(USER_CONFIG, "config.json")}`);
+    console.error(`omastoic: ignoring unreadable ${SETTINGS_FILE}`);
     return {};
+  }
+}
+
+async function saveSettings(settings: Settings, roster: string[]): Promise<void> {
+  mkdirSync(USER_CONFIG, { recursive: true });
+  const next = compactSettings(settings, roster);
+  await Bun.write(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+async function restartDaemon(): Promise<void> {
+  if (enabled() && (await Bun.file(UNIT).exists())) {
+    await run(["systemctl", "--user", "restart", "omastoic.service"]);
   }
 }
 
@@ -458,7 +476,130 @@ async function daemon(): Promise<number> {
   return 0;
 }
 
-// --- reporting ----------------------------------------------------------------
+// --- configure ----------------------------------------------------------------
+
+function stringFlag(rest: string[], name: string): string | undefined {
+  const i = rest.indexOf(`--${name}`);
+  return i >= 0 && rest[i + 1] ? rest[i + 1] : undefined;
+}
+
+async function gumText(args: string[]): Promise<string | null> {
+  if (!Bun.which("gum")) return null;
+  const proc = Bun.spawn(["gum", ...args], { stdin: "inherit", stdout: "pipe", stderr: "inherit" });
+  const out = (await new Response(proc.stdout).text()).trim();
+  const code = await proc.exited;
+  if (code !== 0) return null;
+  return out;
+}
+
+async function pickAuthors(roster: Map<string, { name: string }>, selected: string[]): Promise<string[] | undefined> {
+  const labels = [...roster].map(([slug, a]) => `${a.name}:${slug}`);
+  const args = [
+    "choose",
+    "--no-limit",
+    "--header",
+    "Stoics on the screensaver  (space to toggle, enter to confirm)",
+    "--label-delimiter",
+    ":",
+  ];
+  if (selected.length) {
+    for (const slug of selected) {
+      const name = roster.get(slug)?.name ?? slug;
+      args.push("--selected", `${name}:${slug}`);
+    }
+  } else {
+    args.push("--selected", "*");
+  }
+  args.push(...labels);
+  const out = await gumText(args);
+  if (out == null) return undefined;
+  if (!out) return [];
+  const allowed = new Set(roster.keys());
+  return out.split("\n").flatMap((line) => {
+    const t = line.trim();
+    if (allowed.has(t)) return [t];
+    const colon = t.lastIndexOf(":");
+    const slug = colon >= 0 ? t.slice(colon + 1) : "";
+    return allowed.has(slug) ? [slug] : [];
+  });
+}
+
+async function pickInterval(current: number): Promise<number | undefined> {
+  const out = await gumText([
+    "input",
+    "--header",
+    "Seconds between quotes while the screensaver is up",
+    "--placeholder",
+    String(DEFAULT_INTERVAL),
+    "--value",
+    String(current),
+  ]);
+  if (out == null) return undefined;
+  const n = parseInterval(out);
+  if (n == null) {
+    console.error(`omastoic: interval must be a whole number of seconds from 1 to 3600`);
+    return undefined;
+  }
+  return n;
+}
+
+function printSettings(settings: Settings, names: Map<string, { name: string }>): void {
+  console.log(`→ ${describeSettings(settings, names)}`);
+}
+
+async function configure(rest: string[]): Promise<number> {
+  const roster = await authors();
+  const slugs = [...roster.keys()];
+  const current = await config();
+  const authorsFlag = stringFlag(rest, "authors");
+  const intervalFlag = stringFlag(rest, "interval");
+  const interactive = authorsFlag == null && intervalFlag == null;
+
+  if (interactive && !process.stdin.isTTY) {
+    printSettings(current, roster);
+    console.log(`  omastoic config --authors marcus,seneca --interval 15`);
+    console.log(`  omastoic config --authors all`);
+    return 0;
+  }
+
+  let next: Settings = { ...current };
+
+  if (interactive) {
+    if (!Bun.which("gum")) {
+      console.error("omastoic: gum is missing — set authors and seconds from the command line:");
+      console.error("          omastoic config --authors marcus,seneca --interval 15");
+      return 1;
+    }
+    const picked = await pickAuthors(roster, current.authors ?? []);
+    if (picked == null) return 0;
+    next.authors = picked;
+    const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL);
+    if (seconds == null) return 0;
+    next.interval = seconds;
+  } else {
+    if (authorsFlag != null) {
+      const parsed = parseAuthorList(authorsFlag, slugs);
+      if (parsed == null) {
+        console.error(`omastoic: unknown author — try: ${slugs.join(", ")} (or all)`);
+        return 1;
+      }
+      next.authors = parsed;
+    }
+    if (intervalFlag != null) {
+      const parsed = parseInterval(intervalFlag);
+      if (parsed == null) {
+        console.error("omastoic: interval must be a whole number of seconds from 1 to 3600");
+        return 1;
+      }
+      next.interval = parsed;
+    }
+  }
+
+  await saveSettings(next, slugs);
+  await restartDaemon();
+  printSettings(await config(), roster);
+  return 0;
+}
 
 async function status(): Promise<number> {
   const quotes = await quoteBook();
@@ -479,6 +620,7 @@ async function status(): Promise<number> {
 
   console.log(`
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
+settings:         ${describeSettings(await config(), names)}
 grid:             ${size.cols}x${size.rows} cells
 canvas file:      ${BRANDING}
 rotation service: ${unit.stdout.toString().trim() || "not installed"}`);
@@ -553,11 +695,15 @@ async function main(): Promise<number> {
       return uninstall({ purge: rest.includes("--purge") });
     case "status":
       return status();
+    case "config":
+    case "configure":
+      return configure(rest);
     default:
       console.log(`omastoic — the Stoics on your Omarchy screensaver
 
   omastoic toggle      hand the screensaver to the Stoics, or give it back
   omastoic preview     write a new canvas and start the screensaver now
+  omastoic config      choose which Stoics appear, and seconds between quotes
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 

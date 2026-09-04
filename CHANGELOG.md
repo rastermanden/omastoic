@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.3.0 - 2026-09-04
+
+### Added
+
+- `omastoic config` chooses which Stoics appear and how many seconds between
+  quotes. Style → Screensaver → Configure opens the same picker in a terminal.
+  `omastoic config --authors marcus,seneca --interval 15` works without gum.
+
 ## 1.2.3 - 2026-09-04
 
 ### Fixed

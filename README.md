@@ -56,6 +56,7 @@ commands that write it:
 
 **Style → Screensaver → Stoics** — ✓ when they have the slot. The same toggle
 from a terminal is `omastoic toggle`. Off puts back the art they displaced.
+**Configure** picks which Stoics appear and how many seconds between quotes.
 
 **Omarchy's own commands win.** Edit Text, Set From Image and Restore Default
 are unchanged. If they write the slot, omastoic notices it is no longer its
@@ -91,10 +92,24 @@ short terminal, mostly — the quote is laid out on its own instead.
 | --- | --- |
 | `omastoic toggle` | hand the screensaver to the Stoics, or give it back |
 | `omastoic preview` | write a new canvas and start the screensaver now |
+| `omastoic config` | choose which Stoics appear, and seconds between quotes |
 | `omastoic status` | who has the screensaver, and what's in the quote book |
 | `omastoic uninstall` | take the service, menu row and plugin back out |
 
 ## Configure
+
+```bash
+omastoic config
+```
+
+Space-select the Stoics who should appear, then enter the seconds between
+quotes while the screensaver is up. From the menu: Style → Screensaver →
+Configure. Non-interactive:
+
+```bash
+omastoic config --authors marcus,seneca --interval 15
+omastoic config --authors all
+```
 
 **Your own quotes** go in `~/.config/omastoic/quotes.tsv`, in the same three
 tab-separated columns as `data/quotes.tsv` — author slug, citation, text. They
