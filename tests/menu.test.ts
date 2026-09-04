@@ -38,6 +38,12 @@ test("the rows extend Omarchy's own screensaver submenu with Stoics and Configur
   expect(rows().join("\n")).not.toContain("omastoic choose");
 });
 
+test("the rows hide when the plugin folder is gone", () => {
+  const body = rows().join("\n");
+  expect(body).toContain(`"when":"[[ -f ~/.config/omarchy/plugins/omastoic/manifest.json ]]"`);
+  expect(body.split("when").length - 1).toBe(2);
+});
+
 test("installing twice leaves one block, not two", () => {
   const once = withBlock(menu);
   const twice = withBlock(once);

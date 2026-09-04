@@ -12,7 +12,7 @@
 // clobbering the new art.
 
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents } from "./hyprland.ts";
@@ -54,6 +54,10 @@ const PLUGIN_HOME = join(CONFIG_HOME, "omarchy/plugins/omastoic");
 const DATA_HOME = process.env.XDG_DATA_HOME ?? join(HOME, ".local/share");
 const BASH_COMPLETION = join(DATA_HOME, "bash-completion/completions/omastoic");
 const FISH_COMPLETION = join(DATA_HOME, "fish/vendor_completions.d/omastoic.fish");
+const PRUNE_SCRIPT = join(HOME, ".local/lib/omastoic/prune.sh");
+const PRUNE_UNIT = join(CONFIG_HOME, "systemd/user/omastoic-prune.service");
+const PRUNE_PATH = join(CONFIG_HOME, "systemd/user/omastoic-prune.path");
+const PLUGINS_DIR = join(CONFIG_HOME, "omarchy/plugins");
 
 const SETTINGS_FILE = join(USER_CONFIG, "config.json");
 
@@ -268,14 +272,14 @@ function standAside(): void {
 
 // --- installation ------------------------------------------------------------
 
-async function addMenuRows(): Promise<void> {
+async function addMenuRows(quiet = false): Promise<void> {
   const file = Bun.file(MENU);
   const source = (await file.exists()) ? await file.text() : "{\n}\n";
   const next = withBlock(source);
   if (next === source) return;
   mkdirSync(dirname(MENU), { recursive: true });
   await Bun.write(MENU, next);
-  console.log(`→ added a Stoics row under Style → Screensaver in the Omarchy menu`);
+  if (!quiet) console.log(`→ added a Stoics row under Style → Screensaver in the Omarchy menu`);
 }
 
 async function removeMenuRows(): Promise<void> {
@@ -347,22 +351,69 @@ function uninstallCompletion(): void {
 type SetupOpts = { onFirst?: boolean; quiet?: boolean };
 
 function unitBody(): string {
-  const exec = join(ROOT, "bin/omastoic");
+  // The launcher, not the plugin-tree binary: after `omarchy plugin remove`
+  // a dangling or missing ~/.local/bin/omastoic fails closed instead of
+  // restart-looping on a path that no longer exists.
   return `[Unit]
 Description=Rotate the Stoic quote on the Omarchy screensaver
-ConditionPathExists=${exec}
+ConditionPathExists=${LAUNCHER}
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=${exec} daemon
+ExecStart=${LAUNCHER} daemon
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=graphical-session.target
 `;
+}
+
+function pruneUnitBody(): string {
+  return `[Unit]
+Description=Remove leftover omastoic files after the plugin folder is gone
+
+[Service]
+Type=oneshot
+ExecStart=${PRUNE_SCRIPT}
+`;
+}
+
+function prunePathBody(): string {
+  return `[Unit]
+Description=Watch for omastoic plugin removal
+
+[Path]
+PathChanged=${PLUGINS_DIR}
+Unit=omastoic-prune.service
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+function installPrune(quiet = false): void {
+  const src = join(ROOT, "scripts/prune.sh");
+  if (!existsSync(src)) return;
+  try {
+    mkdirSync(dirname(PRUNE_SCRIPT), { recursive: true });
+    copyFileSync(src, PRUNE_SCRIPT);
+    chmodSync(PRUNE_SCRIPT, 0o755);
+    if (!quiet) console.log(`→ ${PRUNE_SCRIPT}`);
+  } catch (err) {
+    console.error(`omastoic: could not install prune script: ${(err as Error).message}`);
+  }
+}
+
+async function removePrune(): Promise<void> {
+  const had = await Bun.file(PRUNE_PATH).exists();
+  if (had) await run(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
+  await Bun.file(PRUNE_PATH).delete().catch(() => {});
+  await Bun.file(PRUNE_UNIT).delete().catch(() => {});
+  rmSync(dirname(PRUNE_SCRIPT), { recursive: true, force: true });
+  if (had) await run(["systemctl", "--user", "daemon-reload"]);
 }
 
 async function requireOmarchy(): Promise<number> {
@@ -394,18 +445,36 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
   const first = !(await Bun.file(INSTALLED).exists());
   linkLauncher(opts.quiet);
   installCompletion(opts.quiet);
-  await addMenuRows();
+  installPrune(opts.quiet);
+  await addMenuRows(opts.quiet);
 
   const next = unitBody();
   const prev = await Bun.file(UNIT).text().catch(() => "");
   mkdirSync(dirname(UNIT), { recursive: true });
-  if (prev !== next) {
+  let unitsChanged = prev !== next;
+  if (unitsChanged) {
     await Bun.write(UNIT, next);
     say(`→ ${UNIT}`);
-    await run(["systemctl", "--user", "daemon-reload"]);
   }
 
+  const pruneService = pruneUnitBody();
+  const prunePath = prunePathBody();
+  const prevPruneService = await Bun.file(PRUNE_UNIT).text().catch(() => "");
+  const prevPrunePath = await Bun.file(PRUNE_PATH).text().catch(() => "");
+  if (prevPruneService !== pruneService) {
+    await Bun.write(PRUNE_UNIT, pruneService);
+    unitsChanged = true;
+  }
+  if (prevPrunePath !== prunePath) {
+    await Bun.write(PRUNE_PATH, prunePath);
+    unitsChanged = true;
+    say(`→ ${PRUNE_PATH}`);
+  }
+
+  if (unitsChanged) await run(["systemctl", "--user", "daemon-reload"]);
+
   await run(["systemctl", "--user", "enable", "omastoic.service"]);
+  await run(["systemctl", "--user", "enable", "--now", "omastoic-prune.path"]);
 
   mkdirSync(STATE, { recursive: true });
   await Bun.write(INSTALLED, ROOT);
@@ -440,6 +509,7 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
   await removeMenuRows();
   unlinkLauncher();
   uninstallCompletion();
+  await removePrune();
 
   const backup = Bun.file(BACKUP);
   if (await backup.exists()) await backup.delete();
@@ -468,28 +538,48 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
 
 // --- the rotation service -----------------------------------------------------
 
+async function intervalMs(): Promise<number> {
+  return ((await config()).interval ?? DEFAULT_INTERVAL) * 1000;
+}
+
 async function daemon(): Promise<number> {
   if (!enabled()) {
     console.log("omastoic: parked (omastoic toggle to bring the Stoics back)");
     return 0;
   }
 
-  const interval = ((await config()).interval ?? DEFAULT_INTERVAL) * 1000;
   const open = new Set<string>();
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
   const stopRotating = () => {
-    if (timer) clearInterval(timer);
+    if (timer) clearTimeout(timer);
     timer = null;
   };
 
-  const rotate = async () => {
-    if (!enabled()) return stopRotating();
+  const rotate = async (): Promise<boolean> => {
+    if (!enabled()) {
+      stopRotating();
+      return false;
+    }
     if (!(await ownsBranding())) {
       standAside();
-      return stopRotating();
+      stopRotating();
+      return false;
     }
     await writeBranding().catch((err) => console.error(`omastoic: ${err.message}`));
+    return true;
+  };
+
+  const tick = async () => {
+    timer = null;
+    if (!(await rotate())) return;
+    if (open.size === 0) return;
+    timer = setTimeout(tick, await intervalMs());
+  };
+
+  const startRotating = async () => {
+    if (timer) return;
+    timer = setTimeout(tick, await intervalMs());
   };
 
   // Leave a fresh quote sitting in the file so the very first frame of the next
@@ -499,7 +589,7 @@ async function daemon(): Promise<number> {
   for await (const event of screensaverWindowEvents()) {
     if (event.kind === "open") {
       open.add(event.address);
-      if (enabled()) timer ??= setInterval(rotate, interval);
+      if (enabled()) await startRotating();
     } else if (open.delete(event.address) && open.size === 0) {
       stopRotating();
       await rotate();

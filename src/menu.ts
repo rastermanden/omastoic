@@ -16,9 +16,12 @@ const FOOTER = `  ${END}`;
  * Stoics is the on/off; Configure opens the author and interval picker.
  */
 export function rows(): string[] {
+  // Hide unless the plugin is actually on disk. `omarchy plugin remove` deletes
+  // the folder but used to leave these rows pointing at a missing binary.
+  const installed = `[[ -f ~/.config/omarchy/plugins/omastoic/manifest.json ]]`;
   return [
-    `  "style.screensaver.stoics": {"icon":"󱄄","label":"Stoics","description":"Rotate cited Stoic quotes on the screensaver","aliases":["stoic","stoics"],"checked":"omarchy-toggle-enabled omastoic","action":"omastoic toggle"},`,
-    `  "style.screensaver.configure": {"icon":"","label":"Configure","description":"Choose which Stoics appear, and seconds between quotes","action":"omarchy-launch-tui omastoic config"},`,
+    `  "style.screensaver.stoics": {"icon":"󱄄","label":"Stoics","description":"Rotate cited Stoic quotes on the screensaver","aliases":["stoic","stoics"],"when":"${installed}","checked":"omarchy-toggle-enabled omastoic","action":"omastoic toggle"},`,
+    `  "style.screensaver.configure": {"icon":"","label":"Configure","description":"Choose which Stoics appear, and seconds between quotes","when":"${installed}","action":"omarchy-launch-tui omastoic config"},`,
   ];
 }
 

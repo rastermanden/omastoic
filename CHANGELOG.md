@@ -6,6 +6,21 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.4.1 - 2026-09-04
+
+### Fixed
+
+- `omarchy plugin update` re-runs setup when the plugin tree changes, so the
+  menu row, completions and systemd unit follow the new tree without a shell
+  restart.
+- `omarchy plugin remove` hides the Style → Screensaver rows as soon as the
+  plugin folder is gone, and a leftover cleaner takes the launcher,
+  completions and unit with it.
+- The rotation daemon re-reads `interval` on each tick, so editing
+  `~/.config/omastoic/config.json` no longer needs `systemctl --user restart
+  omastoic`.
+- `setup --quiet` no longer prints when it writes the menu row.
+
 ## 1.4.0 - 2026-09-04
 
 ### Added

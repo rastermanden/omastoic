@@ -37,8 +37,9 @@ From a checkout instead:
 ./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/omastoic and sets up
 ```
 
-Update with `omarchy plugin update omastoic`. Tab completion for `omastoic` is
-installed for bash (and fish); open a new terminal, or:
+Update with `omarchy plugin update omastoic`. That also refreshes the menu,
+completions and unit. Tab completion for `omastoic` is installed for bash
+(and fish); open a new terminal, or:
 
 ```bash
 source ~/.local/share/bash-completion/completions/omastoic
@@ -51,8 +52,11 @@ omastoic uninstall
 ```
 
 That restores your old art, removes the service, the menu row and the plugin,
-so a later `omarchy plugin add` is a clean install. Quotes and settings stay
-in `~/.config/omastoic/`; `omastoic uninstall --purge` drops those too.
+so a later `omarchy plugin add` is a clean install. `omarchy plugin remove
+omastoic` also fails closed: the menu rows hide once the folder is gone, and
+a leftover cleaner takes the launcher, completions and unit with it. Quotes
+and settings stay in `~/.config/omastoic/`; `omastoic uninstall --purge`
+drops those too.
 
 ## Usage
 

@@ -36,3 +36,19 @@ test("the service points at the bundled launcher, not PATH", () => {
   expect(qml).toContain("setup");
   expect(qml).toContain("--on-first");
 });
+
+test("plugin update re-runs setup when the plugin tree changes", () => {
+  const qml = readFileSync(join(root, "Service.qml"), "utf8");
+  expect(qml).toContain("FileView");
+  expect(qml).toContain("watchChanges: true");
+  expect(qml).toContain("onFileChanged");
+  expect(qml).toContain("runSetup(false)");
+});
+
+test("setup --quiet stays quiet when rewriting the menu", () => {
+  const cli = readFileSync(join(root, "src/cli.ts"), "utf8");
+  expect(cli).toContain("await addMenuRows(opts.quiet)");
+  expect(cli).toContain("ExecStart=${LAUNCHER} daemon");
+  expect(cli).toContain("await intervalMs()");
+  expect(existsSync(join(root, "scripts/prune.sh"))).toBe(true);
+});
