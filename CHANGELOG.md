@@ -6,6 +6,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.5.1 - 2026-09-04
+
+### Fixed
+
+- Live grid readout missed Ghostty. GTK single-instance reports one pid for
+  every window, and `/proc/<pid>/task/<pid>/children` often omits the shell, so
+  walking from the Hyprland client never reached a pts. The probe now reads
+  `stty` on `omarchy-screensaver` / `ttfx` themselves.
+- `omastoic status` no longer sits on the 14.4×33.3 fallback until a screensaver
+  has opened: it scales a cell from the open default terminal (18pt, no pad).
+- Prune no longer treats a git checkout that briefly unlinks `manifest.json`
+  as `plugin remove`. The plugin directory still being there is enough.
+
 ## 1.5.0 - 2026-09-04
 
 ### Changed

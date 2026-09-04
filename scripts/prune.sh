@@ -6,9 +6,16 @@ set -euo pipefail
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
-PLUGIN="$CONFIG/omarchy/plugins/omastoic/manifest.json"
+PLUGIN_DIR="$CONFIG/omarchy/plugins/omastoic"
+PLUGIN="$PLUGIN_DIR/manifest.json"
 
-if [[ -f $PLUGIN ]]; then
+# The directory existing is enough: a git checkout can briefly unlink
+# manifest.json, and pruning then would tear down a live install.
+if [[ -e $PLUGIN_DIR || -f $PLUGIN ]]; then
+  exit 0
+fi
+sleep 2
+if [[ -e $PLUGIN_DIR || -f $PLUGIN ]]; then
   exit 0
 fi
 

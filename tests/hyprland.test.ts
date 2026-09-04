@@ -5,11 +5,19 @@ import {
   cellFromPixels,
   clampGrid,
   gridForPixels,
+  innerPixels,
   isPlaceholderGrid,
+  isScreensaverArgv,
+  isTtfxArgv,
   logicalMonitorSize,
   minGrid,
   parseCell,
+  parseGhosttyMetrics,
+  parseStatTty,
   parseSttySize,
+  ptsFromTtyNr,
+  scaleCell,
+  zipLiveProbes,
 } from "../src/hyprland.ts";
 
 test("stty size is rows then cols", () => {
@@ -87,4 +95,56 @@ test("cell cache rejects nonsense", () => {
 test("grids are clamped so a tiny probe still lays out", () => {
   expect(clampGrid({ cols: 4, rows: 2 })).toEqual({ cols: 20, rows: 8 });
   expect(minGrid([])).toBeNull();
+});
+
+test("UNIX98 pty tty_nr decodes to /dev/pts/N", () => {
+  expect(ptsFromTtyNr(34818)).toBe("/dev/pts/2");
+  expect(ptsFromTtyNr(0)).toBeNull();
+  expect(parseStatTty("2714111 (bash) S 2713868 2714111 2714111 34818 2714111 4194304 1")).toBe("/dev/pts/2");
+});
+
+test("screensaver processes are matched by argv, not a substring in a wrapper", () => {
+  expect(isScreensaverArgv(["/usr/share/omarchy/bin/omarchy-screensaver"])).toBe(true);
+  expect(isScreensaverArgv(["bash", "/usr/share/omarchy/bin/omarchy-screensaver"])).toBe(true);
+  expect(isScreensaverArgv(["ghostty", "-e", "omarchy-screensaver"])).toBe(true);
+  expect(isScreensaverArgv(["omarchy-launch-screensaver", "force"])).toBe(false);
+  expect(isScreensaverArgv(["bash", "-c", "grep omarchy-screensaver"])).toBe(false);
+  expect(isTtfxArgv(["/usr/bin/ttfx", "-i", "screensaver.txt"])).toBe(true);
+  expect(isTtfxArgv(["bash", "-c", "ttfx"])).toBe(false);
+});
+
+test("a Ghostty window at 9pt scales to the screensaver's 18pt cell", () => {
+  expect(parseGhosttyMetrics("font-size = 9\nwindow-padding-x = 14\n")).toEqual({
+    fontSize: 9,
+    padX: 14,
+    padY: 14,
+  });
+  const inner = innerPixels({ width: 433, height: 950 }, { x: 14, y: 14 });
+  const cell9 = cellFromPixels(inner, { cols: 56, rows: 57 });
+  expect(cell9).toBeTruthy();
+  const cell18 = scaleCell(cell9!, 9, 18);
+  expect(cell18?.width).toBeCloseTo(14.46, 1);
+  expect(cell18?.height).toBeCloseTo(32.4, 1);
+  const size = canvasSizeFrom([], [{ width: 2560, height: 1600, scale: 1.6 }], null, cell18);
+  expect(size.source).toBe("probe");
+  expect(size.cols).toBeGreaterThanOrEqual(100);
+  expect(size.rows).toBe(30);
+});
+
+test("live probes pair the smallest tty with the smallest window", () => {
+  const probes = zipLiveProbes(
+    [
+      { cols: 140, rows: 40 },
+      { cols: 80, rows: 24 },
+      { cols: 111, rows: 30 },
+    ],
+    [
+      { width: 1920, height: 1080 },
+      { width: 1600, height: 1000 },
+    ],
+  );
+  expect(probes).toEqual([
+    { grid: { cols: 111, rows: 30 }, pixels: { width: 1600, height: 1000 } },
+    { grid: { cols: 140, rows: 40 }, pixels: { width: 1920, height: 1080 } },
+  ]);
 });

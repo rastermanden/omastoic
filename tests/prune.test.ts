@@ -43,6 +43,21 @@ async function runPrune(home: string, bin: string) {
   return { code, stdout, stderr };
 }
 
+test("prune is a no-op while the plugin directory exists even without a manifest", async () => {
+  const { home, bin } = tempHome();
+  try {
+    mkdirSync(join(home, ".config/omarchy/plugins/omastoic"), { recursive: true });
+    mkdirSync(join(home, ".local/bin"), { recursive: true });
+    const launcher = join(home, ".local/bin/omastoic");
+    writeFileSync(launcher, "#!/bin/bash\n");
+    const { code } = await runPrune(home, bin);
+    expect(code).toBe(0);
+    expect(existsSync(launcher)).toBe(true);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("prune is a no-op while the plugin is installed", async () => {
   const { home, bin } = tempHome();
   try {
