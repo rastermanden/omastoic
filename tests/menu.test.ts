@@ -29,12 +29,13 @@ test("comments and other tools' blocks survive", () => {
   expect(next).toContain(`"personal"`);
 });
 
-test("the rows extend Omarchy's own screensaver submenu", () => {
-  for (const row of rows()) expect(row).toContain(`"style.screensaver.`);
-  const all = rows().join("\n");
-  expect(all).toContain(`"action":"omastoic choose"`);
-  expect(all).toContain(`"checked":"omarchy-toggle-enabled omastoic"`);
-  expect(all).toContain(`"action":"omastoic toggle"`);
+test("the rows extend Omarchy's own screensaver submenu with one Stoics toggle", () => {
+  expect(rows()).toHaveLength(1);
+  const row = rows()[0];
+  expect(row).toContain(`"style.screensaver.stoics"`);
+  expect(row).toContain(`"checked":"omarchy-toggle-enabled omastoic"`);
+  expect(row).toContain(`"action":"omastoic toggle"`);
+  expect(row).not.toContain("omastoic choose");
 });
 
 test("installing twice leaves one block, not two", () => {
@@ -47,10 +48,10 @@ test("installing twice leaves one block, not two", () => {
 
 test("a changed set of rows replaces the old ones in place", () => {
   const before = withBlock(menu);
-  const after = withBlock(before, [`  "style.screensaver.stoics": {"label":"Stoics"},`]);
+  const after = withBlock(before, [`  "style.screensaver.stoics": {"label":"Quotes"},`]);
   expect(after.split(BEGIN).length - 1).toBe(1);
-  expect(after).toContain(`{"label":"Stoics"}`);
-  expect(after).not.toContain("style.screensaver.choose");
+  expect(after).toContain(`{"label":"Quotes"}`);
+  expect(after).not.toContain("Rotate cited Stoic quotes");
 });
 
 test("removing the block restores the file it was added to", () => {

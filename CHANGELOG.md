@@ -6,6 +6,24 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.2.0 - 2026-09-04
+
+### Changed
+
+- The screensaver slot is Omarchy's again. Style → Screensaver keeps Edit Text,
+  Set From Image and Restore Default; Omastoic adds one **Stoics** toggle
+  beside them. Toggling off restores the art the Stoics displaced.
+- The public CLI is `toggle`, `preview`, `status` and `uninstall`. The old
+  picker (`choose` / `use` / `slates`) and the extra on/off/install surface
+  are gone from help; branding commands remain the way you set art.
+
+### Removed
+
+- The preview-tile screensaver gallery, user slates under
+  `~/.config/omastoic/screensavers/`, and the Previous / Replaced / Omarchy
+  named looks. They were a second screensaver product on a slot Omarchy
+  already manages.
+
 ## 1.1.0 - 2026-09-04
 
 ### Added

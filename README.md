@@ -21,9 +21,9 @@ omarchy plugin add https://github.com/rastermanden/omastoic.git --enable --yes
 
 That clones the plugin into `~/.config/omarchy/plugins/omastoic`, backs up
 whatever screensaver art you had, writes the first canvas, puts `omastoic` on
-your PATH, adds a row to the Omarchy menu, and starts a small user service that
-swaps in a new quote every 20 seconds while the screensaver is actually on
-screen. See it right now:
+your PATH, adds **Stoics** under Style → Screensaver, and starts a small user
+service that swaps in a new quote every 20 seconds while the screensaver is
+actually on screen. See it right now:
 
 ```bash
 omastoic preview
@@ -41,41 +41,19 @@ with `omastoic uninstall && omarchy plugin remove omastoic` — that keeps
 your quotes and settings for a later reinstall; `omastoic uninstall --purge`
 removes those too.
 
-## Switching screensavers
+## Using it
 
-The screensaver art is one slot, and Omarchy already has a place for it, so
-that's where the switch lives: **Style → Screensaver** in the Omarchy menu, next
-to Edit Text, Set From Image and Restore Default.
+Omarchy already owns the screensaver slot. Omastoic adds one row next to the
+commands that write it:
 
-**Choose** opens a grid of previews — the same picker Omarchy uses for
-backgrounds and unlock screens — with a tile per screensaver. Each tile is drawn
-at the size it will really appear on your screen, so a short piece of art shows
-short rather than blown up to fill the frame. **Stoics** is a straight toggle
-alongside it, carrying a ✓ when they have the slot.
+**Style → Screensaver → Stoics** — ✓ when they have the slot. The same toggle
+from a terminal is `omastoic toggle`. Off puts back the art they displaced.
 
-From a terminal:
-
-```bash
-omastoic choose        # the grid of previews
-omastoic slates        # list what you can switch between
-omastoic use Omarchy   # switch by name
-omastoic off           # back to the last fixed art you chose
-omastoic on            # the Stoics again
-omastoic toggle        # whichever of the two you are not on
-```
-
-Out of the box there are three: **Stoics**, **Previous** (whatever was in the
-slot before omastoic arrived, kept once and never overwritten) and **Omarchy**
-(the stock logo). Drop any ASCII or braille art in as
-`~/.config/omastoic/screensavers/<Name>.txt` and it joins the grid under that
-name. Art that omastoic displaces later is kept as **Replaced**, so one undo is
-always on the grid.
-
-**Omarchy's own commands win.** Set the art with `omarchy branding screensaver
-image` (or `text`, or `reset`) and omastoic notices the slot is no longer its
+**Omarchy's own commands win.** Edit Text, Set From Image and Restore Default
+are unchanged. If they write the slot, omastoic notices it is no longer its
 own, turns itself off and leaves the new art alone — rather than quietly
-reverting you on the next rotation, which would look like a bug in Omarchy. Turn
-the Stoics back on whenever you want them.
+reverting you on the next rotation, which would look like a bug in Omarchy.
+Turn the Stoics back on whenever you want them.
 
 `omastoic uninstall` removes the service, menu row and launcher, and restores
 your old art. Follow it with `omarchy plugin remove omastoic` so the plugin
@@ -105,16 +83,10 @@ short terminal, mostly — the quote is laid out on its own instead.
 
 | Command | Does |
 | --- | --- |
-| `omastoic on` | hand the screensaver to the Stoics |
-| `omastoic off` | give it back to whatever art was there before |
-| `omastoic toggle` | whichever of the two you are not on |
+| `omastoic toggle` | hand the screensaver to the Stoics, or give it back |
 | `omastoic preview` | write a new canvas and start the screensaver now |
 | `omastoic status` | who has the screensaver, and what's in the quote book |
-| `omastoic setup` | rotation service, menu row and launcher (safe to re-run) |
-| `omastoic install` | setup, then hand the screensaver to the Stoics |
 | `omastoic uninstall` | take the service, menu row and launcher back out |
-| `omastoic show` | print one canvas at this terminal's size |
-| `omastoic next` | put a new canvas in the screensaver file |
 
 ## Making it yours
 

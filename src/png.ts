@@ -1,9 +1,8 @@
 #!/usr/bin/env bun
 // Render a screensaver canvas to a PNG that looks like the screensaver does.
 //
-// The picker tiles and the dev preview script both go through here, so the one
-// thing that matters — that a canvas is drawn at the *terminal's* cell aspect
-// ratio, not a text renderer's default — is defined once.
+// The dev preview script goes through here so a canvas is drawn at the
+// *terminal's* cell aspect ratio, not a text renderer's default.
 
 import { $ } from "bun";
 import { unlinkSync } from "node:fs";
