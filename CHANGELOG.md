@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.4.0 - 2026-09-04
+
+### Added
+
+- Tab completion for `omastoic` on bash and fish (`toggle`, `preview`, `config`,
+  `--authors`, `--interval`, `--purge`). Installed by setup into
+  `~/.local/share/bash-completion/completions/omastoic`.
+
 ## 1.3.1 - 2026-09-04
 
 ### Fixed

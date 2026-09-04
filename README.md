@@ -37,7 +37,12 @@ From a checkout instead:
 ./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/omastoic and sets up
 ```
 
-Update with `omarchy plugin update omastoic`.
+Update with `omarchy plugin update omastoic`. Tab completion for `omastoic` is
+installed for bash (and fish); open a new terminal, or:
+
+```bash
+source ~/.local/share/bash-completion/completions/omastoic
+```
 
 ## Remove
 

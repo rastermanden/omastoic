@@ -12,7 +12,7 @@
 // clobbering the new art.
 
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents } from "./hyprland.ts";
@@ -51,6 +51,9 @@ const TOGGLE = "omastoic";
 const GLYPH = "󱄄";
 const INSTALLED = join(STATE, "installed");
 const PLUGIN_HOME = join(CONFIG_HOME, "omarchy/plugins/omastoic");
+const DATA_HOME = process.env.XDG_DATA_HOME ?? join(HOME, ".local/share");
+const BASH_COMPLETION = join(DATA_HOME, "bash-completion/completions/omastoic");
+const FISH_COMPLETION = join(DATA_HOME, "fish/vendor_completions.d/omastoic.fish");
 
 const SETTINGS_FILE = join(USER_CONFIG, "config.json");
 
@@ -314,6 +317,33 @@ function unlinkLauncher(): void {
   }
 }
 
+function installCompletion(quiet = false): void {
+  const copies: [string, string][] = [
+    [join(ROOT, "completions/omastoic.bash"), BASH_COMPLETION],
+    [join(ROOT, "completions/omastoic.fish"), FISH_COMPLETION],
+  ];
+  for (const [src, dest] of copies) {
+    if (!existsSync(src)) continue;
+    try {
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(src, dest);
+      if (!quiet) console.log(`→ ${dest}`);
+    } catch (err) {
+      console.error(`omastoic: could not install completion ${dest}: ${(err as Error).message}`);
+    }
+  }
+}
+
+function uninstallCompletion(): void {
+  for (const dest of [BASH_COMPLETION, FISH_COMPLETION]) {
+    try {
+      unlinkSync(dest);
+    } catch {
+      // not ours, or not there
+    }
+  }
+}
+
 type SetupOpts = { onFirst?: boolean; quiet?: boolean };
 
 function unitBody(): string {
@@ -363,6 +393,7 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
 
   const first = !(await Bun.file(INSTALLED).exists());
   linkLauncher(opts.quiet);
+  installCompletion(opts.quiet);
   await addMenuRows();
 
   const next = unitBody();
@@ -408,6 +439,7 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
 
   await removeMenuRows();
   unlinkLauncher();
+  uninstallCompletion();
 
   const backup = Bun.file(BACKUP);
   if (await backup.exists()) await backup.delete();

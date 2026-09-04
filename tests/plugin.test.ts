@@ -23,6 +23,13 @@ test("manifest and package.json carry the same version", () => {
   expect(manifest.version).toBe(pkg.version);
 });
 
+test("bash completion registers omastoic", () => {
+  const bash = readFileSync(join(root, "completions/omastoic.bash"), "utf8");
+  expect(bash).toContain("complete -F _omastoic omastoic");
+  expect(bash).toContain("toggle");
+  expect(bash).toContain("--authors");
+});
+
 test("the service points at the bundled launcher, not PATH", () => {
   const qml = readFileSync(join(root, "Service.qml"), "utf8");
   expect(qml).toContain('Qt.resolvedUrl("bin/omastoic")');
