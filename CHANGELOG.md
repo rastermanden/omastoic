@@ -6,6 +6,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.5.0 - 2026-09-04
+
+### Changed
+
+- The canvas grid is read from the screensaver terminal itself (`stty` on the
+  live tty) instead of assuming foot's 14.4×33.3 cell. The measured cell is
+  remembered so the next canvas, written before the screensaver opens, already
+  fits Alacritty, Ghostty, Kitty or Foot. `omastoic status` shows which source
+  was used.
+
 ## 1.4.1 - 2026-09-04
 
 ### Fixed

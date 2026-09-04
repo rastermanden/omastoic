@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
-import { screensaverSize, screensaverWindowEvents } from "./hyprland.ts";
+import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
 import {
@@ -197,7 +197,11 @@ async function render(size?: { cols: number; rows: number }): Promise<string> {
 
   const grid = size ?? (await screensaverSize());
   const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
-  return compose(chosen.quote, (await authors()).get(chosen.quote.author), { ...grid, art });
+  return compose(chosen.quote, (await authors()).get(chosen.quote.author), {
+    cols: grid.cols,
+    rows: grid.rows,
+    art,
+  });
 }
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
@@ -589,7 +593,13 @@ async function daemon(): Promise<number> {
   for await (const event of screensaverWindowEvents()) {
     if (event.kind === "open") {
       open.add(event.address);
-      if (enabled()) await startRotating();
+      if (enabled()) {
+        // ttfx measures the tty at start; wait until it has left 80x24, then
+        // write a canvas that matches the real grid before the first effect.
+        await waitForLiveGrid();
+        await rotate();
+        await startRotating();
+      }
     } else if (open.delete(event.address) && open.size === 0) {
       stopRotating();
       await rotate();
@@ -739,7 +749,7 @@ async function status(): Promise<number> {
   console.log(`
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
 settings:         ${describeSettings(await config(), names)}
-grid:             ${size.cols}x${size.rows} cells
+grid:             ${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)
 canvas file:      ${BRANDING}
 rotation service: ${unit.stdout.toString().trim() || "not installed"}`);
   return 0;
@@ -802,7 +812,12 @@ async function main(): Promise<number> {
       } else {
         await writeBranding();
       }
-      return launchScreensaver();
+      {
+        const code = await launchScreensaver();
+        await waitForLiveGrid();
+        await writeBranding();
+        return code;
+      }
     case "daemon":
       return daemon();
     case "setup":

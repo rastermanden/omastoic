@@ -52,3 +52,10 @@ test("setup --quiet stays quiet when rewriting the menu", () => {
   expect(cli).toContain("await intervalMs()");
   expect(existsSync(join(root, "scripts/prune.sh"))).toBe(true);
 });
+
+test("the canvas grid comes from a live screensaver tty", () => {
+  const hypr = readFileSync(join(root, "src/hyprland.ts"), "utf8");
+  expect(hypr).toContain('stty');
+  expect(hypr).toContain("waitForLiveGrid");
+  expect(hypr).toContain("source: \"live\"");
+});

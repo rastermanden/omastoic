@@ -91,9 +91,11 @@ event socket rather than polling. It wakes when a window of class
 canvas when the screensaver closes so the next one is already fresh, and then
 goes back to sleep. Nothing runs on a timer when you are working.
 
-The canvas is sized for the smallest attached monitor, from the cell size the
-screensaver terminal actually uses. If a screen is too small for a portrait — a
-short terminal, mostly — the quote is laid out on its own instead.
+The canvas is sized for the smallest attached monitor. While the screensaver
+is up, that grid comes from the terminal's own tty; the cell size is remembered
+so the next canvas already fits, whichever of Alacritty, Foot, Ghostty or Kitty
+is the default. If a screen is too small for a portrait — a short terminal,
+mostly — the quote is laid out on its own instead.
 
 ## Commands
 
