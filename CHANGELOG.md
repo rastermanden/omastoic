@@ -6,6 +6,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.2.3 - 2026-09-04
+
+### Fixed
+
+- The user systemd unit does not start if the plugin folder is gone
+  (`ConditionPathExists`), so `omarchy plugin remove` without `omastoic
+  uninstall` cannot restart-loop on a missing binary.
+
+### Changed
+
+- README matches the Omarchy plugin guide's shape (Install, Usage, Configure,
+  Remove) and documents `omarchy plugin validate`.
+
 ## 1.2.2 - 2026-09-04
 
 ### Fixed

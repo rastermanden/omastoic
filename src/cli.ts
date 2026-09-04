@@ -299,14 +299,16 @@ function unlinkLauncher(): void {
 type SetupOpts = { onFirst?: boolean; quiet?: boolean };
 
 function unitBody(): string {
+  const exec = join(ROOT, "bin/omastoic");
   return `[Unit]
 Description=Rotate the Stoic quote on the Omarchy screensaver
+ConditionPathExists=${exec}
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=${join(ROOT, "bin/omastoic")} daemon
+ExecStart=${exec} daemon
 Restart=on-failure
 RestartSec=5
 

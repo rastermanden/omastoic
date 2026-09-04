@@ -9,10 +9,14 @@ const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 test("the plugin manifest is what Omarchy will validate", () => {
   expect(manifest.schemaVersion).toBe(1);
   expect(manifest.id).toBe("omastoic");
+  expect(manifest.name).toBeTruthy();
+  expect(manifest.author).toBeTruthy();
+  expect(manifest.description).toBeTruthy();
   expect(manifest.kinds).toEqual(["service"]);
   expect(manifest.entryPoints.service).toBe("Service.qml");
   expect(existsSync(join(root, manifest.entryPoints.service))).toBe(true);
   expect(manifest.id).not.toMatch(/^omarchy\./);
+  expect(manifest.omarchy?.clonedFrom).toBeUndefined();
 });
 
 test("manifest and package.json carry the same version", () => {

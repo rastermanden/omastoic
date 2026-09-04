@@ -13,7 +13,9 @@ A longer clip is in [demo.mp4](demo.mp4).
 
 ## Install
 
-Requires Omarchy 4+ and [bun](https://bun.sh) (`omarchy pkg add bun`).
+Requires Omarchy 4+ and [bun](https://bun.sh) (`omarchy pkg add bun`). The
+screensaver itself is Omarchy's (`ttfx`). Enabling the plugin also installs a
+user systemd unit that rotates quotes only while you are logged in.
 
 ```bash
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
@@ -47,7 +49,7 @@ That restores your old art, removes the service, the menu row and the plugin,
 so a later `omarchy plugin add` is a clean install. Quotes and settings stay
 in `~/.config/omastoic/`; `omastoic uninstall --purge` drops those too.
 
-## Using it
+## Usage
 
 Omarchy already owns the screensaver slot. Omastoic adds one row next to the
 commands that write it:
@@ -72,10 +74,12 @@ time round the loop. So Omastoic replaces, shadows and patches nothing: it just
 keeps a freshly composed canvas in the file Omarchy already reads, and swaps it
 for another one between effects.
 
-The service listens on Hyprland's event socket rather than polling. It wakes when
-a window of class `org.omarchy.screensaver` opens, rotates quotes while one is up,
-writes one last canvas when the screensaver closes so the next one is already
-fresh, and then goes back to sleep. Nothing runs on a timer when you are working.
+Enabling the plugin loads `Service.qml` inside `omarchy-shell` — not a second
+Quickshell. That service writes a user systemd unit which listens on Hyprland's
+event socket rather than polling. It wakes when a window of class
+`org.omarchy.screensaver` opens, rotates quotes while one is up, writes one last
+canvas when the screensaver closes so the next one is already fresh, and then
+goes back to sleep. Nothing runs on a timer when you are working.
 
 The canvas is sized for the smallest attached monitor, from the cell size the
 screensaver terminal actually uses. If a screen is too small for a portrait — a
@@ -90,7 +94,7 @@ short terminal, mostly — the quote is laid out on its own instead.
 | `omastoic status` | who has the screensaver, and what's in the quote book |
 | `omastoic uninstall` | take the service, menu row and plugin back out |
 
-## Making it yours
+## Configure
 
 **Your own quotes** go in `~/.config/omastoic/quotes.tsv`, in the same three
 tab-separated columns as `data/quotes.tsv` — author slug, citation, text. They
@@ -132,14 +136,16 @@ cell aspect ratio, which is the quickest way to judge a new portrait.
 
 ```bash
 bun test
+omarchy plugin validate .
 ```
 
-Checks the quote book parses, every author has a portrait and dates, and every
-quote in the book lays out inside the smallest grid the layout claims to
-support — including the fallback when there is no room for a portrait. The menu
-tests cover the part most likely to hurt someone: that adding and removing the
-menu row leaves the rest of `omarchy-menu.jsonc` — comments, and other tools'
-blocks — exactly as it was found.
+`bun test` checks the quote book parses, every author has a portrait and dates,
+and every quote in the book lays out inside the smallest grid the layout claims
+to support — including the fallback when there is no room for a portrait. The
+menu tests cover the part most likely to hurt someone: that adding and removing
+the menu row leaves the rest of `omarchy-menu.jsonc` — comments, and other
+tools' blocks — exactly as it was found. `omarchy plugin validate` is the same
+manifest check Omarchy runs before `plugin add`.
 
 ## Credits
 
