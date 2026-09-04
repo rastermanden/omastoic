@@ -33,12 +33,19 @@ From a checkout instead:
 
 ```bash
 ./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/omastoic and sets up
-./uninstall.sh        # removes service, menu row, launcher and the plugin; keeps your quotes
 ```
 
-Update a published install with `omarchy plugin update omastoic`. Remove it
-with `omastoic uninstall` — that keeps your quotes and settings for a later
-reinstall; `omastoic uninstall --purge` removes those too.
+Update with `omarchy plugin update omastoic`.
+
+## Remove
+
+```bash
+omastoic uninstall
+```
+
+That restores your old art, removes the service, the menu row and the plugin,
+so a later `omarchy plugin add` is a clean install. Quotes and settings stay
+in `~/.config/omastoic/`; `omastoic uninstall --purge` drops those too.
 
 ## Using it
 
@@ -53,9 +60,6 @@ are unchanged. If they write the slot, omastoic notices it is no longer its
 own, turns itself off and leaves the new art alone — rather than quietly
 reverting you on the next rotation, which would look like a bug in Omarchy.
 Turn the Stoics back on whenever you want them.
-
-`omastoic uninstall` restores your old art, removes the service, menu row and
-launcher, and takes the plugin out so `omarchy plugin add` can run again.
 
 State lives where Omarchy keeps its own: the on/off flag is
 `omarchy-toggle omastoic`, which is what the menu row's ✓ reads.
