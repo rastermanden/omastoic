@@ -6,6 +6,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.2.1 - 2026-09-04
+
+### Fixed
+
+- `omastoic preview` no longer prints Omarchy's `socat … Broken pipe` after
+  the screensaver is already up. Real launcher errors still come through.
+
 ## 1.2.0 - 2026-09-04
 
 ### Changed

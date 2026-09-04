@@ -90,6 +90,38 @@ async function recent(): Promise<number[]> {
 const run = (cmd: string[]) => Bun.spawn(cmd, { stdout: "inherit", stderr: "inherit" }).exited;
 const quiet = (cmd: string[]) => Bun.spawnSync(cmd, { stdout: "ignore", stderr: "ignore" });
 
+/**
+ * Omarchy's launcher talks to Hyprland over socat and prints "Broken pipe"
+ * when that socket closes — noise, not a failed screensaver. Keep real errors.
+ */
+async function launchScreensaver(): Promise<number> {
+  if (!Bun.which("omarchy-launch-screensaver")) {
+    console.error("omastoic: omarchy-launch-screensaver is missing");
+    return 1;
+  }
+
+  const proc = Bun.spawn(["omarchy-launch-screensaver", "force"], {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+
+  const keep = (text: string) =>
+    text
+      .split("\n")
+      .filter((line) => line.trim() && !/socat\[\d+\].*Broken pipe/.test(line));
+  for (const line of keep(stdout)) console.log(line);
+  for (const line of keep(stderr)) console.error(line);
+
+  if (code === 0) console.log("→ screensaver");
+  return code ?? 1;
+}
+
 const enabled = () =>
   Bun.which("omarchy-toggle-enabled")
     ? quiet(["omarchy-toggle-enabled", TOGGLE]).exitCode === 0
@@ -501,7 +533,7 @@ async function main(): Promise<number> {
       } else {
         await writeBranding();
       }
-      return run(["omarchy-launch-screensaver", "force"]);
+      return launchScreensaver();
     case "daemon":
       return daemon();
     case "setup":
