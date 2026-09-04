@@ -6,6 +6,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.3.1 - 2026-09-04
+
+### Fixed
+
+- `omastoic config` multi-select: gum 2 toggles with `x` or `tab`, not space.
+  The picker now says so, and `--limit` is set so toggle is actually enabled.
+
 ## 1.3.0 - 2026-09-04
 
 ### Added

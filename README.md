@@ -102,9 +102,9 @@ short terminal, mostly — the quote is laid out on its own instead.
 omastoic config
 ```
 
-Space-select the Stoics who should appear, then enter the seconds between
-quotes while the screensaver is up. From the menu: Style → Screensaver →
-Configure. Non-interactive:
+Pick the Stoics who should appear (`x` or `tab` to toggle, enter to confirm),
+then enter the seconds between quotes while the screensaver is up. From the
+menu: Style → Screensaver → Configure. Non-interactive:
 
 ```bash
 omastoic config --authors marcus,seneca --interval 15

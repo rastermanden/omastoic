@@ -493,34 +493,30 @@ async function gumText(args: string[]): Promise<string | null> {
 }
 
 async function pickAuthors(roster: Map<string, { name: string }>, selected: string[]): Promise<string[] | undefined> {
-  const labels = [...roster].map(([slug, a]) => `${a.name}:${slug}`);
+  const byName = new Map([...roster].map(([slug, a]) => [a.name, slug]));
   const args = [
     "choose",
     "--no-limit",
+    "--limit",
+    String(roster.size + 1),
     "--header",
-    "Stoics on the screensaver  (space to toggle, enter to confirm)",
-    "--label-delimiter",
-    ":",
+    "Stoics on the screensaver  (x or tab to toggle, enter to confirm)",
   ];
   if (selected.length) {
     for (const slug of selected) {
-      const name = roster.get(slug)?.name ?? slug;
-      args.push("--selected", `${name}:${slug}`);
+      const name = roster.get(slug)?.name;
+      if (name) args.push("--selected", name);
     }
   } else {
     args.push("--selected", "*");
   }
-  args.push(...labels);
+  args.push(...byName.keys());
   const out = await gumText(args);
   if (out == null) return undefined;
   if (!out) return [];
-  const allowed = new Set(roster.keys());
   return out.split("\n").flatMap((line) => {
-    const t = line.trim();
-    if (allowed.has(t)) return [t];
-    const colon = t.lastIndexOf(":");
-    const slug = colon >= 0 ? t.slice(colon + 1) : "";
-    return allowed.has(slug) ? [slug] : [];
+    const slug = byName.get(line.trim());
+    return slug ? [slug] : [];
   });
 }
 
