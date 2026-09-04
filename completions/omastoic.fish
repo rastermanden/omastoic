@@ -7,6 +7,6 @@ complete -c omastoic -n "__fish_use_subcommand" -a status -d "Who has the screen
 complete -c omastoic -n "__fish_use_subcommand" -a uninstall -d "Take the service, menu row and plugin back out"
 complete -c omastoic -n "__fish_use_subcommand" -a help -d "Show help"
 
-complete -c omastoic -n "__fish_seen_subcommand_from config" -l authors -xa "all marcus seneca epictetus zeno cleanthes chrysippus" -d "Who appears"
+complete -c omastoic -n "__fish_seen_subcommand_from config" -l authors -xa "@AUTHORS@" -d "Who appears"
 complete -c omastoic -n "__fish_seen_subcommand_from config" -l interval -d "Seconds between quotes"
 complete -c omastoic -n "__fish_seen_subcommand_from uninstall" -l purge -d "Also drop quotes and settings"

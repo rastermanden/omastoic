@@ -12,10 +12,11 @@
 // clobbering the new art.
 
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
+import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
 import {
@@ -326,6 +327,8 @@ function unlinkLauncher(): void {
 }
 
 function installCompletion(quiet = false): void {
+  const tsv = join(ROOT, "data/authors.tsv");
+  const authors = existsSync(tsv) ? authorCompletionList(readFileSync(tsv, "utf8")) : "all";
   const copies: [string, string][] = [
     [join(ROOT, "completions/omastoic.bash"), BASH_COMPLETION],
     [join(ROOT, "completions/omastoic.fish"), FISH_COMPLETION],
@@ -334,7 +337,7 @@ function installCompletion(quiet = false): void {
     if (!existsSync(src)) continue;
     try {
       mkdirSync(dirname(dest), { recursive: true });
-      copyFileSync(src, dest);
+      writeFileSync(dest, renderCompletion(readFileSync(src, "utf8"), authors));
       if (!quiet) console.log(`→ ${dest}`);
     } catch (err) {
       console.error(`omastoic: could not install completion ${dest}: ${(err as Error).message}`);

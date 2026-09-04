@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.7.0 - 2026-09-04
+
+### Changed
+
+- Tab completion for `--authors` is filled from `data/authors.tsv` at setup
+  (`all` plus every slug), so a seventh Stoic completes without editing
+  `completions/`.
+
 ## 1.6.0 - 2026-09-04
 
 ### Changed

@@ -9,7 +9,7 @@ _omastoic() {
   cmd="${COMP_WORDS[1]}"
 
   local commands="toggle preview config status uninstall help"
-  local authors="all marcus seneca epictetus zeno cleanthes chrysippus"
+  local authors="@AUTHORS@"
 
   if ((COMP_CWORD == 1)); then
     mapfile -t COMPREPLY < <(compgen -W "$commands" -- "$cur")
