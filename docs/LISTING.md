@@ -63,8 +63,10 @@ slot Omarchy already reads.
 
 ## Artwork
 
-Listing still: [preview.png](../preview.png). README motion:
-[preview.gif](../preview.gif). Longer clip: [demo.mp4](../demo.mp4).
+Listing still: [preview.png](../preview.png). README motion and the longer clip
+are [release assets](https://github.com/rastermanden/omastoic/releases/latest)
+(`preview.gif`, `demo.mp4`) so `omarchy plugin add` does not clone ~4.5MB of
+video.
 
 ## Disclosures
 

@@ -19,6 +19,7 @@ mkdir -p "$target"
 rsync -a --delete \
   --exclude node_modules --exclude .git --exclude bun.lock --exclude '*.bak.*' \
   --exclude assets/sources --exclude assets/portraits \
+  --exclude demo.mp4 --exclude preview.gif \
   "$root/" "$target/"
 echo "→ $target"
 

@@ -1,3 +1,7 @@
 node_modules/
 assets/sources/
 *.bak.*
+
+# Motion lives on GitHub releases, not in the plugin clone.
+demo.mp4
+preview.gif

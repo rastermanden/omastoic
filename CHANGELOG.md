@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.6.0 - 2026-09-04
+
+### Changed
+
+- `demo.mp4` and `preview.gif` are GitHub release assets, not part of the
+  plugin clone. `preview.png` stays in the repo for the listing. README and
+  listing copy point at the latest release.
+
 ## 1.5.1 - 2026-09-04
 
 ### Fixed

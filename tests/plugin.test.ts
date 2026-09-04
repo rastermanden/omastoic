@@ -53,6 +53,21 @@ test("setup --quiet stays quiet when rewriting the menu", () => {
   expect(existsSync(join(root, "scripts/prune.sh"))).toBe(true);
 });
 
+test("the plugin clone does not ship the demo video or README gif", () => {
+  const listed = Bun.spawnSync(["git", "ls-files", "demo.mp4", "preview.gif"], {
+    cwd: root,
+    stdout: "pipe",
+  })
+    .stdout.toString()
+    .trim();
+  expect(listed).toBe("");
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  expect(readme).toContain("releases/latest/download/preview.gif");
+  expect(readme).toContain("releases/latest/download/demo.mp4");
+  expect(readme).not.toContain("](demo.mp4)");
+  expect(existsSync(join(root, "preview.png"))).toBe(true);
+});
+
 test("the canvas grid comes from a live screensaver tty", () => {
   const hypr = readFileSync(join(root, "src/hyprland.ts"), "utf8");
   expect(hypr).toContain('stty');

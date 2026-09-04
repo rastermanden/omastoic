@@ -5,11 +5,12 @@ Aurelius looks back at you out of the Munich Glyptothek and reminds you that the
 thing bothering you is your opinion of the thing. A minute later it is Seneca, or
 Epictetus, or the man who founded the whole school on an Athenian porch.
 
-![Omastoic on the Omarchy screensaver](preview.gif)
+![Omastoic on the Omarchy screensaver](https://github.com/rastermanden/omastoic/releases/latest/download/preview.gif)
 
 Six Stoics, each with a portrait transcoded from a museum photograph, and 64
 quotes from public-domain translations, every one cited by book and section.
-A longer clip is in [demo.mp4](demo.mp4).
+A longer clip is in
+[demo.mp4](https://github.com/rastermanden/omastoic/releases/latest/download/demo.mp4).
 
 ## Install
 
