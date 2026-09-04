@@ -1,5 +1,14 @@
 # Omastoic
 
+**2.0:** the plugin id is `io.github.rastermanden.omastoic`. The `omastoic`
+command, the on/off toggle, and `~/.config/omastoic/` are unchanged. A 1.x
+install does not pick this up as an update:
+
+```bash
+omastoic uninstall
+omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
+```
+
 **The Stoics on your Omarchy screensaver.** When the screen goes idle, Marcus
 Aurelius looks back at you out of the Munich Glyptothek and reminds you that the
 thing bothering you is your opinion of the thing. A minute later it is Seneca, or
@@ -22,7 +31,8 @@ user systemd unit that rotates quotes only while you are logged in.
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 ```
 
-That clones the plugin into `~/.config/omarchy/plugins/omastoic`, backs up
+That clones the plugin into
+`~/.config/omarchy/plugins/io.github.rastermanden.omastoic`, backs up
 whatever screensaver art you had, writes the first canvas, puts `omastoic` on
 your PATH, adds **Stoics** under Style → Screensaver, and starts a small user
 service that swaps in a new quote every 20 seconds while the screensaver is
@@ -35,10 +45,10 @@ omastoic preview
 From a checkout instead:
 
 ```bash
-./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/omastoic and sets up
+./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/io.github.rastermanden.omastoic and sets up
 ```
 
-Update with `omarchy plugin update omastoic`. That also refreshes the menu,
+Update with `omarchy plugin update io.github.rastermanden.omastoic`. That also refreshes the menu,
 completions and unit. Tab completion for `omastoic` is installed for bash
 (and fish); open a new terminal, or:
 
@@ -54,7 +64,8 @@ omastoic uninstall
 
 That restores your old art, removes the service, the menu row and the plugin,
 so a later `omarchy plugin add` is a clean install. `omarchy plugin remove
-omastoic` also fails closed: the menu rows hide once the folder is gone, and
+io.github.rastermanden.omastoic` also fails closed: the menu rows hide once
+the folder is gone, and
 a leftover cleaner takes the launcher, completions and unit with it. Quotes
 and settings stay in `~/.config/omastoic/`; `omastoic uninstall --purge`
 drops those too.

@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PLUGIN_ID } from "../src/plugin-id.ts";
 
 const root = join(import.meta.dir, "..");
 const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
@@ -8,7 +9,8 @@ const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 
 test("the plugin manifest is what Omarchy will validate", () => {
   expect(manifest.schemaVersion).toBe(1);
-  expect(manifest.id).toBe("omastoic");
+  expect(manifest.id).toBe(PLUGIN_ID);
+  expect(manifest.id).toBe("io.github.rastermanden.omastoic");
   expect(manifest.name).toBeTruthy();
   expect(manifest.author).toBeTruthy();
   expect(manifest.description).toBeTruthy();

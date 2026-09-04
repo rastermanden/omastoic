@@ -6,7 +6,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-plugin_id="omastoic"
+plugin_id="io.github.rastermanden.omastoic"
 plugin_home="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
 target="$plugin_home/$plugin_id"
 

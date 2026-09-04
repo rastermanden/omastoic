@@ -18,6 +18,7 @@ import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from ".
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
+import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
 import {
   compactSettings,
@@ -51,7 +52,8 @@ const LOGO = join(process.env.OMARCHY_PATH ?? "/usr/share/omarchy", "logo.txt");
 const TOGGLE = "omastoic";
 const GLYPH = "󱄄";
 const INSTALLED = join(STATE, "installed");
-const PLUGIN_HOME = join(CONFIG_HOME, "omarchy/plugins/omastoic");
+const PLUGIN_HOME = join(CONFIG_HOME, "omarchy/plugins", PLUGIN_ID);
+const PLUGIN_HOME_LEGACY = join(CONFIG_HOME, "omarchy/plugins", LEGACY_PLUGIN_ID);
 const DATA_HOME = process.env.XDG_DATA_HOME ?? join(HOME, ".local/share");
 const BASH_COMPLETION = join(DATA_HOME, "bash-completion/completions/omastoic");
 const FISH_COMPLETION = join(DATA_HOME, "fish/vendor_completions.d/omastoic.fish");
@@ -532,11 +534,15 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
   // The plugin folder is what `omarchy plugin add` keys on. Leaving it behind
   // after teardown makes the next add fail with "id already used", and the
   // still-enabled service would set the Stoics up again on the next shell start.
-  if (await Bun.file(join(PLUGIN_HOME, "manifest.json")).exists()) {
-    const code = await run(["omarchy", "plugin", "remove", "omastoic", "--yes"]);
+  for (const [id, home] of [
+    [PLUGIN_ID, PLUGIN_HOME],
+    [LEGACY_PLUGIN_ID, PLUGIN_HOME_LEGACY],
+  ] as const) {
+    if (!(await Bun.file(join(home, "manifest.json")).exists())) continue;
+    const code = await run(["omarchy", "plugin", "remove", id, "--yes"]);
     if (code !== 0) {
       console.error("omastoic: plugin folder still there — remove it with:");
-      console.error("          omarchy plugin remove omastoic --yes");
+      console.error(`          omarchy plugin remove ${id} --yes`);
       return 1;
     }
   }

@@ -46,7 +46,7 @@ async function runPrune(home: string, bin: string) {
 test("prune is a no-op while the plugin directory exists even without a manifest", async () => {
   const { home, bin } = tempHome();
   try {
-    mkdirSync(join(home, ".config/omarchy/plugins/omastoic"), { recursive: true });
+    mkdirSync(join(home, ".config/omarchy/plugins/io.github.rastermanden.omastoic"), { recursive: true });
     mkdirSync(join(home, ".local/bin"), { recursive: true });
     const launcher = join(home, ".local/bin/omastoic");
     writeFileSync(launcher, "#!/bin/bash\n");
@@ -62,8 +62,8 @@ test("prune is a no-op while the plugin is installed", async () => {
   const { home, bin } = tempHome();
   try {
     const config = join(home, ".config");
-    mkdirSync(join(config, "omarchy/plugins/omastoic"), { recursive: true });
-    writeFileSync(join(config, "omarchy/plugins/omastoic/manifest.json"), "{}\n");
+    mkdirSync(join(config, "omarchy/plugins/io.github.rastermanden.omastoic"), { recursive: true });
+    writeFileSync(join(config, "omarchy/plugins/io.github.rastermanden.omastoic/manifest.json"), "{}\n");
     mkdirSync(join(home, ".local/bin"), { recursive: true });
     const launcher = join(home, ".local/bin/omastoic");
     writeFileSync(launcher, "#!/bin/bash\n");

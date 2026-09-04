@@ -53,8 +53,8 @@ Remove it cleanly with:
 omastoic uninstall
 ```
 
-`omarchy plugin remove omastoic` hides the menu rows and cleans leftover
-files; quotes stay in `~/.config/omastoic/`.
+`omarchy plugin remove io.github.rastermanden.omastoic` hides the menu rows
+and cleans leftover files; quotes stay in `~/.config/omastoic/`.
 
 ## One line
 

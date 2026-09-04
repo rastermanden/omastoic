@@ -6,16 +6,18 @@ set -euo pipefail
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
-PLUGIN_DIR="$CONFIG/omarchy/plugins/omastoic"
+PLUGIN_DIR="$CONFIG/omarchy/plugins/io.github.rastermanden.omastoic"
+LEGACY_DIR="$CONFIG/omarchy/plugins/omastoic"
 PLUGIN="$PLUGIN_DIR/manifest.json"
 
 # The directory existing is enough: a git checkout can briefly unlink
 # manifest.json, and pruning then would tear down a live install.
-if [[ -e $PLUGIN_DIR || -f $PLUGIN ]]; then
+# Keep the pre-2.0 folder as "still installed" so a rename is not a prune.
+if [[ -e $PLUGIN_DIR || -f $PLUGIN || -e $LEGACY_DIR ]]; then
   exit 0
 fi
 sleep 2
-if [[ -e $PLUGIN_DIR || -f $PLUGIN ]]; then
+if [[ -e $PLUGIN_DIR || -f $PLUGIN || -e $LEGACY_DIR ]]; then
   exit 0
 fi
 

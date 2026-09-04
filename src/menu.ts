@@ -5,6 +5,8 @@
 // it is edited as text between markers, never parsed and re-serialised — that
 // would throw away every comment and every neighbour's block.
 
+import { PLUGIN_ID } from "./plugin-id.ts";
+
 export const BEGIN = "// >>> omastoic:begin";
 export const END = "// <<< omastoic:end";
 
@@ -18,7 +20,7 @@ const FOOTER = `  ${END}`;
 export function rows(): string[] {
   // Hide unless the plugin is actually on disk. `omarchy plugin remove` deletes
   // the folder but used to leave these rows pointing at a missing binary.
-  const installed = `[[ -f ~/.config/omarchy/plugins/omastoic/manifest.json ]]`;
+  const installed = `[[ -f ~/.config/omarchy/plugins/${PLUGIN_ID}/manifest.json ]]`;
   return [
     `  "style.screensaver.stoics": {"icon":"󱄄","label":"Stoics","description":"Rotate cited Stoic quotes on the screensaver","aliases":["stoic","stoics"],"when":"${installed}","checked":"omarchy-toggle-enabled omastoic","action":"omastoic toggle"},`,
     `  "style.screensaver.configure": {"icon":"","label":"Configure","description":"Choose which Stoics appear, and seconds between quotes","when":"${installed}","action":"omarchy-launch-tui omastoic config"},`,

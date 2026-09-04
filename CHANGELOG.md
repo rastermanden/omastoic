@@ -6,6 +6,20 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 2.0.0 - 2026-09-04
+
+### Changed
+
+- Plugin id is `io.github.rastermanden.omastoic`. The `omastoic` command, the
+  on/off toggle, and `~/.config/omastoic/` are unchanged. Existing 1.x
+  installs do not pick this up as an update: remove the old plugin, then
+  `omarchy plugin add` again.
+
+```bash
+omastoic uninstall
+omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
+```
+
 ## 1.7.0 - 2026-09-04
 
 ### Changed
