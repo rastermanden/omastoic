@@ -6,6 +6,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 1.2.2 - 2026-09-04
+
+### Fixed
+
+- `omastoic uninstall` now runs `omarchy plugin remove`, so a later
+  `omarchy plugin add` is not refused with "plugin id already used". The
+  leftover folder also kept the service enabled, which would set the Stoics
+  up again on the next shell start.
+
 ## 1.2.1 - 2026-09-04
 
 ### Fixed

@@ -400,9 +400,16 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
     console.log(`→ removed ${USER_CONFIG}`);
   }
 
+  // The plugin folder is what `omarchy plugin add` keys on. Leaving it behind
+  // after teardown makes the next add fail with "id already used", and the
+  // still-enabled service would set the Stoics up again on the next shell start.
   if (await Bun.file(join(PLUGIN_HOME, "manifest.json")).exists()) {
-    console.log("→ plugin still enabled; it will set up again on the next shell start");
-    console.log("          omarchy plugin remove omastoic");
+    const code = await run(["omarchy", "plugin", "remove", "omastoic", "--yes"]);
+    if (code !== 0) {
+      console.error("omastoic: plugin folder still there — remove it with:");
+      console.error("          omarchy plugin remove omastoic --yes");
+      return 1;
+    }
   }
   return 0;
 }
@@ -550,10 +557,10 @@ async function main(): Promise<number> {
   omastoic toggle      hand the screensaver to the Stoics, or give it back
   omastoic preview     write a new canvas and start the screensaver now
   omastoic status      who has the screensaver, and what is in the quote book
-  omastoic uninstall   take the service and menu row back out
+  omastoic uninstall   take the service, menu row and plugin back out
 
 Install:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable --yes
-Remove:   omastoic uninstall && omarchy plugin remove omastoic
+Remove:   omastoic uninstall
 
 Style → Screensaver → Stoics is the same toggle. Edit Text, Set From Image
 and Restore Default stay Omarchy's; if they write the slot, the Stoics

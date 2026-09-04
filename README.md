@@ -37,9 +37,8 @@ From a checkout instead:
 ```
 
 Update a published install with `omarchy plugin update omastoic`. Remove it
-with `omastoic uninstall && omarchy plugin remove omastoic` — that keeps
-your quotes and settings for a later reinstall; `omastoic uninstall --purge`
-removes those too.
+with `omastoic uninstall` — that keeps your quotes and settings for a later
+reinstall; `omastoic uninstall --purge` removes those too.
 
 ## Using it
 
@@ -55,9 +54,8 @@ own, turns itself off and leaves the new art alone — rather than quietly
 reverting you on the next rotation, which would look like a bug in Omarchy.
 Turn the Stoics back on whenever you want them.
 
-`omastoic uninstall` removes the service, menu row and launcher, and restores
-your old art. Follow it with `omarchy plugin remove omastoic` so the plugin
-does not set itself up again on the next shell start.
+`omastoic uninstall` restores your old art, removes the service, menu row and
+launcher, and takes the plugin out so `omarchy plugin add` can run again.
 
 State lives where Omarchy keeps its own: the on/off flag is
 `omarchy-toggle omastoic`, which is what the menu row's ✓ reads.
@@ -86,7 +84,7 @@ short terminal, mostly — the quote is laid out on its own instead.
 | `omastoic toggle` | hand the screensaver to the Stoics, or give it back |
 | `omastoic preview` | write a new canvas and start the screensaver now |
 | `omastoic status` | who has the screensaver, and what's in the quote book |
-| `omastoic uninstall` | take the service, menu row and launcher back out |
+| `omastoic uninstall` | take the service, menu row and plugin back out |
 
 ## Making it yours
 

@@ -51,7 +51,6 @@ Remove it cleanly with:
 
 ```bash
 omastoic uninstall
-omarchy plugin remove omastoic
 ```
 
 Removing the plugin keeps your quotes in `~/.config/omastoic/`.
