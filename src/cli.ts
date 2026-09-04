@@ -559,7 +559,7 @@ async function main(): Promise<number> {
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 
-Install:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable --yes
+Install:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 Remove:   omastoic uninstall
 
 Style → Screensaver → Stoics is the same toggle. Edit Text, Set From Image

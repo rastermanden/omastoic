@@ -16,7 +16,7 @@ A longer clip is in [demo.mp4](demo.mp4).
 Requires Omarchy 4+ and [bun](https://bun.sh) (`omarchy pkg add bun`).
 
 ```bash
-omarchy plugin add https://github.com/rastermanden/omastoic.git --enable --yes
+omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 ```
 
 That clones the plugin into `~/.config/omarchy/plugins/omastoic`, backs up

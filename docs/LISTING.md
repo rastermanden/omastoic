@@ -42,7 +42,7 @@ some other way and the Stoics stand aside.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/rastermanden/omastoic.git --enable --yes
+omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 ```
 
 Needs bun (`omarchy pkg add bun`). Then `omastoic preview` to see it now.
