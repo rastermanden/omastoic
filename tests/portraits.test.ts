@@ -72,3 +72,13 @@ test("the plugin clone does not ship the portrait sources", () => {
   expect(install).toContain("--exclude assets/sources");
   expect(install).toContain("--exclude assets/local");
 });
+
+test("the full-resolution originals are fetchable, and stay out of the repo", () => {
+  const fetcher = readFileSync(join(root, "scripts/fetch-sources.sh"), "utf8");
+  expect(fetcher).toContain("--originals");
+  expect(fetcher).toContain("releases/download/portrait-sources/");
+  // Committed sources are the reduced copies; the originals are downloaded.
+  const ignored = readFileSync(join(root, ".gitignore"), "utf8");
+  expect(ignored).toContain("assets/originals/");
+  expect(existsSync(join(root, "assets/local"))).toBe(true);
+});

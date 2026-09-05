@@ -162,6 +162,20 @@ Every portrait now ships its own source in `assets/local/`, so that is the whole
 loop. Only a `commons` entry needs fetching first, and
 `./scripts/fetch-sources.sh` downloads those.
 
+What is committed in `assets/local/` is each source halved and greyscaled — it
+rebuilds `art/` exactly, and keeps `omarchy plugin add` from cloning several
+megabytes. To re-crop a portrait you want the full-resolution original, which is
+a [release asset](https://github.com/rastermanden/omastoic/releases/tag/portrait-sources):
+
+```bash
+./scripts/fetch-sources.sh --originals   # unpacks into assets/originals/, gitignored
+```
+
+Crops are in the coordinates of the committed copy, so halve any measurement you
+take off an original. Having re-cropped, write the committed copy back out —
+`magick assets/originals/zeno.jpg -colorspace Gray -resize 50% -quality 80
+-strip assets/local/zeno.jpg` — and rebuild.
+
 Each entry names where its source lives and how to reduce it:
 
 | Field | |

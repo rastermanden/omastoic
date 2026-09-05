@@ -10,7 +10,10 @@ likeness at all, and the rest were guesswork long before a model was asked.
 They are illustrations for a screensaver, labelled as such.
 
 `scripts/transcode.ts` rebuilds `art/` from them; `assets/portraits.json`
-records the crop and threshold each one is reduced with.
+records the crop and threshold each one is reduced with. What the repository
+commits is a halved, greyscaled copy of each source; the full-resolution
+originals are a release asset, fetched with
+`./scripts/fetch-sources.sh --originals`.
 
 | Portrait | Source | License |
 | --- | --- | --- |

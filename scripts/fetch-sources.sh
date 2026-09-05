@@ -5,9 +5,31 @@
 #
 # Portraits marked "origin": "local" are skipped — those images cannot be
 # re-fetched from anywhere, so they live committed in assets/local/ instead.
+#
+# With --originals, fetch instead the full-resolution originals behind those
+# committed copies. assets/local/ holds each one halved and greyscaled, which
+# rebuilds art/ exactly but is no good for re-cropping; the originals are kept
+# as a release asset so the repository stays small.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 dest="$root/assets/sources"
+originals="$root/assets/originals"
+archive_url="https://github.com/rastermanden/omastoic/releases/download/portrait-sources/omastoic-portrait-originals.zip"
+
+if [[ ${1:-} == "--originals" ]]; then
+  if [[ -d $originals && -n $(ls -A "$originals" 2>/dev/null) ]]; then
+    echo "have $originals"
+    exit 0
+  fi
+  mkdir -p "$originals"
+  tmp=$(mktemp -t omastoic-originals-XXXXXX.zip)
+  trap 'rm -f "$tmp"' EXIT
+  curl -fsSL --max-time 300 -o "$tmp" "$archive_url"
+  unzip -q -o "$tmp" -d "$originals"
+  echo "got  $(ls "$originals" | wc -l) files into $originals"
+  exit 0
+fi
+
 mkdir -p "$dest"
 missing=0
 
