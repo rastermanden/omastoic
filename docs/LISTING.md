@@ -20,7 +20,7 @@ repository, and release posts.
 Omastoic puts the Stoics on the Omarchy screensaver. When the screen goes
 idle, Marcus Aurelius looks back at you out of the Munich Glyptothek; a
 minute later it is Seneca, or Epictetus, or the man who founded the school
-on an Athenian porch. Six portraits transcoded from museum photographs, and
+on an Athenian porch. Six portraits transcoded from imagined likenesses, and
 64 quotes from public-domain translations, every one cited by book and
 section.
 
@@ -78,5 +78,6 @@ video.
   you are logged in.
 - Plugins run unsandboxed as the logged-in user inside `omarchy-shell`;
   review the source before enabling it.
-- Portrait sources are public domain or CC0; translations are out of
-  copyright. Credits in [CREDITS.md](../CREDITS.md).
+- The portraits are AI-generated likenesses, labelled as such, not photographs
+  of surviving busts; translations are out of copyright. Credits in
+  [CREDITS.md](../CREDITS.md).

@@ -2,21 +2,31 @@
 
 ## Portraits
 
-The braille portraits in `art/` are derived from these images. Every source is
-public domain or CC0; `scripts/fetch-sources.sh` downloads them from Wikimedia
-Commons and `scripts/transcode.ts` rebuilds the art from them.
+The braille portraits in `art/` are AI-generated likenesses, made with Grok
+Imagine and committed in `assets/local/`. No portrait here is a photograph of a
+surviving bust, and none should be taken as evidence of what these men looked
+like — of the six, only Marcus Aurelius has a securely identified ancient
+likeness at all, and the rest were guesswork long before a model was asked.
+They are illustrations for a screensaver, labelled as such.
+
+`scripts/transcode.ts` rebuilds `art/` from them; `assets/portraits.json`
+records the crop and threshold each one is reduced with.
 
 | Portrait | Source | License |
 | --- | --- | --- |
-| Marcus Aurelius | Bust of Marcus Aurelius, Glyptothek, Munich — photo by Bibi Saint-Pol | Public domain |
-| Seneca | Peter Paul Rubens, drawing after the bust of Pseudo-Seneca — The Metropolitan Museum of Art | CC0 |
-| Epictetus | Henri Bonnart, engraving of Epictetus, c. 1700 | Public domain |
-| Zeno of Citium | Bust of Zeno of Citium, Ny Carlsberg Glyptotek, Copenhagen | Public domain |
-| Cleanthes | Head of Cleanthes, Ny Carlsberg Glyptotek, Copenhagen | Public domain |
-| Chrysippus | Bronze portrait-bust of Chrysippus, Museo dei Fori Imperiali, Rome — photo by Szilas | Public domain |
+| Marcus Aurelius | Imagined bust of Marcus Aurelius — generated with Grok Imagine | AI-generated |
+| Seneca | Imagined portrait of Seneca — generated with Grok Imagine | AI-generated |
+| Epictetus | Imagined portrait of Epictetus — generated with Grok Imagine | AI-generated |
+| Zeno of Citium | Imagined portrait of Zeno of Citium — generated with Grok Imagine | AI-generated |
+| Cleanthes | Imagined portrait of Cleanthes — generated with Grok Imagine | AI-generated |
+| Chrysippus | Imagined portrait of Chrysippus — generated with Grok Imagine | AI-generated |
 
-No portrait of Epictetus survives from antiquity — Bonnart's engraving is a
-seventeenth-century imagining, and it is included as such.
+Through 1.x the portraits were transcoded from public-domain and CC0 museum
+photographs instead — the Glyptothek's Marcus Aurelius, the Met's Rubens drawing
+after the Pseudo-Seneca, Bonnart's engraving of Epictetus, and the Ny Carlsberg
+Glyptotek's Zeno and Cleanthes. Those entries are in the git history, and
+`scripts/fetch-sources.sh` still fetches any portrait whose `origin` is
+`commons`.
 
 ## Translations
 

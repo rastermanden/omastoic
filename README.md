@@ -16,7 +16,7 @@ Epictetus, or the man who founded the whole school on an Athenian porch.
 
 ![Omastoic on the Omarchy screensaver](https://github.com/rastermanden/omastoic/releases/latest/download/preview.gif)
 
-Six Stoics, each with a portrait transcoded from a museum photograph, and 64
+Six Stoics, each with a portrait transcoded from an imagined likeness, and 64
 quotes from public-domain translations, every one cited by book and section.
 A longer clip is in
 [demo.mp4](https://github.com/rastermanden/omastoic/releases/latest/download/demo.mp4).
@@ -152,20 +152,36 @@ are added to the book, not swapped in for it. An author slug with a portrait in
 narrows the roster — leave it out for all six.
 
 **Portraits.** `art/*.txt` is generated, not hand-drawn. To change one, or add a
-seventh Stoic, add an entry to `assets/portraits.json` — source filename, crop,
-and the three tone numbers — then:
+seventh Stoic, add an entry to `assets/portraits.json` and rebuild:
 
 ```bash
-./scripts/fetch-sources.sh      # downloads the sources from Wikimedia Commons
 bun scripts/transcode.ts        # rebuilds art/, or one slug: ... transcode.ts zeno
 ```
 
-A photograph needs more than the hard threshold a logo transcoder uses; a bust
-thresholded flat is a white blob. Each portrait is blurred just enough to lose
-the marble's grain, levelled so the sitter's own shadows survive, masked with a
-soft ellipse so the museum wall behind it does not, and halftoned with a
-clustered 4×4 pattern — which the braille grid renders as tone, where a
-diffusion dither at this size turns into static.
+Every portrait now ships its own source in `assets/local/`, so that is the whole
+loop. Only a `commons` entry needs fetching first, and
+`./scripts/fetch-sources.sh` downloads those.
+
+Each entry names where its source lives and how to reduce it:
+
+| Field | |
+| --- | --- |
+| `origin` | `commons` — public domain or CC0, downloaded into `assets/sources/`, which is gitignored. `local` — an image that cannot be re-fetched from anywhere, so it is committed in `assets/local/`. |
+| `crop` | `WxH+X+Y` in source pixels, framed on the head. Aim near 17:20, the shape of the 34×20 cell grid; at 68×80 dots a loose frame is mush. |
+| `floor` | Flattens everything above this lightness to one white. Some exports bake their transparency checkerboard in as pixels; this removes it. |
+| `transcoder` | `ascii` or `halftone` — see below. |
+
+`ascii` hands the cropped image to `omarchy transcode ascii`, Omarchy's own
+braille transcoder, at `threshold` percent. A hard threshold is right for a
+drawing: strong strokes on bare paper, nothing to blur away and no background to
+mask. Lower the threshold for more ink.
+
+`halftone` is for photographs, which need more than a hard threshold — a bust
+thresholded flat is a white blob. The image is blurred by `tone.blur` to lose the
+marble's grain, levelled between `tone.black` and `tone.white` so the sitter's
+own shadows survive, masked with a soft ellipse so the museum wall behind it is
+not, and halftoned with a clustered 4×4 pattern — which the braille grid renders
+as tone, where a diffusion dither at this size turns into static.
 
 `scripts/preview.sh <canvas.txt>` renders a canvas to a PNG at the terminal's
 cell aspect ratio, which is the quickest way to judge a new portrait.
@@ -187,7 +203,8 @@ manifest check Omarchy runs before `plugin add`.
 
 ## Credits
 
-Portrait sources and translations are listed in [CREDITS.md](CREDITS.md). Every
-image is public domain or CC0, and every translation is out of copyright.
+Portrait sources and translations are listed in [CREDITS.md](CREDITS.md). The
+portraits are AI-generated likenesses, not photographs of surviving busts; every
+translation is out of copyright.
 
 MIT licensed.

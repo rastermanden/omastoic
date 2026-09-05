@@ -1,5 +1,5 @@
 {
-  "$comment": "Sources for the braille portraits in art/. Every source is public domain or CC0; re-run scripts/transcode.ts to rebuild art/ from them.",
+  "$comment": "Sources for the braille portraits in art/. origin: \"commons\" is public domain or CC0 and lives in assets/sources/, fetched by scripts/fetch-sources.sh; \"local\" cannot be re-fetched from anywhere and lives committed in assets/local/. transcoder: \"ascii\" hands the crop to `omarchy transcode ascii` at threshold percent, right for a drawing; \"halftone\" blurs, levels and dithers it through tone, right for a photograph. See the Portraits section of README.md, and re-run scripts/transcode.ts to rebuild art/.",
   "size": {
     "cols": 34,
     "rows": 20
@@ -8,80 +8,74 @@
     {
       "slug": "marcus",
       "name": "Marcus Aurelius",
-      "file": "Marcus Aurelius Glyptothek München (3x4 cropped).jpg",
-      "credit": "Bust of Marcus Aurelius, Glyptothek, Munich — photo by Bibi Saint-Pol",
-      "license": "Public domain",
-      "crop": "860x1120+60+20",
-      "tone": {
-        "blur": 2,
-        "black": 38,
-        "white": 72
-      }
+      "origin": "local",
+      "file": "marcus.jpg",
+      "credit": "Imagined bust of Marcus Aurelius — generated with Grok Imagine",
+      "license": "AI-generated",
+      "crop": "400x470+30+125",
+      "floor": 88,
+      "transcoder": "ascii",
+      "threshold": 45
     },
     {
       "slug": "seneca",
       "name": "Seneca",
-      "file": "Bust of Pseudo-Seneca MET DP359039.jpg",
-      "credit": "Peter Paul Rubens, drawing after the bust of Pseudo-Seneca — The Metropolitan Museum of Art",
-      "license": "CC0",
-      "crop": "840x900+60+40",
-      "tone": {
-        "blur": 2,
-        "black": 38,
-        "white": 72
-      }
+      "origin": "local",
+      "file": "seneca.jpg",
+      "credit": "Imagined portrait of Seneca — generated with Grok Imagine",
+      "license": "AI-generated",
+      "crop": "400x470+45+50",
+      "floor": 88,
+      "transcoder": "ascii",
+      "threshold": 38
     },
     {
       "slug": "epictetus",
       "name": "Epictetus",
-      "file": "Epictetus - Henri Bonnart engraving c. 1700.png",
-      "credit": "Henri Bonnart, engraving of Epictetus, c. 1700",
-      "license": "Public domain",
-      "crop": "460x600+250+300",
-      "tone": {
-        "blur": 2,
-        "black": 30,
-        "white": 62
-      }
+      "origin": "local",
+      "file": "epictetus.jpg",
+      "credit": "Imagined portrait of Epictetus — generated with Grok Imagine",
+      "license": "AI-generated",
+      "crop": "400x470+90+30",
+      "floor": 88,
+      "transcoder": "ascii",
+      "threshold": 45
     },
     {
       "slug": "zeno",
       "name": "Zeno of Citium",
-      "file": "Zeno of Citium Ny Carlsberg Glyptotek IN606.jpg",
-      "credit": "Bust of Zeno of Citium, Ny Carlsberg Glyptotek, Copenhagen",
-      "license": "Public domain",
-      "crop": "700x920+140+50",
-      "tone": {
-        "blur": 2,
-        "black": 50,
-        "white": 85
-      }
+      "origin": "local",
+      "file": "zeno.jpg",
+      "credit": "Imagined portrait of Zeno of Citium — generated with Grok Imagine",
+      "license": "AI-generated",
+      "crop": "210x247+190+50",
+      "floor": 88,
+      "transcoder": "ascii",
+      "threshold": 45
     },
     {
       "slug": "cleanthes",
       "name": "Cleanthes",
-      "file": "Cleanthes Ny Carlsberg Glyptotek IN 1795.jpg",
-      "credit": "Head of Cleanthes, Ny Carlsberg Glyptotek, Copenhagen",
-      "license": "Public domain",
-      "crop": "740x1020+110+70",
-      "tone": {
-        "blur": 2,
-        "black": 38,
-        "white": 72
-      }
+      "origin": "local",
+      "file": "cleanthes.jpg",
+      "credit": "Imagined portrait of Cleanthes — generated with Grok Imagine",
+      "license": "AI-generated",
+      "crop": "400x470+65+30",
+      "floor": 88,
+      "transcoder": "ascii",
+      "threshold": 45
     },
     {
       "slug": "chrysippus",
       "name": "Chrysippus",
-      "file": "Portrait-bust of Chrysippus.jpg",
-      "credit": "Bronze portrait-bust of Chrysippus, Museo dei Fori Imperiali, Rome — photo by Szilas",
-      "license": "Public domain",
-      "crop": "860x1200+60+60",
-      "tone": {
-        "blur": 2,
-        "black": 38,
-        "white": 72
-      }
+      "origin": "local",
+      "file": "chrysippus.jpg",
+      "credit": "Imagined portrait of Chrysippus — generated with Grok Imagine",
+      "license": "AI-generated",
+      "crop": "280x329+150+125",
+      "floor": 84,
+      "transcoder": "ascii",
+      "threshold": 52
     }
   ]
 }

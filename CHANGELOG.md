@@ -6,6 +6,26 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 2.1.0 - 2026-09-05
+
+### Changed
+
+- New portraits. All six are AI-generated likenesses, made with Grok Imagine,
+  in place of the public-domain museum photographs 1.x and 2.0 transcoded. They
+  are labelled as such in [CREDITS.md](CREDITS.md): none is a photograph of a
+  surviving bust, and none is evidence of what these men looked like.
+- Portrait sources can now live in the repo. `assets/portraits.json` gained an
+  `origin`: `commons` sources are public domain or CC0 and are still fetched
+  into the gitignored `assets/sources/` by `scripts/fetch-sources.sh`, while
+  `local` sources cannot be re-fetched from anywhere and are committed in
+  `assets/local/` so `art/` stays rebuildable. Neither ships in the plugin
+  clone.
+- `scripts/transcode.ts` gained a second transcoder. `ascii` hands the cropped
+  source to `omarchy transcode ascii`, which is right for a drawing — strong
+  strokes on bare paper, nothing to blur away and no background to mask. The
+  existing blur/level/ellipse/dither path stays as `halftone`, which is what a
+  photograph still needs.
+
 ## 2.0.0 - 2026-09-04
 
 ### Changed
