@@ -72,10 +72,10 @@
       "file": "chrysippus.jpg",
       "credit": "Imagined portrait of Chrysippus — generated with Grok Imagine",
       "license": "AI-generated",
-      "crop": "280x329+150+125",
-      "floor": 84,
+      "crop": "429x505+85+60",
+      "floor": 88,
       "transcoder": "ascii",
-      "threshold": 52
+      "threshold": 18
     }
   ]
 }
