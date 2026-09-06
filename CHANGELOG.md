@@ -6,7 +6,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
-## 2.1.0 - 2026-09-05
+## 2.1.0 - 2026-09-06
 
 ### Changed
 
@@ -25,6 +25,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strokes on bare paper, nothing to blur away and no background to mask. The
   existing blur/level/ellipse/dither path stays as `halftone`, which is what a
   photograph still needs.
+- What `assets/local/` commits is each source halved and greyscaled: enough to
+  rebuild `art/` exactly, small enough that `omarchy plugin add` does not clone
+  several megabytes. The full-resolution originals are a release asset,
+  fetched with `./scripts/fetch-sources.sh --originals`.
+
+### Added
+
+- `scripts/make-preview.ts` builds `preview.png` and the `preview.gif` and
+  `demo.mp4` that go on the release, from the committed art — one plate per
+  Stoic, laid out by the same `compose()` the screensaver writes. A portrait
+  change no longer leaves the listing art stale.
 
 ## 2.0.0 - 2026-09-04
 
