@@ -1,23 +1,14 @@
 # Omastoic
 
-**2.0:** the plugin id is `io.github.rastermanden.omastoic`. The `omastoic`
-command, the on/off toggle, and `~/.config/omastoic/` are unchanged. A 1.x
-install does not pick this up as an update:
-
-```bash
-omastoic uninstall
-omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
-```
-
 **The Stoics on your Omarchy screensaver.** When the screen goes idle, Marcus
-Aurelius looks back at you out of the Munich Glyptothek and reminds you that the
-thing bothering you is your opinion of the thing. A minute later it is Seneca, or
-Epictetus, or the man who founded the whole school on an Athenian porch.
+Aurelius looks back at you and reminds you that the thing bothering you is your
+opinion of the thing. A minute later it is Seneca, or Epictetus, or the man who
+founded the whole school on an Athenian porch.
 
 ![Omastoic on the Omarchy screensaver](https://github.com/rastermanden/omastoic/releases/latest/download/preview.gif)
 
-Six Stoics, each with a portrait transcoded from an imagined likeness, and 64
-quotes from public-domain translations, every one cited by book and section.
+Six Stoics, each drawn as a braille portrait, and 64 quotes from public-domain
+translations, every one cited by book and section.
 A longer clip is in
 [demo.mp4](https://github.com/rastermanden/omastoic/releases/latest/download/demo.mp4).
 
@@ -48,8 +39,10 @@ From a checkout instead:
 ./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/io.github.rastermanden.omastoic and sets up
 ```
 
-Update with `omarchy plugin update io.github.rastermanden.omastoic`. That also refreshes the menu,
-completions and unit. Tab completion for `omastoic` is installed for bash
+Update with `omarchy plugin update io.github.rastermanden.omastoic`. That also
+refreshes the menu, completions and unit. Coming from 1.x, the plugin id changed
+in 2.0, so an old install does not see this as an update — `omastoic uninstall`
+first, then add it again. Tab completion for `omastoic` is installed for bash
 (and fish); open a new terminal, or:
 
 ```bash
@@ -151,62 +144,10 @@ are added to the book, not swapped in for it. An author slug with a portrait in
 `interval` is seconds between quotes while the screensaver is up. `authors`
 narrows the roster — leave it out for all six.
 
-**Portraits.** `art/*.txt` is generated, not hand-drawn. To change one, or add a
-seventh Stoic, add an entry to `assets/portraits.json` and rebuild:
-
-```bash
-bun scripts/transcode.ts        # rebuilds art/, or one slug: ... transcode.ts zeno
-```
-
-Every portrait now ships its own source in `assets/local/`, so that is the whole
-loop. Only a `commons` entry needs fetching first, and
-`./scripts/fetch-sources.sh` downloads those.
-
-What is committed in `assets/local/` is each source halved and greyscaled — it
-rebuilds `art/` exactly, and keeps `omarchy plugin add` from cloning several
-megabytes. To re-crop a portrait you want the full-resolution original, which is
-a [release asset](https://github.com/rastermanden/omastoic/releases/tag/portrait-sources):
-
-```bash
-./scripts/fetch-sources.sh --originals   # unpacks into assets/originals/, gitignored
-```
-
-Crops are in the coordinates of the committed copy, so halve any measurement you
-take off an original. Having re-cropped, write the committed copy back out —
-`magick assets/originals/zeno.jpg -colorspace Gray -resize 50% -quality 80
--strip assets/local/zeno.jpg` — and rebuild.
-
-Each entry names where its source lives and how to reduce it:
-
-| Field | |
-| --- | --- |
-| `origin` | `commons` — public domain or CC0, downloaded into `assets/sources/`, which is gitignored. `local` — an image that cannot be re-fetched from anywhere, so it is committed in `assets/local/`. |
-| `crop` | `WxH+X+Y` in source pixels, framed on the head. Aim near 17:20, the shape of the 34×20 cell grid; at 68×80 dots a loose frame is mush. |
-| `floor` | Flattens everything above this lightness to one white. Some exports bake their transparency checkerboard in as pixels; this removes it. |
-| `transcoder` | `ascii` or `halftone` — see below. |
-
-`ascii` hands the cropped image to `omarchy transcode ascii`, Omarchy's own
-braille transcoder, at `threshold` percent. A hard threshold is right for a
-drawing: strong strokes on bare paper, nothing to blur away and no background to
-mask. Lower the threshold for more ink.
-
-`halftone` is for photographs, which need more than a hard threshold — a bust
-thresholded flat is a white blob. The image is blurred by `tone.blur` to lose the
-marble's grain, levelled between `tone.black` and `tone.white` so the sitter's
-own shadows survive, masked with a soft ellipse so the museum wall behind it is
-not, and halftoned with a clustered 4×4 pattern — which the braille grid renders
-as tone, where a diffusion dither at this size turns into static.
-
-`scripts/preview.sh <canvas.txt>` renders a canvas to a PNG at the terminal's
-cell aspect ratio, which is the quickest way to judge a new portrait.
-
-**Listing art.** `bun scripts/make-preview.ts` rebuilds `preview.png`, and the
-`preview.gif` and `demo.mp4` that go on the release, from the committed art —
-one plate per Stoic, each with that Stoic's shortest quote, so the same input
-always gives the same preview. Frames are real canvases laid out on the same
-111×30 grid the screensaver uses; the only liberty is the gradient they are
-multiplied through. `--mono` leaves them white, `--still <slug>` chooses the
-Stoic on the still.
+**Portraits.** `art/*.txt` is generated, not hand-drawn — `bun
+scripts/transcode.ts` rebuilds it from the sources named in
+`assets/portraits.json`. Changing a portrait, adding a seventh Stoic, and
+remaking the listing art are all in [docs/ART.md](docs/ART.md).
 
 ## Tests
 
@@ -227,6 +168,7 @@ manifest check Omarchy runs before `plugin add`.
 
 Portrait sources and translations are listed in [CREDITS.md](CREDITS.md). The
 portraits are AI-generated likenesses, not photographs of surviving busts; every
-translation is out of copyright.
+translation is out of copyright. Release history is in
+[CHANGELOG.md](CHANGELOG.md).
 
 MIT licensed.

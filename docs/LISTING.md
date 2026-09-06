@@ -18,11 +18,10 @@ repository, and release posts.
 ## Long description
 
 Omastoic puts the Stoics on the Omarchy screensaver. When the screen goes
-idle, Marcus Aurelius looks back at you out of the Munich Glyptothek; a
-minute later it is Seneca, or Epictetus, or the man who founded the school
-on an Athenian porch. Six portraits transcoded from imagined likenesses, and
-64 quotes from public-domain translations, every one cited by book and
-section.
+idle, Marcus Aurelius looks back at you; a minute later it is Seneca, or
+Epictetus, or the man who founded the school on an Athenian porch. Six
+braille portraits, and 64 quotes from public-domain translations, every one
+cited by book and section.
 
 It does not replace, shadow or patch anything Omarchy ships. The screensaver
 already re-reads `~/.config/omarchy/branding/screensaver.txt`; Omastoic keeps
