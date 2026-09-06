@@ -69,8 +69,11 @@ test("the art fits the grid the manifest says it is drawn on", () => {
 
 test("the plugin clone does not ship the portrait sources", () => {
   const install = readFileSync(join(root, "install.sh"), "utf8");
+  // Every directory a source can land in, or ./install.sh copies megabytes of
+  // JPEG into the plugin tree.
   expect(install).toContain("--exclude assets/sources");
   expect(install).toContain("--exclude assets/local");
+  expect(install).toContain("--exclude assets/originals");
 });
 
 test("the full-resolution originals are fetchable, and stay out of the repo", () => {
