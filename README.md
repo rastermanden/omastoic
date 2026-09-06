@@ -200,6 +200,14 @@ as tone, where a diffusion dither at this size turns into static.
 `scripts/preview.sh <canvas.txt>` renders a canvas to a PNG at the terminal's
 cell aspect ratio, which is the quickest way to judge a new portrait.
 
+**Listing art.** `bun scripts/make-preview.ts` rebuilds `preview.png`, and the
+`preview.gif` and `demo.mp4` that go on the release, from the committed art —
+one plate per Stoic, each with that Stoic's shortest quote, so the same input
+always gives the same preview. Frames are real canvases laid out on the same
+111×30 grid the screensaver uses; the only liberty is the gradient they are
+multiplied through. `--mono` leaves them white, `--still <slug>` chooses the
+Stoic on the still.
+
 ## Tests
 
 ```bash
