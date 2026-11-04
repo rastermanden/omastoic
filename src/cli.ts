@@ -241,6 +241,7 @@ async function preserveDisplaced(): Promise<void> {
 }
 
 async function restoreSlot(): Promise<void> {
+  if (!(await Bun.file(DISPLACED).exists()) && !(await Bun.file(WRITTEN).exists())) return;
   const backup = Bun.file(BACKUP);
   const kind = await Bun.file(DISPLACED).text().catch(() => "legacy");
   if (kind === "absent") rmSync(BRANDING, { force: true });
@@ -396,6 +397,7 @@ WantedBy=graphical-session.target
 function pruneUnitBody(): string {
   return `[Unit]
 Description=Remove leftover omastoic files after the plugin folder is gone
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
@@ -473,7 +475,7 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
   const artifacts: [string, string, string, string?][] = [
     ...completionFiles(),
     ["unit", UNIT, unitBody()],
-    ["prune-unit", PRUNE_UNIT, pruneUnitBody()],
+    ["prune-unit", PRUNE_UNIT, pruneUnitBody(), pruneUnitBody().replace("StartLimitIntervalSec=0\n", "")],
     ["prune-path", PRUNE_PATH, prunePathBody(), prunePathBody().replace("disable or removal", "removal").replace(`PathChanged=${join(CONFIG_HOME, "omarchy/shell.json")}\n`, "").replace(`PathChanged=${BRANDING}\n`, "")],
     ["prune-script", PRUNE_SCRIPT, readFileSync(join(ROOT, "scripts/prune.sh"), "utf8")],
   ];

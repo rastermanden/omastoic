@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sandbox } from "./sandbox.ts";
 
@@ -82,6 +82,53 @@ test("failed activation preserves an already enabled selection and owned canvas"
     expect(readFileSync(join(s.state, "written.sha"), "utf8")).toBe(written);
     expect((await s.cli(["off"])).code).toBe(0);
     expect(readFileSync(branding, "utf8")).toBe("original art\n");
+  } finally { s.cleanup(); }
+});
+
+for (const firstStop of ["off", "uninstall", "cleanup"]) {
+  test(`absent branding stays absent after ${firstStop} and repeated teardown with a host logo`, async () => {
+    const s = sandbox();
+    const branding = join(s.config, "omarchy/branding/screensaver.txt");
+    const host = process.env.OMARCHY_TEST_ROOT ?? "/usr/share/omarchy";
+    s.put(join(s.env.OMARCHY_PATH, "logo.txt"), readFileSync(join(host, "logo.txt"), "utf8"));
+    try {
+      expect(existsSync(branding)).toBe(false);
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      expect(existsSync(branding)).toBe(true);
+      if (firstStop === "cleanup") s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+      expect((await (firstStop === "cleanup" ? s.prune() : s.cli([firstStop]))).code).toBe(0);
+      for (const command of ["off", "off", "uninstall", "uninstall"]) {
+        expect(existsSync(branding)).toBe(false);
+        expect((await s.cli([command])).code).toBe(0);
+        expect(existsSync(branding)).toBe(false);
+        expect(existsSync(join(s.state, "written.sha"))).toBe(false);
+        expect(existsSync(join(s.state, "displaced.kind"))).toBe(false);
+      }
+      expect((await s.cli(["on"])).code).toBe(0);
+      expect(existsSync(branding)).toBe(true);
+      expect((await s.cli(["off"])).code).toBe(0);
+      expect(existsSync(branding)).toBe(false);
+    } finally { s.cleanup(); }
+  });
+}
+
+test("legacy write evidence still restores the host logo once", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const host = process.env.OMARCHY_TEST_ROOT ?? "/usr/share/omarchy";
+  const logo = readFileSync(join(host, "logo.txt"), "utf8");
+  s.put(join(s.env.OMARCHY_PATH, "logo.txt"), logo);
+  try {
+    expect((await s.cli(["on"])).code).toBe(0);
+    rmSync(join(s.state, "displaced.kind"));
+    expect(existsSync(join(s.state, "written.sha"))).toBe(true);
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe(logo);
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe(logo);
+    rmSync(branding);
+    expect((await s.cli(["uninstall"])).code).toBe(0);
+    expect(existsSync(branding)).toBe(false);
   } finally { s.cleanup(); }
 });
 

@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { sandbox } from "./sandbox.ts";
 
@@ -22,7 +23,11 @@ test("generated watcher connects host disable, removal and reset to the executab
   const s = sandbox();
   try {
     expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+    expect((await s.cli(["config", "--interval", "1"])).code).toBe(0);
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).interval).toBe(1);
     const dir = join(s.config, "systemd/user");
+    const cleanup = unit(join(dir, "omastoic-prune.service"));
+    expect(cleanup.Unit.StartLimitIntervalSec.map(Number)).toEqual([0]);
     const path = unit(join(dir, "omastoic-prune.path"));
     expect(path.Path.PathChanged.sort()).toEqual([join(s.config, "omarchy/plugins"), join(s.config, "omarchy/shell.json"), join(s.config, "omarchy/branding/screensaver.txt")].sort());
     expect(path.Path.Unit).toEqual(["omastoic-prune.service"]);
@@ -39,3 +44,26 @@ test("generated watcher connects host disable, removal and reset to the executab
     }
   } finally { s.cleanup(); }
 });
+
+for (const tracked of [true, false]) {
+  test(`refresh upgrades the cleanup start policy (ownership record=${tracked})`, async () => {
+    const s = sandbox();
+    const path = join(s.config, "systemd/user/omastoic-prune.service");
+    const record = join(s.state, "owned/prune-unit");
+    const checksum = (text: string) => createHash("sha256").update(text).digest("hex");
+    const previous = `[Unit]\nDescription=Remove leftover omastoic files after the plugin folder is gone\n\n[Service]\nType=oneshot\nExecStart=${join(s.home, ".local/lib/omastoic/prune.sh")}\n`;
+    try {
+      expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+      s.put(path, previous);
+      if (tracked) s.put(record, checksum(previous));
+      else rmSync(record);
+      s.put(join(s.home, "systemctl.log"), "");
+      expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+      expect(unit(path).Unit.StartLimitIntervalSec.map(Number)).toEqual([0]);
+      expect(s.log()).toContain("daemon-reload");
+      expect(readFileSync(record, "utf8")).toBe(checksum(readFileSync(path, "utf8")));
+      expect((await s.cli(["uninstall"])).code).toBe(0);
+      expect(existsSync(path)).toBe(false);
+    } finally { s.cleanup(); }
+  });
+}
