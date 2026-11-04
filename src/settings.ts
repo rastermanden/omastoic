@@ -1,6 +1,18 @@
 export type Settings = { interval?: number; authors?: string[] };
 
-export const DEFAULT_INTERVAL = 20;
+export const DEFAULT_INTERVAL = 60;
+
+/** Treat hand-edited JSON as untrusted input, just like CLI arguments. */
+export function normalizeSettings(raw: unknown, roster: string[]): Settings {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const value = raw as Record<string, unknown>;
+  const result: Settings = {};
+  if (typeof value.interval === "number" && parseInterval(String(value.interval)) != null) result.interval = value.interval;
+  if (Array.isArray(value.authors) && value.authors.every((a) => typeof a === "string" && roster.includes(a))) {
+    result.authors = [...new Set(value.authors)];
+  }
+  return result;
+}
 export const MIN_INTERVAL = 1;
 export const MAX_INTERVAL = 3600;
 

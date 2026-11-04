@@ -92,8 +92,8 @@ test("cell cache rejects nonsense", () => {
   expect(parseCell(null)).toBeNull();
 });
 
-test("grids are clamped so a tiny probe still lays out", () => {
-  expect(clampGrid({ cols: 4, rows: 2 })).toEqual({ cols: 20, rows: 8 });
+test("tiny probes are not inflated beyond the real terminal", () => {
+  expect(clampGrid({ cols: 4, rows: 2 })).toEqual({ cols: 4, rows: 2 });
   expect(minGrid([])).toBeNull();
 });
 

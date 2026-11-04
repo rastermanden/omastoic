@@ -74,7 +74,7 @@ export function parseCell(raw: unknown): Cell | null {
 }
 
 export function clampGrid(size: Size): Size {
-  return { cols: Math.max(20, size.cols), rows: Math.max(8, size.rows) };
+  return { cols: Math.max(1, Math.floor(size.cols)), rows: Math.max(1, Math.floor(size.rows)) };
 }
 
 export function minGrid(sizes: Size[]): Size | null {
@@ -481,39 +481,59 @@ export async function waitForLiveGrid(timeoutMs = 2000): Promise<CanvasSize | nu
   return size.source === "live" ? size : null;
 }
 
-export type WindowEvent = { kind: "open" | "close"; address: string };
+export type WindowEvent = { kind: "open" | "close"; address: string } | { kind: "sync"; addresses: string[] };
 
-/**
- * Yield screensaver window open/close events from Hyprland's event socket, and
- * keep yielding across compositor restarts. `openwindow` carries the class;
- * `closewindow` carries only an address, so callers match it against what they
- * saw open.
- */
-export async function* screensaverWindowEvents(signal?: AbortSignal): AsyncGenerator<WindowEvent> {
+async function snapshotWindows(): Promise<string[]> {
+  const clients = await hyprctlJson(["clients", "-j"]);
+  if (!Array.isArray(clients)) throw new Error("cannot reconcile Hyprland clients");
+  return clients.flatMap((c) => c?.class === SCREENSAVER_CLASS && c.mapped !== false && typeof c.address === "string" ? [c.address.replace(/^0x/, "")] : []);
+}
+
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) => {
+  const done = () => { clearTimeout(timer); signal?.removeEventListener("abort", done); resolve(); };
+  const timer = setTimeout(done, ms);
+  signal?.addEventListener("abort", done, { once: true });
+  if (signal?.aborted) done();
+});
+
+/** Subscribe before snapshotting, then replay buffered records. Every reconnect
+ * replaces stale state, including closes that occurred during disconnection. */
+export async function* screensaverWindowEvents(signal?: AbortSignal, reconnectMs = 2000): AsyncGenerator<WindowEvent> {
   while (!signal?.aborted) {
     const path = socketPath();
     if (!path) {
-      await Bun.sleep(5000);
+      await sleep(reconnectMs, signal);
       continue;
     }
 
     let queue: WindowEvent[] = [];
     let wake: (() => void) | null = null;
     let closed = false;
+    let pending = "";
+    const decoder = new TextDecoder();
 
     const socket = await Bun.connect({
       unix: path,
       socket: {
         data(_socket, chunk) {
-          for (const line of chunk.toString().split("\n")) {
+          pending += decoder.decode(chunk, { stream: true });
+          let end: number;
+          while ((end = pending.indexOf("\n")) >= 0) {
+            const line = pending.slice(0, end);
+            pending = pending.slice(end + 1);
+            if (line.length > 65536) { closed = true; break; }
             if (line.startsWith("openwindow>>")) {
               const [address, , windowClass] = line.slice("openwindow>>".length).split(",");
-              if (windowClass === SCREENSAVER_CLASS) queue.push({ kind: "open", address });
+              if (address && windowClass === SCREENSAVER_CLASS) queue.push({ kind: "open", address: address.replace(/^0x/, "") });
             } else if (line.startsWith("closewindow>>")) {
-              queue.push({ kind: "close", address: line.slice("closewindow>>".length).trim() });
+              const address = line.slice("closewindow>>".length).trim().replace(/^0x/, "");
+              if (address) queue.push({ kind: "close", address });
             }
+            if (queue.length > 4096) { closed = true; break; }
           }
-          wake?.();
+          if (pending.length > 65536) closed = true;
+          if (closed) _socket.end();
+          if (queue.length || closed) wake?.();
         },
         close() {
           closed = true;
@@ -527,7 +547,7 @@ export async function* screensaverWindowEvents(signal?: AbortSignal): AsyncGener
     }).catch(() => null);
 
     if (!socket) {
-      await Bun.sleep(5000);
+      await sleep(reconnectMs, signal);
       continue;
     }
 
@@ -536,8 +556,11 @@ export async function* screensaverWindowEvents(signal?: AbortSignal): AsyncGener
       wake?.();
     };
     signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
 
     try {
+      const addresses = await snapshotWindows();
+      if (!closed) yield { kind: "sync", addresses };
       while (!closed) {
         if (!queue.length) {
           await new Promise<void>((resolve) => {
@@ -550,11 +573,13 @@ export async function* screensaverWindowEvents(signal?: AbortSignal): AsyncGener
         queue = [];
         yield* batch;
       }
+    } catch (error) {
+      if (!signal?.aborted) console.error(`omastoic: ${String(error)}; reconnecting`);
     } finally {
       signal?.removeEventListener("abort", onAbort);
       socket.end();
     }
 
-    if (!signal?.aborted) await Bun.sleep(2000); // compositor restarting
+    if (!signal?.aborted) await sleep(reconnectMs, signal); // compositor restarting
   }
 }

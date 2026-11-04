@@ -1,0 +1,44 @@
+name: Test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Check out the audited Omarchy host (read-only test oracle)
+        uses: actions/checkout@v4
+        with:
+          repository: omacom/omarchy
+          ref: 5eb922f137422ff32a90869a9ba47525a428792d
+          path: .host
+          sparse-checkout: |
+            bin
+            shell/plugins/menu
+            default/omarchy
+      - name: Test in an isolated home
+        env:
+          OMARCHY_TEST_ROOT: ${{ github.workspace }}/.host
+        run: |
+          export HOME="$RUNNER_TEMP/omastoic-home"
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.local/state"
+          export XDG_DATA_HOME="$HOME/.local/share" XDG_CACHE_HOME="$HOME/.cache"
+          export TMPDIR="$RUNNER_TEMP/omastoic-tmp"
+          mkdir -p "$HOME" "$TMPDIR"
+          bun test tests
+      - name: Bash syntax
+        run: |
+          for script in install.sh uninstall.sh bin/omastoic scripts/*.sh; do
+            bash -n "$script"
+          done
+      - name: Validate with the real Omarchy CLI
+        run: |
+          mkdir -p "$RUNNER_TEMP/omastoic-plugin"
+          git archive HEAD | tar -xf - -C "$RUNNER_TEMP/omastoic-plugin"
+          .host/bin/omarchy plugin validate "$RUNNER_TEMP/omastoic-plugin"

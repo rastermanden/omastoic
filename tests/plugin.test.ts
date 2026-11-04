@@ -1,78 +1,215 @@
 import { test, expect } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, symlinkSync, rmSync, cpSync } from "node:fs";
 import { join } from "node:path";
+import { sandbox, root } from "./sandbox.ts";
 import { PLUGIN_ID } from "../src/plugin-id.ts";
 
-const root = join(import.meta.dir, "..");
 const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-
-test("the plugin manifest is what Omarchy will validate", () => {
+test("manifest describes a loadable third-party service with a matching release", () => {
   expect(manifest.schemaVersion).toBe(1);
   expect(manifest.id).toBe(PLUGIN_ID);
-  expect(manifest.id).toBe("io.github.rastermanden.omastoic");
-  expect(manifest.name).toBeTruthy();
-  expect(manifest.author).toBeTruthy();
-  expect(manifest.description).toBeTruthy();
   expect(manifest.kinds).toEqual(["service"]);
   expect(manifest.entryPoints.service).toBe("Service.qml");
   expect(existsSync(join(root, manifest.entryPoints.service))).toBe(true);
-  expect(manifest.id).not.toMatch(/^omarchy\./);
-  expect(manifest.omarchy?.clonedFrom).toBeUndefined();
-});
-
-test("manifest and package.json carry the same version", () => {
   expect(manifest.version).toBe(pkg.version);
 });
 
-test("bash completion registers omastoic", () => {
-  const bash = readFileSync(join(root, "completions/omastoic.bash"), "utf8");
-  expect(bash).toContain("complete -F _omastoic omastoic");
-  expect(bash).toContain("toggle");
-  expect(bash).toContain("--authors");
+for (const failure of ["daemon-reload", "enable --now omastoic-prune.path", "enable --now omastoic.service"]) {
+  test(`setup reports systemctl failure, never an install marker (${failure})`, async () => {
+    const s = sandbox();
+    const branding = join(s.config, "omarchy/branding/screensaver.txt");
+    s.put(branding, "my art\n");
+    try {
+      const result = await s.cli(["setup", "--on-first", "--quiet"], { SYSTEMCTL_FAIL: failure });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("systemctl --user");
+      expect(result.stderr).toContain("failed (exit 1)");
+      expect(result.stdout).not.toContain("every 60s");
+      expect(existsSync(join(s.state, "installed"))).toBe(false);
+      expect(readFileSync(branding, "utf8")).toBe("my art\n");
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      expect(existsSync(join(s.state, "installed"))).toBe(true);
+    } finally { s.cleanup(); }
+  });
+}
+
+test("install activation failure is not marked installed; uninstall failure is retryable", async () => {
+  const s = sandbox();
+  try {
+    expect((await s.cli(["install"], { SYSTEMCTL_FAIL: "enable --now omastoic.service" })).code).toBe(1);
+    expect(existsSync(join(s.state, "installed"))).toBe(false);
+    expect((await s.cli(["install"])).code).toBe(0);
+    const failed = await s.cli(["uninstall"], { SYSTEMCTL_FAIL: "disable --now omastoic.service" });
+    expect(failed.code).toBe(1);
+    expect(failed.stderr).toContain("failed (exit 1)");
+    expect(existsSync(join(s.config, "systemd/user/omastoic.service"))).toBe(true);
+    expect((await s.cli(["uninstall"])).code).toBe(0);
+  } finally { s.cleanup(); }
 });
 
-test("the service points at the bundled launcher, not PATH", () => {
-  const qml = readFileSync(join(root, "Service.qml"), "utf8");
-  expect(qml).toContain('Qt.resolvedUrl("bin/omastoic")');
-  expect(qml).toContain("setup");
-  expect(qml).toContain("--on-first");
+test("setup/off/re-enable/uninstall/re-add is idempotent and restores displaced art", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  s.put(branding, "original art\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const first = readFileSync(branding, "utf8");
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe(first);
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe("original art\n");
+    expect(s.log()).toContain("disable --now omastoic.service");
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe("original art\n");
+    expect((await s.cli(["on"])).code).toBe(0);
+    for (let i = 0; i < 2; i++) expect((await s.cli(["uninstall"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe("original art\n");
+    expect(existsSync(join(s.config, "systemd/user/omastoic.service"))).toBe(false);
+    expect(existsSync(join(s.state, "installed"))).toBe(false);
+    expect(existsSync(join(s.home, ".local/bin/omastoic"))).toBe(false);
+    s.put(join(s.plugin, "manifest.json"), JSON.stringify({ id: PLUGIN_ID }));
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+  } finally { s.cleanup(); }
 });
 
-test("plugin update re-runs setup when the plugin tree changes", () => {
-  const qml = readFileSync(join(root, "Service.qml"), "utf8");
-  expect(qml).toContain("FileView");
-  expect(qml).toContain("watchChanges: true");
-  expect(qml).toContain("onFileChanged");
-  expect(qml).toContain("runSetup(false)");
+test("null/type-wrong config normalizes; show is a read-only export", async () => {
+  const s = sandbox();
+  try {
+    for (const raw of [null, [], { interval: 0, authors: "marcus" }, { interval: -1 }, { authors: [null] }]) {
+      s.put(join(s.config, "omastoic/config.json"), JSON.stringify(raw));
+      const result = await s.cli(["show", "--cols", "40", "--rows", "24"]);
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout.length).toBeGreaterThan(50);
+      expect(existsSync(s.state)).toBe(false);
+    }
+    expect((await s.cli(["config"])).stdout).toContain("every 60s");
+    expect((await s.cli(["config", "--interval", "120"])).code).toBe(0);
+    expect((await s.cli(["config"])).stdout).toContain("every 120s");
+  } finally { s.cleanup(); }
 });
 
-test("setup --quiet stays quiet when rewriting the menu", () => {
-  const cli = readFileSync(join(root, "src/cli.ts"), "utf8");
-  expect(cli).toContain("await addMenuRows(opts.quiet)");
-  expect(cli).toContain("ExecStart=${LAUNCHER} daemon");
-  expect(cli).toContain("await intervalMs()");
-  expect(existsSync(join(root, "scripts/prune.sh"))).toBe(true);
+for (const command of ["next", "preview"]) {
+  test(`${command} never overwrites user-changed art`, async () => {
+    const s = sandbox();
+    try {
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      const branding = join(s.config, "omarchy/branding/screensaver.txt");
+      s.put(branding, "USER CHANGED ART\n");
+      const result = await s.cli([command]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("standing aside");
+      expect(readFileSync(branding, "utf8")).toBe("USER CHANGED ART\n");
+      expect((await s.cli(["uninstall"])).code).toBe(0);
+      expect(readFileSync(branding, "utf8")).toBe("USER CHANGED ART\n");
+    } finally { s.cleanup(); }
+  });
+}
+
+for (const [name, path] of [
+  ["launcher", ".local/bin/omastoic"], ["unit", ".config/systemd/user/omastoic.service"],
+  ["completion", ".data/bash-completion/completions/omastoic"],
+  ["menu", ".config/omarchy/extensions/omarchy-menu.jsonc"],
+]) {
+  test(`setup refuses an unrelated ${name} without destroying it`, async () => {
+    const s = sandbox();
+    const file = join(s.home, path);
+    s.put(file, "private data\n");
+    try {
+      expect((await s.cli(["setup", "--quiet"])).code).toBe(1);
+      expect(readFileSync(file, "utf8")).toBe("private data\n");
+      expect(existsSync(join(s.state, "installed"))).toBe(false);
+      await s.cli(["uninstall"]);
+      expect(readFileSync(file, "utf8")).toBe("private data\n");
+    } finally { s.cleanup(); }
+  });
+}
+
+test("uninstall preserves replaced completions, units, backups and foreign symlinks", async () => {
+  const s = sandbox();
+  try {
+    expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+    const completion = join(s.data, "bash-completion/completions/omastoic");
+    s.put(completion, "custom completion");
+    const backup = join(s.config, "omarchy/branding/screensaver.txt.pre-omastoic");
+    s.put(backup, "unrelated backup");
+    const launcher = join(s.home, ".local/bin/omastoic");
+    rmSync(launcher); symlinkSync("/unrelated/program", launcher);
+    expect((await s.cli(["uninstall"])).code).toBe(0);
+    expect(readFileSync(completion, "utf8")).toBe("custom completion");
+    expect(readFileSync(backup, "utf8")).toBe("unrelated backup");
+    expect((await s.exec(["readlink", launcher])).stdout.trim()).toBe("/unrelated/program");
+  } finally { s.cleanup(); }
 });
 
-test("the plugin clone does not ship the demo video or README gif", () => {
-  const listed = Bun.spawnSync(["git", "ls-files", "demo.mp4", "preview.gif"], {
-    cwd: root,
-    stdout: "pipe",
-  })
-    .stdout.toString()
-    .trim();
-  expect(listed).toBe("");
-  const readme = readFileSync(join(root, "README.md"), "utf8");
-  expect(readme).toContain("releases/latest/download/preview.gif");
-  expect(readme).toContain("releases/latest/download/demo.mp4");
-  expect(readme).not.toContain("](demo.mp4)");
-  expect(existsSync(join(root, "preview.png"))).toBe(true);
+test("concurrent setup and quote writers serialize and leave valid owned state", async () => {
+  const s = sandbox();
+  try {
+    const results = await Promise.all(Array.from({ length: 4 }, () => s.cli(["setup", "--on-first", "--quiet"])));
+    for (const result of results) expect(result.code).toBe(0);
+    const writes = await Promise.all(Array.from({ length: 5 }, () => s.cli(["next"])));
+    for (const result of writes) expect(result.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(s.state, "recent.json"), "utf8")).length).toBeGreaterThan(0);
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(existsSync(join(s.config, "omarchy/branding/screensaver.txt"))).toBe(false);
+  } finally { s.cleanup(); }
 });
 
-test("the canvas grid comes from a live screensaver tty", () => {
-  const hypr = readFileSync(join(root, "src/hyprland.ts"), "utf8");
-  expect(hypr).toContain('stty');
-  expect(hypr).toContain("waitForLiveGrid");
-  expect(hypr).toContain("source: \"live\"");
+test("code-only updates restart an enabled daemon, an unchanged setup does not", async () => {
+  const s = sandbox();
+  const copy = join(s.home, "copy");
+  // An ordinary source export, not another Git checkout or worktree.
+  for (const path of ["src", "data", "art", "bin", "scripts", "completions", "manifest.json"]) cpSync(join(root, path), join(copy, path), { recursive: true });
+  const cli = () => s.exec([process.execPath, join(copy, "src/cli.ts"), "setup", "--on-first", "--quiet"]);
+  try {
+    expect((await cli()).code).toBe(0);
+    expect((await cli()).code).toBe(0);
+    s.put(join(s.home, "systemctl.log"), "");
+    s.put(join(copy, "data/quotes.tsv"), readFileSync(join(copy, "data/quotes.tsv"), "utf8") + "\n# data-only update\n");
+    expect((await cli()).code).toBe(0);
+    expect(s.log()).toContain("restart omastoic.service");
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await cli()).code).toBe(0);
+    expect(s.log()).not.toContain("restart omastoic.service");
+  } finally { s.cleanup(); }
+});
+
+test("2.1 untracked plumbing and displaced art migrate without backing up our own canvas", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  s.put(branding, "original pre-2.1 art\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    // Recreate 2.1's public on-disk installation contract (no ownership ledger,
+    // plain ROOT marker, old watcher/marked menu block). The fixture is the
+    // exact Bash artifact distributed in 2.1, not a source-string assertion.
+    rmSync(join(s.state, "owned"), { recursive: true });
+    rmSync(join(s.state, "displaced.kind"));
+    rmSync(join(s.state, "launcher.target"));
+    s.put(join(s.state, "installed"), root);
+    s.put(join(s.home, ".local/lib/omastoic/prune.sh"), readFileSync(join(root, "tests/fixtures/prune-2.1.sh"), "utf8"));
+    const path = join(s.config, "systemd/user/omastoic-prune.path");
+    s.put(path, `[Unit]\nDescription=Watch for omastoic plugin removal\n\n[Path]\nPathChanged=${join(s.config, "omarchy/plugins")}\nUnit=omastoic-prune.service\n\n[Install]\nWantedBy=default.target\n`);
+    s.put(join(s.config, "omarchy/extensions/omarchy-menu.jsonc"), '{\n // >>> omastoic:begin — old\n "style.screensaver.stoics":{"label":"Old"},\n "style.screensaver.configure":{"label":"Configure"},\n // <<< omastoic:end\n}\n');
+    const result = await s.cli(["setup", "--on-first", "--quiet"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect((await s.cli(["on"])).code).toBe(0);
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe("original pre-2.1 art\n");
+    expect((await s.cli(["uninstall"])).code).toBe(0);
+  } finally { s.cleanup(); }
+});
+
+test("native backend is rejected before installing external artifacts", async () => {
+  const s = sandbox();
+  s.stub("omarchy-launch-screensaver", "exec /usr/lib/omarchy-screensaver/omarchy-screensaver");
+  try {
+    const result = await s.cli(["setup", "--on-first", "--quiet"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("native Omarchy screensaver is not supported");
+    expect(existsSync(join(s.config, "systemd/user/omastoic.service"))).toBe(false);
+    expect(existsSync(join(s.state, "installed"))).toBe(false);
+  } finally { s.cleanup(); }
 });

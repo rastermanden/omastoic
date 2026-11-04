@@ -20,13 +20,14 @@ repository, and release posts.
 Omastoic puts the Stoics on the Omarchy screensaver. When the screen goes
 idle, Marcus Aurelius looks back at you; a minute later it is Seneca, or
 Epictetus, or the man who founded the school on an Athenian porch. Six
-braille portraits, and 64 quotes from public-domain translations, every one
-cited by book and section.
+braille portraits, and 64 entries from public-domain US translations, every one
+cited by book and section. This release supports the terminal/ttfx screensaver,
+tested on Omarchy 4.5.0rc3, not the newer native renderer.
 
 It does not replace, shadow or patch anything Omarchy ships. The screensaver
 already re-reads `~/.config/omarchy/branding/screensaver.txt`; Omastoic keeps
 a freshly composed canvas in that file and swaps it between effects. One
-**Stoics** toggle sits in Style → Screensaver next to Edit Text, Set From
+**Stoics** toggle sits in Appearance → Branding → Screensaver next to Edit Text, Set From
 Image and Restore Default. Omarchy's own branding commands win — set the art
 some other way and the Stoics stand aside.
 
@@ -34,7 +35,8 @@ some other way and the Stoics stand aside.
 
 - Six braille portraits and 64 cited quotes (Marcus, Seneca, Epictetus, Zeno, Cleanthes, Chrysippus).
 - Rotates only while the screensaver is actually on screen.
-- **Style → Screensaver → Stoics** is the on/off, with a ✓ when they have the slot.
+- **Appearance → Branding → Screensaver → Stoics** is the single on/off row.
+- 60 seconds per canvas by default, configurable; the host reads changes at effect boundaries.
 - Stands aside when `omarchy branding screensaver` writes the slot.
 - Your quotes and settings survive uninstall; `--purge` drops them.
 
@@ -44,7 +46,10 @@ some other way and the Stoics stand aside.
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 ```
 
-Needs bun (`omarchy pkg add bun`). Then `omastoic preview` to see it now.
+Needs Bun (`omarchy pkg add bun`) and the terminal/ttfx host backend. Then
+`omastoic preview` selects Stoics and launches the saver; `omastoic show` is a
+read-only text export. Update Git-managed installs with
+`omarchy plugin update io.github.rastermanden.omastoic`.
 
 Remove it cleanly with:
 
@@ -52,7 +57,7 @@ Remove it cleanly with:
 omastoic uninstall
 ```
 
-`omarchy plugin remove io.github.rastermanden.omastoic` hides the menu rows
+`omarchy plugin remove io.github.rastermanden.omastoic` hides the menu row
 and cleans leftover files; quotes stay in `~/.config/omastoic/`.
 
 ## One line
@@ -74,9 +79,9 @@ video.
   overwrite art it does not own.
 - It adds one **Stoics** row to `~/.config/omarchy/extensions/omarchy-menu.jsonc`
   inside a marked block, and a user systemd service that runs only while
-  you are logged in.
+  selected. Plugin disable stops and disables rotation; hot reload does not.
 - Plugins run unsandboxed as the logged-in user inside `omarchy-shell`;
   review the source before enabling it.
 - The portraits are AI-generated likenesses, labelled as such, not photographs
-  of surviving busts; translations are out of copyright. Credits in
+  of surviving busts; credited translations are public domain in the US. Credits in
   [CREDITS.md](../CREDITS.md).

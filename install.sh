@@ -10,10 +10,16 @@ plugin_id="io.github.rastermanden.omastoic"
 plugin_home="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
 target="$plugin_home/$plugin_id"
 
-command -v omarchy >/dev/null 2>&1 || { echo "omarchy is required (Omarchy 4+)." >&2; exit 1; }
-
-if [[ -L $target ]]; then
-  rm -f "$target"
+for dependency in bun omarchy ttfx systemctl jq python3 rsync; do
+  command -v "$dependency" >/dev/null 2>&1 || { echo "$dependency is required; nothing was copied." >&2; exit 1; }
+done
+if [[ -L $target || -e $target/.git || $root == "$target" ]]; then
+  echo "Refusing to overwrite a linked/Git-managed plugin or copy onto itself: $target" >&2
+  exit 1
+fi
+if [[ -e $target ]] && ! jq -e --arg id "$plugin_id" '.id == $id' "$target/manifest.json" >/dev/null 2>&1; then
+  echo "Refusing to overwrite an unrelated directory: $target" >&2
+  exit 1
 fi
 mkdir -p "$target"
 rsync -a --delete \

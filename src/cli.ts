@@ -11,8 +11,8 @@
 // ran `omarchy branding screensaver image`, say — it stands aside instead of
 // clobbering the new art.
 
-import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
@@ -26,6 +26,7 @@ import {
   describeSettings,
   parseAuthorList,
   parseInterval,
+  normalizeSettings,
   type Settings,
 } from "./settings.ts";
 
@@ -63,12 +64,15 @@ const PRUNE_PATH = join(CONFIG_HOME, "systemd/user/omastoic-prune.path");
 const PLUGINS_DIR = join(CONFIG_HOME, "omarchy/plugins");
 
 const SETTINGS_FILE = join(USER_CONFIG, "config.json");
+const owned = new OwnedFiles(STATE);
+const DISPLACED = join(STATE, "displaced.kind");
 
 async function config(): Promise<Settings> {
   const file = Bun.file(SETTINGS_FILE);
   if (!(await file.exists())) return {};
   try {
-    return await file.json();
+    if (file.size > 65536) throw new Error("config exceeds 64 KiB");
+    return normalizeSettings(await file.json(), [...(await authors()).keys()]);
   } catch {
     console.error(`omastoic: ignoring unreadable ${SETTINGS_FILE}`);
     return {};
@@ -78,12 +82,12 @@ async function config(): Promise<Settings> {
 async function saveSettings(settings: Settings, roster: string[]): Promise<void> {
   mkdirSync(USER_CONFIG, { recursive: true });
   const next = compactSettings(settings, roster);
-  await Bun.write(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
+  atomicWrite(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
 }
 
 async function restartDaemon(): Promise<void> {
   if (enabled() && (await Bun.file(UNIT).exists())) {
-    await run(["systemctl", "--user", "restart", "omastoic.service"]);
+    await checked(["systemctl", "--user", "restart", "omastoic.service"]);
   }
 }
 
@@ -93,7 +97,10 @@ async function quoteBook(): Promise<Quote[]> {
 
   // Anything the user drops in is added to the book rather than replacing it.
   const extra = Bun.file(join(USER_CONFIG, "quotes.tsv"));
-  if (await extra.exists()) quotes = [...quotes, ...parseQuotes(await extra.text())];
+  if (await extra.exists()) {
+    if (extra.size > 1024 * 1024) throw new Error("custom quote file exceeds 1 MiB");
+    quotes = [...quotes, ...parseQuotes(await extra.text())];
+  }
 
   if (cfg.authors?.length) {
     const wanted = new Set(cfg.authors);
@@ -117,6 +124,10 @@ async function recent(): Promise<number[]> {
 
 const run = (cmd: string[]) => Bun.spawn(cmd, { stdout: "inherit", stderr: "inherit" }).exited;
 const quiet = (cmd: string[]) => Bun.spawnSync(cmd, { stdout: "ignore", stderr: "ignore" });
+async function checked(cmd: string[]): Promise<void> {
+  const code = await run(cmd);
+  if (code !== 0) throw new Error(`${cmd.join(" ")} failed (exit ${code}); check the user session bus and journalctl --user -u omastoic.service, then retry setup`);
+}
 
 /**
  * Omarchy's launcher talks to Hyprland over socat and prints "Broken pipe"
@@ -155,18 +166,18 @@ const enabled = () =>
     ? quiet(["omarchy-toggle-enabled", TOGGLE]).exitCode === 0
     : false;
 
-const setEnabled = (on: boolean) => quiet(["omarchy-toggle", TOGGLE, on ? "on" : "off"]);
+const setEnabled = (on: boolean) => {
+  if (quiet(["omarchy-toggle", TOGGLE, on ? "on" : "off"]).exitCode !== 0) throw new Error("could not change Omarchy's omastoic toggle");
+};
 
 const notify = (message: string) =>
   quiet(["omarchy-notification-send", "-g", GLYPH, message]);
 
 // --- who owns the screensaver slot ------------------------------------------
 
-const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-
 async function rememberWrite(canvas: string): Promise<void> {
   mkdirSync(STATE, { recursive: true });
-  await Bun.write(WRITTEN, digest(canvas));
+  atomicWrite(WRITTEN, digest(canvas));
 }
 
 /** True when the branding file still holds exactly what omastoic last put there. */
@@ -176,11 +187,7 @@ async function ownsBranding(): Promise<boolean> {
 
   const written = Bun.file(WRITTEN);
   if (!(await written.exists())) {
-    // Installs from before omastoic tracked what it wrote left no hash. A backup
-    // means it had already taken the slot, so the canvas sitting there is ours —
-    // without this, the first `on` would back omastoic's own art up as if it
-    // were the user's, and lose the real thing.
-    return await Bun.file(BACKUP).exists();
+    return false; // A backup's mere existence is not proof of ownership.
   }
 
   try {
@@ -190,13 +197,12 @@ async function ownsBranding(): Promise<boolean> {
   }
 }
 
-async function render(size?: { cols: number; rows: number }): Promise<string> {
+async function render(size?: { cols: number; rows: number }, remember = true): Promise<string> {
   const quotes = await quoteBook();
   if (!quotes.length) throw new Error("the quote book is empty");
 
   const chosen = pick(quotes, await recent());
-  mkdirSync(STATE, { recursive: true });
-  await Bun.write(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
+  if (remember) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
 
   const grid = size ?? (await screensaverSize());
   const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
@@ -208,13 +214,16 @@ async function render(size?: { cols: number; rows: number }): Promise<string> {
 }
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
-async function writeBranding(): Promise<void> {
+async function writeBranding(takeSlot = false): Promise<boolean> {
+  // Recheck after rendering too: a user's branding command may run while we
+  // measure terminals. All our writers hold the transaction lock.
+  const before = await Bun.file(BRANDING).text().catch(() => null);
+  if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
   const canvas = `${await render()}\n`;
-  mkdirSync(dirname(BRANDING), { recursive: true });
-  const temp = `${BRANDING}.omastoic-tmp`;
-  await Bun.write(temp, canvas);
-  renameSync(temp, BRANDING);
+  if ((await Bun.file(BRANDING).text().catch(() => null)) !== before) { standAside(); return false; }
+  atomicWrite(BRANDING, canvas);
   await rememberWrite(canvas);
+  return true;
 }
 
 /**
@@ -224,32 +233,42 @@ async function writeBranding(): Promise<void> {
  */
 async function preserveDisplaced(): Promise<void> {
   const current = Bun.file(BRANDING);
-  if (!(await current.exists()) || (await ownsBranding())) return;
-  await Bun.write(BACKUP, await current.text());
+  if (await ownsBranding() && await Bun.file(DISPLACED).exists()) return;
+  if (!(await current.exists())) { atomicWrite(DISPLACED, "absent"); return; }
+  const text = await current.text();
+  owned.write("backup", BACKUP, text);
+  atomicWrite(DISPLACED, "file");
 }
 
 async function restoreSlot(): Promise<void> {
   const backup = Bun.file(BACKUP);
-  if (await backup.exists()) {
-    await Bun.write(BRANDING, await backup.text());
-  } else {
-    const logo = Bun.file(LOGO);
-    if (await logo.exists()) await Bun.write(BRANDING, await logo.text());
-  }
-  await Bun.file(WRITTEN).delete().catch(() => {});
+  const kind = await Bun.file(DISPLACED).text().catch(() => "legacy");
+  if (kind === "absent") rmSync(BRANDING, { force: true });
+  else if (await backup.exists() && owned.owns("backup", BACKUP)) atomicWrite(BRANDING, await backup.text());
+  else if (kind === "file") throw new Error(`displaced branding backup changed or is missing: ${BACKUP}; restore the backup before retrying off/uninstall`);
+  else if (kind === "legacy" && await Bun.file(LOGO).exists()) atomicWrite(BRANDING, await Bun.file(LOGO).text());
+  owned.remove("backup", BACKUP);
+  rmSync(DISPLACED, { force: true });
+  rmSync(WRITTEN, { force: true });
 }
 
 async function stopDaemon(): Promise<void> {
-  if (await Bun.file(UNIT).exists()) await run(["systemctl", "--user", "stop", "omastoic.service"]);
+  if (owned.owns("unit", UNIT)) await checked(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
 }
 
 async function on(): Promise<number> {
   await preserveDisplaced();
   setEnabled(true);
-  await writeBranding();
+  if (!(await writeBranding(true))) return 1;
 
-  if (await Bun.file(UNIT).exists()) await run(["systemctl", "--user", "start", "omastoic.service"]);
-  else console.log("→ not installed as a service yet; run: omastoic setup");
+  try {
+    if (owned.owns("unit", UNIT)) await checked(["systemctl", "--user", "enable", "--now", "omastoic.service"]);
+    else console.log("→ not installed as a service yet; run: omastoic setup");
+  } catch (error) {
+    setEnabled(false);
+    if (await ownsBranding()) await restoreSlot();
+    throw error;
+  }
 
   console.log("→ the Stoics have the screensaver");
   notify("Screensaver: the Stoics");
@@ -285,8 +304,9 @@ async function addMenuRows(quiet = false): Promise<void> {
   const next = withBlock(source);
   if (next === source) return;
   mkdirSync(dirname(MENU), { recursive: true });
-  await Bun.write(MENU, next);
-  if (!quiet) console.log(`→ added a Stoics row under Style → Screensaver in the Omarchy menu`);
+  if ((await file.exists()) && await file.text() !== source) throw new Error("menu changed during setup; retry");
+  atomicWrite(MENU, next);
+  if (!quiet) console.log(`→ added Stoics under Appearance → Branding → Screensaver`);
 }
 
 async function removeMenuRows(): Promise<void> {
@@ -294,67 +314,53 @@ async function removeMenuRows(): Promise<void> {
   if (!(await file.exists())) return;
   const source = await file.text();
   if (!hasBlock(source)) return;
-  await Bun.write(MENU, withoutBlock(source));
+  const next = withoutBlock(source);
+  // withBlock validates the remaining user document without reserializing it.
+  withBlock(next);
+  if (await file.text() !== source) throw new Error("menu changed during removal; retry");
+  atomicWrite(MENU, next);
   console.log("→ removed the Stoics row from the Omarchy menu");
 }
 
-function linkLauncher(quiet = false): void {
+function checkLauncher(): void {
+  let stat;
+  try { stat = lstatSync(LAUNCHER); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+  let previous: string | undefined;
+  try { previous = readFileSync(join(STATE, "launcher.target"), "utf8"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  if (stat.isSymbolicLink() && [join(ROOT, "bin/omastoic"), previous].includes(readlinkSync(LAUNCHER))) return;
+  throw new Error(`refusing to overwrite unrelated launcher: ${LAUNCHER}`);
+}
+
+function linkLauncher(): void {
+  checkLauncher();
   const target = join(ROOT, "bin/omastoic");
-  try {
-    mkdirSync(dirname(LAUNCHER), { recursive: true });
-    try {
-      if (readlinkSync(LAUNCHER) === target) return;
-      unlinkSync(LAUNCHER);
-    } catch {
-      try {
-        lstatSync(LAUNCHER);
-        unlinkSync(LAUNCHER);
-      } catch {
-        // nothing there yet
-      }
-    }
+  mkdirSync(dirname(LAUNCHER), { recursive: true });
+  let current: string | undefined;
+  try { current = readlinkSync(LAUNCHER); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  if (current !== target) {
+    if (current != null) unlinkSync(LAUNCHER);
     symlinkSync(target, LAUNCHER);
-    if (!quiet) console.log(`→ ${LAUNCHER}`);
-  } catch (err) {
-    console.error(`omastoic: could not link ${LAUNCHER}: ${(err as Error).message}`);
   }
+  atomicWrite(join(STATE, "launcher.target"), target);
 }
 
 function unlinkLauncher(): void {
   try {
-    if (lstatSync(LAUNCHER).isSymbolicLink()) unlinkSync(LAUNCHER);
-  } catch {
-    // not ours, or not there
-  }
+    const target = readFileSync(join(STATE, "launcher.target"), "utf8");
+    if (lstatSync(LAUNCHER).isSymbolicLink() && readlinkSync(LAUNCHER) === target) unlinkSync(LAUNCHER);
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  rmSync(join(STATE, "launcher.target"), { force: true });
 }
 
-function installCompletion(quiet = false): void {
-  const tsv = join(ROOT, "data/authors.tsv");
-  const authors = existsSync(tsv) ? authorCompletionList(readFileSync(tsv, "utf8")) : "all";
-  const copies: [string, string][] = [
-    [join(ROOT, "completions/omastoic.bash"), BASH_COMPLETION],
-    [join(ROOT, "completions/omastoic.fish"), FISH_COMPLETION],
+function completionFiles(): [string, string, string][] {
+  const roster = authorCompletionList(readFileSync(join(ROOT, "data/authors.tsv"), "utf8"));
+  return [
+    ["bash", BASH_COMPLETION, renderCompletion(readFileSync(join(ROOT, "completions/omastoic.bash"), "utf8"), roster)],
+    ["fish", FISH_COMPLETION, renderCompletion(readFileSync(join(ROOT, "completions/omastoic.fish"), "utf8"), roster)],
   ];
-  for (const [src, dest] of copies) {
-    if (!existsSync(src)) continue;
-    try {
-      mkdirSync(dirname(dest), { recursive: true });
-      writeFileSync(dest, renderCompletion(readFileSync(src, "utf8"), authors));
-      if (!quiet) console.log(`→ ${dest}`);
-    } catch (err) {
-      console.error(`omastoic: could not install completion ${dest}: ${(err as Error).message}`);
-    }
-  }
-}
-
-function uninstallCompletion(): void {
-  for (const dest of [BASH_COMPLETION, FISH_COMPLETION]) {
-    try {
-      unlinkSync(dest);
-    } catch {
-      // not ours, or not there
-    }
-  }
 }
 
 type SetupOpts = { onFirst?: boolean; quiet?: boolean };
@@ -392,10 +398,12 @@ ExecStart=${PRUNE_SCRIPT}
 
 function prunePathBody(): string {
   return `[Unit]
-Description=Watch for omastoic plugin removal
+Description=Watch for omastoic plugin disable or removal
 
 [Path]
 PathChanged=${PLUGINS_DIR}
+PathChanged=${join(CONFIG_HOME, "omarchy/shell.json")}
+PathChanged=${BRANDING}
 Unit=omastoic-prune.service
 
 [Install]
@@ -403,36 +411,31 @@ WantedBy=default.target
 `;
 }
 
-function installPrune(quiet = false): void {
-  const src = join(ROOT, "scripts/prune.sh");
-  if (!existsSync(src)) return;
-  try {
-    mkdirSync(dirname(PRUNE_SCRIPT), { recursive: true });
-    copyFileSync(src, PRUNE_SCRIPT);
-    chmodSync(PRUNE_SCRIPT, 0o755);
-    if (!quiet) console.log(`→ ${PRUNE_SCRIPT}`);
-  } catch (err) {
-    console.error(`omastoic: could not install prune script: ${(err as Error).message}`);
-  }
-}
-
 async function removePrune(): Promise<void> {
-  const had = await Bun.file(PRUNE_PATH).exists();
-  if (had) await run(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
-  await Bun.file(PRUNE_PATH).delete().catch(() => {});
-  await Bun.file(PRUNE_UNIT).delete().catch(() => {});
-  rmSync(dirname(PRUNE_SCRIPT), { recursive: true, force: true });
-  if (had) await run(["systemctl", "--user", "daemon-reload"]);
+  if (owned.owns("prune-path", PRUNE_PATH)) await checked(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
+  owned.remove("prune-path", PRUNE_PATH);
+  owned.remove("prune-unit", PRUNE_UNIT);
+  owned.remove("prune-script", PRUNE_SCRIPT);
+  await checked(["systemctl", "--user", "daemon-reload"]);
 }
 
 async function requireOmarchy(): Promise<number> {
   if (!Bun.which("omarchy")) {
-    console.error("omastoic: omarchy is not on PATH — this needs Omarchy 4+");
+    console.error("omastoic: omarchy is not on PATH — this needs Omarchy's terminal/ttfx screensaver");
     return 1;
   }
   if (!Bun.which("ttfx")) {
     console.error("omastoic: ttfx is missing, so the Omarchy screensaver cannot run");
     console.error("          install it with: omarchy pkg add ttfx");
+    return 1;
+  }
+  for (const command of ["systemctl", "jq", "python3", "omarchy-toggle", "omarchy-toggle-enabled"]) {
+    if (!Bun.which(command)) { console.error(`omastoic: required command missing: ${command}`); return 1; }
+  }
+  // The native renderer reads its input only once and has no terminal events.
+  const launcher = Bun.which("omarchy-launch-screensaver");
+  if (launcher && /\/usr\/lib\/omarchy-screensaver\//.test(await Bun.file(launcher).text())) {
+    console.error("omastoic: native Omarchy screensaver is not supported by this release; nothing was installed");
     return 1;
   }
   return 0;
@@ -451,82 +454,84 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
     if (!opts.quiet) console.log(line);
   };
 
-  const first = !(await Bun.file(INSTALLED).exists());
-  linkLauncher(opts.quiet);
-  installCompletion(opts.quiet);
-  installPrune(opts.quiet);
-  await addMenuRows(opts.quiet);
-
-  const next = unitBody();
-  const prev = await Bun.file(UNIT).text().catch(() => "");
-  mkdirSync(dirname(UNIT), { recursive: true });
-  let unitsChanged = prev !== next;
-  if (unitsChanged) {
-    await Bun.write(UNIT, next);
-    say(`→ ${UNIT}`);
+  const previous = await Bun.file(INSTALLED).text().catch(() => "");
+  const first = !previous;
+  rmSync(INSTALLED, { force: true });
+  // Adopt only the existing installation's own legacy displaced-art backup.
+  if (previous && existsSync(WRITTEN) && existsSync(BACKUP) && !existsSync(DISPLACED)) {
+    owned.write("backup", BACKUP, readFileSync(BACKUP, "utf8"));
+    atomicWrite(DISPLACED, "file");
   }
-
-  const pruneService = pruneUnitBody();
-  const prunePath = prunePathBody();
-  const prevPruneService = await Bun.file(PRUNE_UNIT).text().catch(() => "");
-  const prevPrunePath = await Bun.file(PRUNE_PATH).text().catch(() => "");
-  if (prevPruneService !== pruneService) {
-    await Bun.write(PRUNE_UNIT, pruneService);
-    unitsChanged = true;
+  const fingerprint = digest(["src", "data", "art", "bin"].flatMap((dir) => readdirSync(join(ROOT, dir)).sort().map((f) => readFileSync(join(ROOT, dir, f), "utf8"))).join("\0") + await Bun.file(join(ROOT, "manifest.json")).text());
+  const marker = JSON.stringify({ root: ROOT, fingerprint });
+  const artifacts: [string, string, string, string?][] = [
+    ...completionFiles(),
+    ["unit", UNIT, unitBody()],
+    ["prune-unit", PRUNE_UNIT, pruneUnitBody()],
+    ["prune-path", PRUNE_PATH, prunePathBody(), prunePathBody().replace("disable or removal", "removal").replace(`PathChanged=${join(CONFIG_HOME, "omarchy/shell.json")}\n`, "").replace(`PathChanged=${BRANDING}\n`, "")],
+    ["prune-script", PRUNE_SCRIPT, readFileSync(join(ROOT, "scripts/prune.sh"), "utf8")],
+  ];
+  // Preflight every conflict and the menu before creating any external artifact.
+  checkLauncher();
+  withBlock(await Bun.file(MENU).text().catch(() => "{\n}\n"));
+  for (const [id, path, body, legacy] of artifacts) owned.check(id, path, body, legacy);
+  rmSync(INSTALLED, { force: true });
+  try {
+    linkLauncher();
+    let changed = false;
+    for (const [id, path, body, legacy] of artifacts) changed = owned.write(id, path, body, legacy) || changed;
+    chmodSync(PRUNE_SCRIPT, 0o755);
+    await addMenuRows(opts.quiet);
+    if (changed) await checked(["systemctl", "--user", "daemon-reload"]);
+    await checked(["systemctl", "--user", "enable", "--now", "omastoic-prune.path"]);
+    if (opts.onFirst && first) {
+      const code = await on();
+      if (code) throw new Error("could not activate the Stoics");
+    } else if (enabled()) {
+      await checked(["systemctl", "--user", "enable", "omastoic.service"]);
+      if (previous !== marker || changed) await checked(["systemctl", "--user", "restart", "omastoic.service"]);
+      else await checked(["systemctl", "--user", "start", "omastoic.service"]);
+    } else {
+      await stopDaemon();
+    }
+    atomicWrite(INSTALLED, marker); // Only successful setup is an installation.
+  } catch (error) {
+    // Leave owned plumbing available for retry/uninstall, but fail closed.
+    await run(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
+    await run(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
+    if (existsSync(WRITTEN) && await ownsBranding()) await restoreSlot();
+    setEnabled(false);
+    throw error;
   }
-  if (prevPrunePath !== prunePath) {
-    await Bun.write(PRUNE_PATH, prunePath);
-    unitsChanged = true;
-    say(`→ ${PRUNE_PATH}`);
-  }
-
-  if (unitsChanged) await run(["systemctl", "--user", "daemon-reload"]);
-
-  await run(["systemctl", "--user", "enable", "omastoic.service"]);
-  await run(["systemctl", "--user", "enable", "--now", "omastoic-prune.path"]);
-
-  mkdirSync(STATE, { recursive: true });
-  await Bun.write(INSTALLED, ROOT);
-
-  if (opts.onFirst && first) return on();
-  if (enabled() && prev !== next) await run(["systemctl", "--user", "restart", "omastoic.service"]);
-
   const interval = (await config()).interval ?? DEFAULT_INTERVAL;
   say(`→ a new quote every ${interval}s while the screensaver is up`);
   return 0;
 }
 
 async function install(): Promise<number> {
-  const code = await setup();
+  const code = await setup({ onFirst: true });
   if (code) return code;
-  await on();
   console.log("\nTry it now:    omastoic preview");
-  console.log("Switch away:   Style → Screensaver → Stoics, or omastoic toggle");
+  console.log("Switch away:   Appearance → Branding → Screensaver → Stoics, or omastoic toggle");
   return 0;
 }
 
 async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
   await off();
 
-  if (await Bun.file(UNIT).exists()) {
-    await run(["systemctl", "--user", "disable", "omastoic.service"]);
-    await Bun.file(UNIT).delete();
-    await run(["systemctl", "--user", "daemon-reload"]);
-    console.log(`→ removed ${UNIT}`);
-  }
-
+  owned.remove("unit", UNIT);
+  await checked(["systemctl", "--user", "daemon-reload"]);
   await removeMenuRows();
   unlinkLauncher();
-  uninstallCompletion();
+  for (const [id, path] of completionFiles()) owned.remove(id, path);
   await removePrune();
 
-  const backup = Bun.file(BACKUP);
-  if (await backup.exists()) await backup.delete();
+  owned.remove("backup", BACKUP);
   await Bun.file(INSTALLED).delete().catch(() => {});
 
   if (opts.purge) {
     rmSync(USER_CONFIG, { recursive: true, force: true });
-    rmSync(STATE, { recursive: true, force: true });
+    for (const name of readdirSync(STATE)) if (name !== "transaction.lock") rmSync(join(STATE, name), { recursive: true, force: true });
     rmSync(PREVIEWS, { recursive: true, force: true });
     console.log(`→ removed ${USER_CONFIG}`);
   }
@@ -579,8 +584,10 @@ async function daemon(): Promise<number> {
       stopRotating();
       return false;
     }
-    await writeBranding().catch((err) => console.error(`omastoic: ${err.message}`));
-    return true;
+    return await locked(STATE, async () => {
+      if (!enabled()) return false;
+      return writeBranding();
+    }).catch((err) => { console.error(`omastoic: ${err.message}`); return false; });
   };
 
   const tick = async () => {
@@ -600,13 +607,22 @@ async function daemon(): Promise<number> {
   await rotate();
 
   for await (const event of screensaverWindowEvents()) {
-    if (event.kind === "open") {
+    if (event.kind === "sync") {
+      open.clear();
+      for (const address of event.addresses) open.add(address);
+      stopRotating();
+      if (open.size) await startRotating();
+    } else if (event.kind === "open") {
+      if (open.has(event.address)) continue;
+      const alreadyReading = open.size > 0;
       open.add(event.address);
       if (enabled()) {
         // ttfx measures the tty at start; wait until it has left 80x24, then
         // write a canvas that matches the real grid before the first effect.
-        await waitForLiveGrid();
-        await rotate();
+        if (!alreadyReading) {
+          await waitForLiveGrid();
+          await rotate();
+        }
         await startRotating();
       }
     } else if (open.delete(event.address) && open.size === 0) {
@@ -781,7 +797,7 @@ async function main(): Promise<number> {
     case "show": {
       const cols = flag("cols") ?? (process.stdout.columns || undefined);
       const rows = flag("rows") ?? (process.stdout.rows || undefined);
-      console.log(await render(cols && rows ? { cols, rows } : undefined));
+      console.log(await render({ cols: cols ?? 92, rows: rows ?? 25 }, false));
       return 0;
     }
     case "on":
@@ -794,7 +810,7 @@ async function main(): Promise<number> {
     case "switcher":
     case "use":
     case "slates":
-      console.error("omastoic: the screensaver slot is Omarchy's — Style → Screensaver");
+      console.error("omastoic: the screensaver slot is Omarchy's — Appearance → Branding → Screensaver");
       console.error("          Stoics on/off is: omastoic toggle");
       return 1;
     case "render-png": {
@@ -812,19 +828,16 @@ async function main(): Promise<number> {
     }
     case "next":
       if (!(await requireOn())) return 1;
-      await writeBranding();
-      return 0;
+      return await writeBranding() ? 0 : 1;
     case "preview":
       if (!enabled()) {
         const code = await on();
         if (code) return code;
-      } else {
-        await writeBranding();
-      }
+      } else if (!(await writeBranding())) return 1;
       {
         const code = await launchScreensaver();
         await waitForLiveGrid();
-        await writeBranding();
+        if (!(await writeBranding())) return 1;
         return code;
       }
     case "daemon":
@@ -852,7 +865,7 @@ async function main(): Promise<number> {
 Install:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 Remove:   omastoic uninstall
 
-Style → Screensaver → Stoics is the same toggle. Edit Text, Set From Image
+Appearance → Branding → Screensaver → Stoics is the same toggle. Edit Text, Set From Image
 and Restore Default stay Omarchy's; if they write the slot, the Stoics
 stand aside.
 
@@ -862,4 +875,11 @@ Settings: ${join(USER_CONFIG, "config.json")}`);
   }
 }
 
-process.exit(await main());
+try {
+  const command = Bun.argv[2];
+  const mutating = ["on", "off", "toggle", "next", "preview", "setup", "install", "uninstall", "config", "configure"].includes(command);
+  process.exit(await (mutating ? locked(STATE, main) : main()));
+} catch (error) {
+  console.error(`omastoic: ${(error as Error).message}`);
+  process.exit(1);
+}
