@@ -95,8 +95,8 @@ export function logicalMonitorSize(monitor: Monitor): { width: number; height: n
 
 export function gridForPixels(pixels: { width: number; height: number }, cell: Cell): Size {
   return clampGrid({
-    cols: Math.floor(pixels.width / cell.width),
-    rows: Math.floor(pixels.height / cell.height),
+    cols: Math.floor(pixels.width / cell.width + 1e-9),
+    rows: Math.floor(pixels.height / cell.height + 1e-9),
   });
 }
 
@@ -164,7 +164,8 @@ export function canvasSizeFrom(
     const size = minGrid(real.map((probe) => probe.grid)) ?? DEFAULT_SIZE;
     const sample = real.find((probe) => probe.grid.cols === size.cols && probe.grid.rows === size.rows) ?? real[0];
     const cell = (sample.pixels && cellFromPixels(sample.pixels, sample.grid)) || cached || probed || FALLBACK_CELL;
-    return { ...size, source: "live", cell };
+    const safe = minGrid([size, ...monitors.map((monitor) => gridForPixels(logicalMonitorSize(monitor), cell))])!;
+    return { ...safe, source: "live", cell };
   }
 
   const cell = cached ?? probed ?? FALLBACK_CELL;

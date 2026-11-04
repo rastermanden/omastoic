@@ -57,6 +57,17 @@ test("untrusted quote files cannot inject terminal escapes or unbounded input", 
   expect(() => parseQuotes(`custom\tcite\t${"x".repeat(4097)}`)).toThrow("too long");
 });
 
+test("CRLF quote records normalize without accepting embedded carriage returns", () => {
+  expect(parseQuotes("# custom book\r\ncustom\tSource 1\tA thought.\r\nother\tSource 2\tAnother thought.\n")).toEqual([
+    { author: "custom", citation: "Source 1", text: "A thought." },
+    { author: "other", citation: "Source 2", text: "Another thought." },
+  ]);
+  for (const record of ["cus\rtom\tSource 1\tThought.", "custom\tSource\r1\tThought.", "custom\tSource 1\tA\rthought.", "custom\tSource 1\tThought.\r"]) {
+    expect(() => parseQuotes(record)).toThrow("control");
+  }
+  expect(() => compose({ author: "custom", citation: "Source 1", text: "A\rthought." }, undefined, { cols: 60, rows: 12, art: null })).toThrow("control");
+});
+
 test("wrap keeps every line inside the width", () => {
   const lines = wrap(quotes.map((q) => q.text).join(" "), 40);
   for (const line of lines) expect(line.length).toBeLessThanOrEqual(40);

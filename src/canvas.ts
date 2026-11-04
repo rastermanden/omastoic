@@ -11,6 +11,7 @@ export const ART_GAP = 4;
 
 export function parseQuotes(tsv: string): Quote[] {
   if (Buffer.byteLength(tsv) > 1024 * 1024) throw new Error("quote file exceeds 1 MiB");
+  tsv = tsv.replace(/\r\n/g, "\n");
   if (/[\x00-\x08\x0b-\x1f\x7f-\x9f]/u.test(tsv)) throw new Error("quote file contains terminal control characters");
   return tsv
     .split("\n")

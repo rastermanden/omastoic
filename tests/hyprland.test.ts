@@ -39,6 +39,8 @@ test("a live 1600x1000 screensaver at the fallback cell is 111x30", () => {
   const cell = cellFromPixels(pixels, grid);
   expect(cell?.width).toBeCloseTo(14.414, 2);
   expect(cell?.height).toBeCloseTo(33.333, 2);
+  expect(gridForPixels(pixels, cell!)).toEqual({ cols: 111, rows: 30 });
+  expect(gridForPixels({ width: 1553.5, height: 899.5 }, { width: 14, height: 30 })).toEqual({ cols: 110, rows: 29 });
 });
 
 test("logical size divides by scale and swaps on 90° transform", () => {
@@ -64,6 +66,17 @@ test("the canvas is the smallest real screensaver tty, not 80x24", () => {
   );
   expect(size).toMatchObject({ cols: 111, rows: 30, source: "live" });
   expect(size.cell.width).toBeCloseTo(14.414, 2);
+});
+
+test("live sizing reserves both axes for pending, opening and replacement outputs", () => {
+  const large = { grid: { cols: 111, rows: 30 }, pixels: { width: 1554, height: 900 } };
+  const narrow = { grid: { cols: 60, rows: 30 }, pixels: { width: 840, height: 900 } };
+  const short = { grid: { cols: 111, rows: 12 }, pixels: { width: 1554, height: 360 } };
+  const monitors = [large, narrow, short].map((probe) => probe.pixels);
+  for (const live of [[large], [large, narrow], [large, narrow, short], [narrow, short], [short]]) {
+    expect(canvasSizeFrom(live, monitors, null)).toMatchObject({ cols: 60, rows: 12, source: "live" });
+  }
+  expect(canvasSizeFrom([large], [large.pixels, { width: 840, height: 360 }], null)).toMatchObject({ cols: 60, rows: 12 });
 });
 
 test("without a live tty the smallest monitor uses the cached cell", () => {

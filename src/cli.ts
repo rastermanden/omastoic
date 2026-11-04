@@ -257,16 +257,23 @@ async function stopDaemon(): Promise<void> {
 }
 
 async function on(): Promise<number> {
+  const wasEnabled = enabled();
+  const previousCanvas = wasEnabled && await ownsBranding() ? await Bun.file(BRANDING).text().catch(() => null) : null;
   await preserveDisplaced();
-  setEnabled(true);
-  if (!(await writeBranding(true))) return 1;
 
   try {
+    setEnabled(true);
+    if (!(await writeBranding(true))) throw new Error("could not activate the Stoics");
     if (owned.owns("unit", UNIT)) await checked(["systemctl", "--user", "enable", "--now", "omastoic.service"]);
     else console.log("→ not installed as a service yet; run: omastoic setup");
   } catch (error) {
-    setEnabled(false);
-    if (await ownsBranding()) await restoreSlot();
+    setEnabled(wasEnabled);
+    if (await ownsBranding()) {
+      if (previousCanvas !== null) {
+        atomicWrite(BRANDING, previousCanvas);
+        await rememberWrite(previousCanvas);
+      } else await restoreSlot();
+    }
     throw error;
   }
 
@@ -456,7 +463,6 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
 
   const previous = await Bun.file(INSTALLED).text().catch(() => "");
   const first = !previous;
-  rmSync(INSTALLED, { force: true });
   // Adopt only the existing installation's own legacy displaced-art backup.
   if (previous && existsSync(WRITTEN) && existsSync(BACKUP) && !existsSync(DISPLACED)) {
     owned.write("backup", BACKUP, readFileSync(BACKUP, "utf8"));
@@ -475,7 +481,6 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
   checkLauncher();
   withBlock(await Bun.file(MENU).text().catch(() => "{\n}\n"));
   for (const [id, path, body, legacy] of artifacts) owned.check(id, path, body, legacy);
-  rmSync(INSTALLED, { force: true });
   try {
     linkLauncher();
     let changed = false;
@@ -610,8 +615,8 @@ async function daemon(): Promise<number> {
     if (event.kind === "sync") {
       open.clear();
       for (const address of event.addresses) open.add(address);
-      stopRotating();
       if (open.size) await startRotating();
+      else stopRotating();
     } else if (event.kind === "open") {
       if (open.has(event.address)) continue;
       const alreadyReading = open.size > 0;

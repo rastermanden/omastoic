@@ -34,6 +34,32 @@ for (const failure of ["daemon-reload", "enable --now omastoic-prune.path", "ena
   });
 }
 
+for (const failure of ["completion conflict", "enable --now omastoic-prune.path"]) {
+  test(`failed refresh after off preserves installation history (${failure})`, async () => {
+    const s = sandbox();
+    const branding = join(s.config, "omarchy/branding/screensaver.txt");
+    const completion = join(s.data, "bash-completion/completions/omastoic");
+    s.put(branding, "my chosen art\n");
+    try {
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      expect((await s.cli(["off"])).code).toBe(0);
+      const marker = readFileSync(join(s.state, "installed"), "utf8");
+      const originalCompletion = readFileSync(completion, "utf8");
+      if (failure === "completion conflict") s.put(completion, "user completion\n");
+      const failed = await s.cli(["setup", "--on-first", "--quiet"], failure === "completion conflict" ? {} : { SYSTEMCTL_FAIL: failure });
+      expect(failed.code).toBe(1);
+      expect(readFileSync(join(s.state, "installed"), "utf8")).toBe(marker);
+      expect(readFileSync(branding, "utf8")).toBe("my chosen art\n");
+      expect(existsSync(join(s.home, "toggle"))).toBe(false);
+      if (failure === "completion conflict") s.put(completion, originalCompletion);
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      expect(existsSync(join(s.home, "toggle"))).toBe(false);
+      expect(existsSync(join(s.home, "omastoic.service.active"))).toBe(false);
+      expect(readFileSync(branding, "utf8")).toBe("my chosen art\n");
+    } finally { s.cleanup(); }
+  });
+}
+
 test("install activation failure is not marked installed; uninstall failure is retryable", async () => {
   const s = sandbox();
   try {
