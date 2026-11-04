@@ -1,7 +1,6 @@
-// Small local transactions shared by CLI commands and daemon writes. The Bash
-// removal watcher takes the same mkdir lock, so it cannot prune mid-setup.
+// Small local transactions shared by CLI commands and daemon writes.
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const digest = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -19,32 +18,19 @@ export function atomicWrite(path: string, text: string): void {
 
 export async function locked<T>(state: string, action: () => Promise<T>): Promise<T> {
   mkdirSync(state, { recursive: true });
-  const lock = join(state, "transaction.lock");
-  const deadline = Date.now() + 15000;
-  while (true) {
-    try {
-      mkdirSync(lock);
-      writeFileSync(join(lock, "pid"), String(process.pid));
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        const pid = Number(readFileSync(join(lock, "pid"), "utf8"));
-        if (Number.isInteger(pid) && pid > 0) {
-          try { process.kill(pid, 0); } catch (e) {
-            if ((e as NodeJS.ErrnoException).code === "ESRCH") { rmSync(lock, { recursive: true, force: true }); continue; }
-          }
-        }
-      } catch {
-        // A crash between mkdir and writing pid must not wedge future setup.
-        try { if (Date.now() - statSync(lock).mtimeMs > 30000) { rmSync(lock, { recursive: true, force: true }); continue; } } catch {}
-      }
-      if (Date.now() >= deadline) throw new Error("another omastoic command is busy; retry shortly");
-      await Bun.sleep(25);
-    }
+  const holder = Bun.spawn(["flock", "--exclusive", "--wait", "15", "--no-fork", join(state, "transaction.flock"), "sh", "-c", "printf x; cat >/dev/null"], {
+    stdin: "pipe", stdout: "pipe", stderr: "ignore",
+  });
+  try {
+    const reader = holder.stdout.getReader();
+    const { done } = await reader.read();
+    reader.releaseLock();
+    if (done) throw new Error("could not acquire the omastoic transaction lock; retry shortly");
+    return await action();
+  } finally {
+    holder.stdin.end();
+    await holder.exited;
   }
-  try { return await action(); }
-  finally { rmSync(lock, { recursive: true, force: true }); }
 }
 
 export class OwnedFiles {

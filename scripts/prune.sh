@@ -32,22 +32,9 @@ sleep 2
 if installed && active; then exit 0; fi
 
 mkdir -p "$STATE"
-lock="$STATE/transaction.lock"
-for ((i=0; ; i++)); do
-  if mkdir "$lock" 2>/dev/null; then
-    printf '%s' "$$" > "$lock/pid"
-    trap '[[ -z ${temp:-} ]] || rm -f -- "$temp"; rm -rf "$lock"' EXIT
-    break
-  fi
-  if [[ -f $lock/pid ]]; then
-    read -r pid < "$lock/pid" || true
-    if [[ ${pid:-} =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then rm -rf "$lock"; continue; fi
-  elif [[ $(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null) ]]; then
-    rm -rf "$lock"; continue
-  fi
-  if (( i >= 150 )); then echo 'omastoic: cleanup busy; retry prune.sh' >&2; exit 1; fi
-  sleep 0.1
-done
+exec 9>"$STATE/transaction.flock"
+flock --exclusive --wait 15 9 || { echo 'omastoic: cleanup busy; retry prune.sh' >&2; exit 1; }
+trap '[[ -z ${temp:-} ]] || rm -f -- "$temp"' EXIT
 if installed && active; then exit 0; fi
 
 owns() {
@@ -105,7 +92,7 @@ if nxt == text:
     nxt = re.sub(r"(?:\r?\n)*[ \t]*// >>> omastoic:begin[^\n]*\n[\s\S]*?// <<< omastoic:end[ \t]*(?=\r?\n|$)", "", text, count=1)
 if nxt != text:
     stripped = re.sub(r"^\s*//[^\n]*(\n|$)", "", nxt, flags=re.M)
-    json.loads(re.sub(r",(\s*[}\]])", r"\1", stripped))
+    if stripped.strip(): json.loads(re.sub(r",(\s*[}\]])", r"\1", stripped))
     fd, temp = tempfile.mkstemp(prefix=".omastoic-menu-", dir=path.parent)
     try:
         with os.fdopen(fd, 'w') as stream: stream.write(nxt)

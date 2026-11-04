@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { sandbox } from "./sandbox.ts";
 import { createRequire } from "node:module";
 import { BEGIN, withBlock, withoutBlock } from "../src/menu.ts";
 
@@ -10,6 +12,7 @@ const model = createRequire(import.meta.path)(`${host}/shell/plugins/menu/MenuMo
 const defaults = model.parseMenuJsonc(readFileSync(`${host}/default/omarchy/omarchy-menu.jsonc`, "utf8"));
 
 for (const original of [
+  "", " \r\n\t", "// only a comment", "// first\r\n  // second\r\n",
   '{\n  "personal": {"label":"Personal"}\n}\n',
   '{\n  "personal": {"label":"Personal"},\n}\n',
   '{\n}\n',
@@ -19,10 +22,10 @@ for (const original of [
   '{"items": {"personal":{"label":"Personal"}}, "title":"Wrapper }"}',
 ]) {
   test(`host menu round-trip: ${JSON.stringify(original)}`, () => {
-    const before = model.parseMenuJsonc(original);
+    const before = model.keepMenuRows(null, original, false);
     expect(before).not.toBeNull();
     const next = withBlock(original);
-    const after = model.parseMenuJsonc(next);
+    const after = model.keepMenuRows(null, next, false);
     expect(after).not.toBeNull();
     expect(after.length).toBe(before.length + 1);
     for (const row of before) expect(after).toContainEqual(row);
@@ -38,8 +41,27 @@ for (const original of [
 }
 
 test("refuse invalid menu documents instead of writing more invalid JSONC", () => {
-  for (const bad of ["null", "[]", '{"personal": {', '// only a comment', '{"x": {}} garbage']) expect(() => withBlock(bad)).toThrow();
+  for (const bad of ["null", "[]", '{"personal": {', '{"x": {}} garbage']) expect(() => withBlock(bad)).toThrow();
 });
+
+for (const original of ["", "// only a comment"]) {
+  for (const removal of ["uninstall", "prune"]) {
+    test(`empty host menu survives setup and ${removal}: ${JSON.stringify(original)}`, async () => {
+      const s = sandbox();
+      const menu = join(s.config, "omarchy/extensions/omarchy-menu.jsonc");
+      s.put(menu, original);
+      try {
+        expect(model.keepMenuRows(null, original, false)).toEqual([]);
+        expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+        expect(model.keepMenuRows(null, readFileSync(menu, "utf8"), false).map((row: { id: string }) => row.id)).toEqual(["appearance.branding.screensaver.stoics"]);
+        if (removal === "prune") rmSync(s.plugin, { recursive: true });
+        expect((await (removal === "prune" ? s.prune() : s.cli(["uninstall"]))).code).toBe(0);
+        expect(readFileSync(menu, "utf8")).toBe(original);
+        expect(model.keepMenuRows(null, readFileSync(menu, "utf8"), false)).toEqual([]);
+      } finally { s.cleanup(); }
+    });
+  }
+}
 
 test("updating old misplaced rows removes them and preserves neighbours", () => {
   const old = '{\n "personal":{"label":"Mine"},\n // >>> omastoic:begin — old version\n "style.screensaver.stoics":{"label":"Old"},\n "style.screensaver.configure":{"label":"Configure"},\n // <<< omastoic:end\n}\n';

@@ -436,7 +436,7 @@ async function requireOmarchy(): Promise<number> {
     console.error("          install it with: omarchy pkg add ttfx");
     return 1;
   }
-  for (const command of ["systemctl", "jq", "python3", "omarchy-toggle", "omarchy-toggle-enabled"]) {
+  for (const command of ["systemctl", "jq", "python3", "flock", "omarchy-toggle", "omarchy-toggle-enabled"]) {
     if (!Bun.which(command)) { console.error(`omastoic: required command missing: ${command}`); return 1; }
   }
   // The native renderer reads its input only once and has no terminal events.
@@ -536,7 +536,7 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
 
   if (opts.purge) {
     rmSync(USER_CONFIG, { recursive: true, force: true });
-    for (const name of readdirSync(STATE)) if (name !== "transaction.lock") rmSync(join(STATE, name), { recursive: true, force: true });
+    for (const name of readdirSync(STATE)) if (name !== "transaction.flock") rmSync(join(STATE, name), { recursive: true, force: true });
     rmSync(PREVIEWS, { recursive: true, force: true });
     console.log(`→ removed ${USER_CONFIG}`);
   }
@@ -580,6 +580,9 @@ async function daemon(): Promise<number> {
   };
 
   const rotate = async (): Promise<boolean> => {
+    await locked(STATE, async () => {
+      if (enabled()) await writeBranding();
+    }).catch((err) => { console.error(`omastoic: ${err.message}`); });
     if (!enabled()) {
       stopRotating();
       return false;
@@ -589,10 +592,7 @@ async function daemon(): Promise<number> {
       stopRotating();
       return false;
     }
-    return await locked(STATE, async () => {
-      if (!enabled()) return false;
-      return writeBranding();
-    }).catch((err) => { console.error(`omastoic: ${err.message}`); return false; });
+    return true;
   };
 
   const tick = async () => {

@@ -108,6 +108,56 @@ test("mixed-output opens, closes and reconnects preserve the quote and reading d
   }
 }, 12000);
 
+for (const handoff of ["off", "foreign art"]) {
+  test(`daemon recovers from corrected quotes and stops on ${handoff}`, async () => {
+    const s = sandbox();
+    const socket = join(s.env.XDG_RUNTIME_DIR, "hypr/test/.socket2.sock");
+    const branding = join(s.config, "omarchy/branding/screensaver.txt");
+    const custom = join(s.config, "omastoic/quotes.tsv");
+    const history = () => readFileSync(join(s.state, "recent.json"), "utf8");
+    const until = async (check: () => boolean) => {
+      const deadline = Date.now() + 3000;
+      while (!check() && Date.now() < deadline) await Bun.sleep(20);
+      expect(check()).toBe(true);
+    };
+    mkdirSync(dirname(socket), { recursive: true });
+    s.put(join(s.config, "omastoic/config.json"), '{"interval":1}');
+    s.put(join(s.home, "clients.json"), '[{"address":"large","class":"org.omarchy.screensaver"}]');
+    let connected = false;
+    const server = Bun.listen({ unix: socket, socket: { open() { connected = true; }, data() {} } });
+    let daemon: ReturnType<typeof Bun.spawn> | undefined;
+    let capture: Promise<void> | undefined;
+    let errors = "";
+    try {
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      daemon = Bun.spawn([process.execPath, join(root, "src/cli.ts"), "daemon"], { cwd: root, env: s.env, stdout: "ignore", stderr: "pipe" });
+      const reader = (daemon.stderr as ReadableStream<Uint8Array>).getReader();
+      capture = (async () => { while (true) { const { done, value } = await reader.read(); if (done) break; errors += new TextDecoder().decode(value); } })();
+      await until(() => connected);
+      const before = history();
+      const canvas = readFileSync(branding, "utf8");
+      s.put(custom, `custom\tSource 1\t${"x".repeat(4097)}\n`);
+      await until(() => errors.includes("too long"));
+      expect(history()).toBe(before);
+      expect(readFileSync(branding, "utf8")).toBe(canvas);
+      s.put(custom, "custom\tSource 1\tA corrected thought.\n");
+      await until(() => history() !== before);
+      if (handoff === "off") expect((await s.cli(["off"])).code).toBe(0);
+      s.put(branding, "user-selected art\n");
+      const stopped = history();
+      await Bun.sleep(1500);
+      expect(history()).toBe(stopped);
+      expect(readFileSync(branding, "utf8")).toBe("user-selected art\n");
+      expect((await s.exec(["omarchy-toggle-enabled", "omastoic"])).code).toBe(1);
+    } finally {
+      if (daemon) { daemon.kill(); await daemon.exited; }
+      await capture;
+      server.stop(true);
+      s.cleanup();
+    }
+  }, 10000);
+}
+
 test("oversized unterminated records reconnect instead of growing without bound", async () => {
   const s = sandbox();
   const socket = join(s.env.XDG_RUNTIME_DIR, "hypr/test/.socket2.sock");
