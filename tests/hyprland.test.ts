@@ -1,4 +1,7 @@
 import { test, expect } from "bun:test";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { root, sandbox } from "./sandbox.ts";
 import {
   FALLBACK_CELL,
   canvasSizeFrom,
@@ -17,7 +20,7 @@ import {
   parseSttySize,
   ptsFromTtyNr,
   scaleCell,
-  zipLiveProbes,
+  liveProbesFrom,
 } from "../src/hyprland.ts";
 
 test("stty size is rows then cols", () => {
@@ -144,20 +147,88 @@ test("a Ghostty window at 9pt scales to the screensaver's 18pt cell", () => {
   expect(size.rows).toBe(30);
 });
 
-test("live probes pair the smallest tty with the smallest window", () => {
-  const probes = zipLiveProbes(
-    [
-      { cols: 140, rows: 40 },
-      { cols: 80, rows: 24 },
-      { cols: 111, rows: 30 },
-    ],
-    [
-      { width: 1920, height: 1080 },
-      { width: 1600, height: 1000 },
-    ],
-  );
-  expect(probes).toEqual([
-    { grid: { cols: 111, rows: 30 }, pixels: { width: 1600, height: 1000 } },
-    { grid: { cols: 140, rows: 40 }, pixels: { width: 1920, height: 1080 } },
-  ]);
+test("independent samples calibrate only a single unambiguous grid and window", () => {
+  const large = { cols: 111, rows: 30 };
+  const small = { cols: 60, rows: 12 };
+  const placeholder = { cols: 80, rows: 24 };
+  const windows = [{ width: 1554, height: 900 }, { width: 840, height: 360 }];
+  expect(liveProbesFrom([large], [windows[0]])).toEqual([{ grid: large, pixels: windows[0] }]);
+  for (const grids of [[large, placeholder], [large], [placeholder, large], [large, small]]) {
+    const probes = liveProbesFrom(grids, windows);
+    expect(probes.every((probe) => probe.pixels === undefined)).toBe(true);
+    for (const cached of [null, { width: 14, height: 30 }]) {
+      const size = canvasSizeFrom(probes, windows, cached);
+      expect(size.cols).toBeLessThanOrEqual(60);
+      expect(size.rows).toBeLessThanOrEqual(12);
+    }
+  }
+  expect(liveProbesFrom([large, placeholder], [windows[0]])).toEqual([{ grid: large, pixels: undefined }]);
+});
+
+test("real staggered PTYs fit pending outputs without poisoning cell calibration", async () => {
+  const s = sandbox();
+  const fixture = Bun.spawn(["python3", "-u", "-c", `import fcntl, json, os, pty, struct, subprocess, sys, termios
+pairs = [pty.openpty(), pty.openpty()]
+children = []
+def resize(fd, cols, rows):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+try:
+    for (master, slave), (cols, rows) in zip(pairs, [(111, 30), (80, 24)]):
+        resize(slave, cols, rows)
+        children.append(subprocess.Popen(['sleep', '60'], stdin=slave, stdout=slave, stderr=slave))
+    print(json.dumps([child.pid for child in children]), flush=True)
+    for line in sys.stdin:
+        resize(pairs[1][1], 60, 12)
+        print('ready', flush=True)
+finally:
+    for child in children:
+        child.terminate()
+        child.wait()
+    for master, slave in pairs:
+        os.close(master)
+        os.close(slave)
+`], { env: s.env, stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+  const reader = fixture.stdout.getReader();
+  const record = async () => {
+    let text = "";
+    while (!text.includes("\n")) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error("PTY fixture exited before readiness");
+      text += new TextDecoder().decode(value);
+    }
+    return text.trim();
+  };
+  const cell = join(s.state, "cell.json");
+  const sample = async () => {
+    const result = await s.exec([process.execPath, "--eval", `import { screensaverSize } from ${JSON.stringify(join(root, "src/hyprland.ts"))}; console.log(JSON.stringify(await screensaverSize()));`]);
+    expect(result.code).toBe(0);
+    return JSON.parse(result.stdout);
+  };
+  try {
+    const pids = JSON.parse(await record());
+    const clients = pids.map((pid: number, i: number) => ({ pid, class: "org.omarchy.screensaver", size: i === 0 ? [1554, 900] : [840, 360] }));
+    s.stub("hyprctl", 'if [[ $1 == clients ]]; then cat "$HOME/clients.json"; else echo \'[{"width":1554,"height":900},{"width":840,"height":360}]\'; fi');
+    s.put(join(s.home, "clients.json"), JSON.stringify(clients.slice(0, 1)));
+    expect(await sample()).toMatchObject({ cols: 60, rows: 12 });
+    expect(JSON.parse(readFileSync(cell, "utf8"))).toEqual({ width: 14, height: 30 });
+    s.put(join(s.home, "clients.json"), JSON.stringify(clients));
+    expect(await sample()).toMatchObject({ cols: 60, rows: 12 });
+    expect(JSON.parse(readFileSync(cell, "utf8"))).toEqual({ width: 14, height: 30 });
+    rmSync(cell);
+    const pending = await sample();
+    expect(pending.cols).toBeLessThanOrEqual(60);
+    expect(pending.rows).toBeLessThanOrEqual(12);
+    expect(existsSync(cell)).toBe(false);
+    fixture.stdin.write("resize\n");
+    expect(await record()).toBe("ready");
+    const settled = await sample();
+    expect(settled.cols).toBeLessThanOrEqual(60);
+    expect(settled.rows).toBeLessThanOrEqual(12);
+    expect(existsSync(cell)).toBe(false);
+  } finally {
+    fixture.stdin.end();
+    await fixture.exited;
+    reader.releaseLock();
+    s.cleanup();
+  }
 });

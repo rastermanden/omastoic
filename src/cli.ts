@@ -465,9 +465,8 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
 
   const previous = await Bun.file(INSTALLED).text().catch(() => "");
   const first = !previous;
-  // Adopt only the existing installation's own legacy displaced-art backup.
-  if (previous && existsSync(WRITTEN) && existsSync(BACKUP) && !existsSync(DISPLACED)) {
-    owned.write("backup", BACKUP, readFileSync(BACKUP, "utf8"));
+  if (previous && existsSync(WRITTEN) && !existsSync(DISPLACED)) {
+    owned.write("backup", BACKUP, readFileSync(existsSync(BACKUP) ? BACKUP : LOGO, "utf8"));
     atomicWrite(DISPLACED, "file");
   }
   const fingerprint = digest(["src", "data", "art", "bin"].flatMap((dir) => readdirSync(join(ROOT, dir)).sort().map((f) => readFileSync(join(ROOT, dir, f), "utf8"))).join("\0") + await Bun.file(join(ROOT, "manifest.json")).text());

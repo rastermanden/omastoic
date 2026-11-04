@@ -228,6 +228,43 @@ test("2.1 untracked plumbing and displaced art migrate without backing up our ow
   } finally { s.cleanup(); }
 });
 
+for (const transition of ["on/off", "disable", "remove"]) {
+  test(`legacy activation without a backup restores the host logo through ${transition}`, async () => {
+    const s = sandbox();
+    const branding = join(s.config, "omarchy/branding/screensaver.txt");
+    const host = process.env.OMARCHY_TEST_ROOT ?? "/usr/share/omarchy";
+    const logo = readFileSync(join(host, "logo.txt"), "utf8");
+    s.put(join(s.env.OMARCHY_PATH, "logo.txt"), logo);
+    try {
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      expect(existsSync(`${branding}.pre-omastoic`)).toBe(false);
+      rmSync(join(s.state, "displaced.kind"));
+      s.put(join(s.state, "installed"), root);
+      const canvas = readFileSync(branding, "utf8");
+      for (let i = 0; i < 2; i++) {
+        expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+        expect(readFileSync(branding, "utf8")).toBe(canvas);
+        expect(readFileSync(`${branding}.pre-omastoic`, "utf8")).toBe(logo);
+        expect(readFileSync(join(s.state, "displaced.kind"), "utf8")).toBe("file");
+      }
+      if (transition === "on/off") {
+        expect((await s.cli(["on"])).code).toBe(0);
+        expect((await s.cli(["on"])).code).toBe(0);
+        expect((await s.cli(["off"])).code).toBe(0);
+      } else {
+        if (transition === "disable") s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+        else rmSync(s.plugin, { recursive: true });
+        expect((await s.prune()).code).toBe(0);
+      }
+      expect(readFileSync(branding, "utf8")).toBe(logo);
+      expect(existsSync(join(s.state, "written.sha"))).toBe(false);
+      expect((await s.cli(["off"])).code).toBe(0);
+      expect((await s.cli(["uninstall"])).code).toBe(0);
+      expect(readFileSync(branding, "utf8")).toBe(logo);
+    } finally { s.cleanup(); }
+  });
+}
+
 test("native backend is rejected before installing external artifacts", async () => {
   const s = sandbox();
   s.stub("omarchy-launch-screensaver", "exec /usr/lib/omarchy-screensaver/omarchy-screensaver");

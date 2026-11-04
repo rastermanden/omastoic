@@ -298,11 +298,10 @@ async function gridForProcessTree(pid: number): Promise<Size | null> {
   return null;
 }
 
-export function zipLiveProbes(grids: Size[], windows: { width: number; height: number }[]): LiveProbe[] {
+export function liveProbesFrom(grids: Size[], windows: { width: number; height: number }[]): LiveProbe[] {
   const real = grids.filter((grid) => !isPlaceholderGrid(grid));
-  const sortedGrids = [...real].sort((a, b) => a.cols - b.cols || a.rows - b.rows);
-  const sortedWindows = [...windows].sort((a, b) => a.width - b.width || a.height - b.height);
-  return sortedGrids.map((grid, i) => ({ grid, pixels: sortedWindows[i] }));
+  const pixels = grids.length === 1 && windows.length === 1 ? windows[0] : undefined;
+  return real.map((grid) => ({ grid, pixels }));
 }
 
 async function gridsFromPids(pids: number[]): Promise<Size[]> {
@@ -349,7 +348,7 @@ async function liveProbes(): Promise<LiveProbe[]> {
       if (grid) grids.push(grid);
     }
   }
-  return zipLiveProbes(
+  return liveProbesFrom(
     grids,
     windows.map(({ width, height }) => ({ width, height })),
   );
@@ -463,7 +462,7 @@ export async function screensaverSize(): Promise<CanvasSize> {
   }
 
   const size = canvasSizeFrom(live, monitors, cached, probed);
-  if (size.source === "live" || size.source === "probe") await rememberCell(size.cell);
+  if (size.source === "probe" || live.some((probe) => !isPlaceholderGrid(probe.grid) && probe.pixels && cellFromPixels(probe.pixels, probe.grid))) await rememberCell(size.cell);
   return size;
 }
 
