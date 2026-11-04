@@ -22,7 +22,8 @@ idle, Marcus Aurelius looks back at you; a minute later it is Seneca, or
 Epictetus, or the man who founded the school on an Athenian porch. Six
 braille portraits, and 64 entries from public-domain US translations, every one
 cited by book and section. This release supports the terminal/ttfx screensaver,
-tested on Omarchy 4.5.0rc3, not the newer native renderer.
+audited on Omarchy 4.5.0rc3 and regression-tested with the 4.5.0 host parser
+and branding CLI, not the newer native renderer.
 
 It does not replace, shadow or patch anything Omarchy ships. The screensaver
 already re-reads `~/.config/omarchy/branding/screensaver.txt`; Omastoic keeps

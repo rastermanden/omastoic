@@ -11,8 +11,10 @@ US translations, reviewed against the editions in [CREDITS.md](CREDITS.md).
 ## Compatibility
 
 This correctness release supports **Omarchy's terminal/ttfx screensaver**,
-tested against Omarchy **4.5.0rc3**. It still requires [Bun](https://bun.sh)
-(tested with **1.4.4**, `omarchy pkg add bun`), plus the host's `ttfx`, systemd,
+audited on Omarchy **4.5.0rc3**, with these regression tests run against the
+installed **4.5.0** host parser/branding CLI. This is sandboxed integration
+evidence, not a live compositor/display matrix. It still requires
+[Bun](https://bun.sh) (tested with **1.4.4**, `omarchy pkg add bun`), plus the host's `ttfx`, systemd,
 `jq` and Python 3. No network is used at runtime.
 
 **The newer native `omarchy-screensaver` backend is not supported.** It reads

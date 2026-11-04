@@ -15,7 +15,7 @@ plumbing available for retry/uninstall. A content fingerprint of code, data,
 art and manifest restarts a selected daemon after updates, even if unit text
 has not changed.
 
-A mkdir transaction lock in XDG state serializes setup, config, toggle, export
+A mkdir transaction lock in XDG state serializes setup, config, toggle, branding
 writers and cleanup. The daemon locks each rotation, not its entire lifetime.
 Dead lock holders are detected; waits are bounded. Unique temporary files and
 atomic renames avoid partial reads. Menu writes additionally compare the source
