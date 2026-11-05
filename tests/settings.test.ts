@@ -1,12 +1,16 @@
 import { test, expect } from "bun:test";
 import {
+  applyQuoteFlags,
   compactSettings,
   describeSettings,
+  inRotation,
   parseAuthorList,
   parseInterval,
+  parseQuoteFlag,
   DEFAULT_INTERVAL,
   normalizeSettings,
 } from "../src/settings.ts";
+import { indexBundled, type Quote } from "../src/canvas.ts";
 
 const roster = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"];
 
@@ -49,4 +53,63 @@ test("describeSettings names the roster and the interval", () => {
   expect(DEFAULT_INTERVAL).toBe(60);
   expect(describeSettings({}, names)).toBe("all six · every 60s");
   expect(describeSettings({ interval: 8, authors: ["marcus"] }, names)).toBe("Marcus Aurelius · every 8s");
+});
+
+const catalog = [
+  { id: "q01", author: "marcus" },
+  { id: "q02", author: "marcus" },
+  { id: "q03", author: "seneca" },
+];
+
+test("hand-edited quote ids are canonical, ordered, and dropped when malformed", () => {
+  expect(normalizeSettings({ quotes: { marcus: ["q2", "q02", "q1"] } }, roster, catalog)).toEqual({});
+  expect(normalizeSettings({ quotes: { marcus: ["q2", "q02"] } }, roster, catalog)).toEqual({ quotes: { marcus: ["q02"] } });
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "q02"], seneca: [] } }, roster, catalog)).toEqual({ quotes: { seneca: [] } });
+  expect(normalizeSettings({ interval: 12, quotes: { marcus: ["q99"] } }, roster, catalog)).toEqual({ interval: 12 });
+  expect(normalizeSettings({ quotes: { plato: ["q01"] } }, roster, catalog)).toEqual({});
+  expect(normalizeSettings({ quotes: ["q01"] }, roster, catalog)).toEqual({});
+});
+
+test("quote flags merge per Stoic and a full set is the default", () => {
+  expect(parseQuoteFlag("all")).toEqual({ kind: "reset" });
+  expect(parseQuoteFlag("marcus=q1,q02,q02")).toEqual({ kind: "author", author: "marcus", ids: ["q01", "q02"] });
+  expect(parseQuoteFlag("marcus=none")).toEqual({ kind: "author", author: "marcus", ids: [] });
+  expect(parseQuoteFlag("marcus")).toBeNull();
+  const cleared = applyQuoteFlags({ marcus: ["q01"], seneca: [] }, ["all", "Marcus=q02"], roster, catalog);
+  expect(cleared).toEqual({ ok: true, quotes: { marcus: ["q02"] } });
+  const restored = applyQuoteFlags({ marcus: ["q01"], seneca: [] }, ["marcus=all"], roster, catalog);
+  expect(restored).toEqual({ ok: true, quotes: { seneca: [] } });
+  expect(applyQuoteFlags(undefined, ["marcus=q99"], roster, catalog).ok).toBe(false);
+  expect(applyQuoteFlags(undefined, ["plato=q01"], roster, catalog).ok).toBe(false);
+});
+
+test("compact quote settings omit unrestricted Stoics", () => {
+  expect(compactSettings({ interval: 8, quotes: { marcus: ["q01", "q02"], seneca: ["q03"] } }, roster, catalog)).toEqual({ interval: 8 });
+  expect(compactSettings({ quotes: { marcus: ["q02"], seneca: [] } }, roster, catalog)).toEqual({
+    quotes: { marcus: ["q02"], seneca: [] },
+  });
+});
+
+test("describeSettings counts bundled lines still in rotation", () => {
+  const names = new Map([["marcus", { name: "Marcus Aurelius" }]]);
+  expect(describeSettings({ quotes: { marcus: ["q02"] } }, names, catalog)).toBe("all six · 2 of 3 quotes · every 60s");
+  expect(describeSettings({ authors: ["seneca"], quotes: { marcus: ["q02"] } }, names, catalog)).toBe("seneca · every 60s");
+});
+
+test("rotation keeps custom lines and falls back when a filter matches nothing", () => {
+  const bundled = indexBundled([
+    { author: "marcus", citation: "A", text: "first" },
+    { author: "marcus", citation: "A", text: "second" },
+    { author: "seneca", citation: "B", text: "third" },
+  ]);
+  const custom: Quote[] = [{ author: "marcus", citation: "Mine", text: "added" }];
+  expect(bundled.map((quote) => quote.id)).toEqual(["q01", "q02", "q03"]);
+  expect(inRotation(bundled, custom, { quotes: { marcus: ["q02"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third", "added"]);
+  expect(inRotation(bundled, [], { authors: ["seneca"], quotes: { seneca: [] } })).toEqual({
+    quotes: bundled,
+    ignoredSelection: false,
+    ignoredAuthors: true,
+  });
+  expect(inRotation(bundled, custom, { quotes: { marcus: [], seneca: [] } }).quotes).toEqual(custom);
+  expect(inRotation(bundled, [], { quotes: { marcus: [], seneca: [] } }).ignoredSelection).toBe(true);
 });

@@ -73,9 +73,13 @@ omastoic next                  # another quote, only if we still own the slot
 omastoic preview               # MUTATING: select Stoics and launch the saver
 omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
 omastoic status
-omastoic config                # terminal author/interval picker (gum)
+omastoic config                # Stoics, their quotes, and the interval (gum)
 omastoic config --authors marcus,seneca --interval 90
 omastoic config --authors all --interval 60
+omastoic config --quotes marcus=q01,q02
+omastoic config --quotes marcus=none --quotes seneca=all
+omastoic config --add $'marcus\tMeditations IX.1\tYour line.'
+omastoic config --list
 ```
 
 **Omarchy's branding commands win.** Edit Text, Set From Image and Restore
@@ -103,11 +107,30 @@ all six. Invalid/null/type-wrong hand-edited settings fall back to defaults;
 the next interval is read from the file at each rotation. `omastoic config`
 validates and saves the same settings, restarting the daemon if selected.
 
-Your own `quotes.tsv` in that directory adds entries to the bundled book:
+`quotes` chooses which **bundled** lines stay in rotation, per Stoic. Ids are
+`q01`, `q02`, … in `data/quotes.tsv` order (`omastoic config --list` prints
+them; `q1` is `q01`). A missing Stoic means every bundled line of theirs. `[]`
+means none of their bundled lines. Listing every id for a Stoic is stored as
+the default and the key is omitted. `omastoic config --quotes marcus=q01,q02`
+writes that list; `--quotes marcus=all` and `--quotes all` clear restrictions.
+With gum, `omastoic config` asks once per selected Stoic, all lines selected
+until you change them.
+
+```json
+{
+  "authors": ["marcus", "seneca"],
+  "quotes": { "marcus": ["q01", "q04"] }
+}
+```
+
+Your own `quotes.tsv` in that directory adds entries to the bundled book, and
+those lines stay in rotation even when that Stoic's bundled ids are limited.
+Append them with `omastoic config --add` or by editing the file:
 **author slug, citation, text**, separated by tabs. Slugs contain letters,
 digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
 citations to 256 characters and quote text to 4096; terminal control escapes
-are rejected. An unknown author renders without a portrait.
+are rejected. An unknown author renders without a portrait. A selection or
+author list that matches nothing falls back to the whole book.
 
 The shared canvas uses the smallest measured terminal/monitor grid. Portraits
 are hidden when either dimension cannot fit. Wrapping accounts for CJK,

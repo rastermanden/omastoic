@@ -6,6 +6,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## Unreleased
+
+### Added
+
+- Choose which bundled quotes from each Stoic stay in rotation. `config.json`
+  takes a per-author `quotes` id list (`q01`, …); `omastoic config --quotes`,
+  the gum picker, and `omastoic config --list` edit and show it. Omitting a
+  Stoic keeps every bundled line of theirs.
+- `omastoic config --add` appends a tab-separated line to
+  `~/.config/omastoic/quotes.tsv`. Custom lines stay in rotation alongside any
+  bundled selection.
+
 ## 2.2.0 - 2026-11-04
 
 ### Changed

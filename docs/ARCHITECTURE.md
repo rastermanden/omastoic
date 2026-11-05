@@ -60,7 +60,10 @@ force reconnect/reconciliation rather than unbounded memory growth.
 
 There is no periodic rotation timer while no saver windows are open. The
 configurable timer defaults to 60 seconds; another monitor opening does not
-interrupt a quote already being read. PTY/monitor sizing is shared across
+interrupt a quote already being read. Each rotation reads `config.json` and
+`quotes.tsv`. Omitting `quotes` keeps every bundled line for the selected
+authors. A per-author id list keeps only those bundled lines; lines in
+`quotes.tsv` are always added and still honor the author list. PTY/monitor sizing is shared across
 outputs, with quote-only fallback. The host rereads branding between effects,
 so file cadence and visible effect cadence are distinct.
 
