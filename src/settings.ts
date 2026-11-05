@@ -153,9 +153,10 @@ export function compactSettings(settings: Settings, roster: string[], catalog: Q
 }
 
 /**
- * Bundled lines that stay in rotation, plus every custom line. An allow-list
- * that matches nothing, or an author list that matches nothing, falls back to
- * the book from before that filter so the screensaver still has a line.
+ * Bundled lines kept by a per-author allow-list, plus every custom line.
+ * An allow-list that matches nothing is ignored and the author list is applied
+ * to the full book. An author list that matches nothing falls back to every
+ * bundled and custom line.
  */
 export function inRotation(
   bundled: BundledQuote[],

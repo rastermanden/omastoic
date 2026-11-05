@@ -129,8 +129,10 @@ Append them with `omastoic config --add` or by editing the file:
 **author slug, citation, text**, separated by tabs. Slugs contain letters,
 digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
 citations to 256 characters and quote text to 4096; terminal control escapes
-are rejected. An unknown author renders without a portrait. A selection or
-author list that matches nothing falls back to the whole book.
+are rejected. An unknown author renders without a portrait. A quote selection
+that matches nothing is ignored. The selected Stoics' lines are used when an
+author list is set; otherwise the whole book is. An author list that still
+matches nothing uses the whole book.
 
 The shared canvas uses the smallest measured terminal/monitor grid. Portraits
 are hidden when either dimension cannot fit. Wrapping accounts for CJK,
