@@ -62,8 +62,11 @@ const catalog = [
 ];
 
 test("hand-edited quote ids are canonical, ordered, and dropped when malformed", () => {
-  expect(normalizeSettings({ quotes: { marcus: ["q2", "q02", "q1"] } }, roster, catalog)).toEqual({});
-  expect(normalizeSettings({ quotes: { marcus: ["q2", "q02"] } }, roster, catalog)).toEqual({ quotes: { marcus: ["q02"] } });
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "q02"] } }, roster, catalog)).toEqual({});
+  expect(normalizeSettings({ quotes: { marcus: ["q02", "q02"] } }, roster, catalog)).toEqual({ quotes: { marcus: ["q02"] } });
+  expect(normalizeSettings({ quotes: { marcus: ["q1"] } }, roster, catalog)).toEqual({});
+  expect(normalizeSettings({ quotes: { marcus: ["q001"] } }, roster, catalog)).toEqual({});
+  expect(normalizeSettings({ quotes: { marcus: ["q2", "q02"] } }, roster, catalog)).toEqual({});
   expect(normalizeSettings({ quotes: { marcus: ["q01", "q02"], seneca: [] } }, roster, catalog)).toEqual({ quotes: { seneca: [] } });
   expect(normalizeSettings({ interval: 12, quotes: { marcus: ["q99"] } }, roster, catalog)).toEqual({ interval: 12 });
   expect(normalizeSettings({ quotes: { plato: ["q01"] } }, roster, catalog)).toEqual({});
@@ -72,9 +75,15 @@ test("hand-edited quote ids are canonical, ordered, and dropped when malformed",
 
 test("quote flags merge per Stoic and a full set is the default", () => {
   expect(parseQuoteFlag("all")).toEqual({ kind: "reset" });
-  expect(parseQuoteFlag("marcus=q1,q02,q02")).toEqual({ kind: "author", author: "marcus", ids: ["q01", "q02"] });
+  expect(parseQuoteFlag("marcus=all")).toEqual({ kind: "author", author: "marcus", ids: "all" });
+  expect(parseQuoteFlag("marcus=q01,q02,q02")).toEqual({ kind: "author", author: "marcus", ids: ["q01", "q02"] });
   expect(parseQuoteFlag("marcus=none")).toEqual({ kind: "author", author: "marcus", ids: [] });
   expect(parseQuoteFlag("marcus")).toBeNull();
+  expect(parseQuoteFlag("*")).toBeNull();
+  expect(parseQuoteFlag("marcus=*")).toBeNull();
+  expect(parseQuoteFlag("marcus=-")).toBeNull();
+  expect(parseQuoteFlag("marcus=q1")).toBeNull();
+  expect(parseQuoteFlag("marcus=q001")).toBeNull();
   const cleared = applyQuoteFlags({ marcus: ["q01"], seneca: [] }, ["all", "Marcus=q02"], roster, catalog);
   expect(cleared).toEqual({ ok: true, quotes: { marcus: ["q02"] } });
   const restored = applyQuoteFlags({ marcus: ["q01"], seneca: [] }, ["marcus=all"], roster, catalog);
@@ -112,4 +121,9 @@ test("rotation keeps custom lines and falls back when a filter matches nothing",
   });
   expect(inRotation(bundled, custom, { quotes: { marcus: [], seneca: [] } }).quotes).toEqual(custom);
   expect(inRotation(bundled, [], { quotes: { marcus: [], seneca: [] } }).ignoredSelection).toBe(true);
+  expect(inRotation(bundled, [], { authors: ["marcus"], quotes: { marcus: [], seneca: [] } })).toEqual({
+    quotes: bundled.filter((quote) => quote.author === "marcus"),
+    ignoredSelection: true,
+    ignoredAuthors: false,
+  });
 });

@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { sandbox } from "./sandbox.ts";
+import { root, sandbox } from "./sandbox.ts";
 
 test("config selects bundled quotes, lists them, and still adds custom lines", async () => {
   const s = sandbox();
@@ -81,5 +81,98 @@ test("a bad quote field is ignored and an empty bundled list can fall back", asy
     const unmarked = await s.cli(["config", "--list"]);
     expect(unmarked.stdout).toContain("  q01  marcus  Meditations II.5");
     expect(unmarked.stdout).not.toContain("* q01");
+    expect(unmarked.stderr).toContain("config quotes matched no quotes");
+  } finally { s.cleanup(); }
+});
+
+test("config warns when an empty selection is ignored at rotation", async () => {
+  const s = sandbox();
+  try {
+    const narrowed = await s.cli(["config", "--authors", "marcus", "--quotes", "marcus=none"]);
+    expect(narrowed.code).toBe(0);
+    expect(narrowed.stdout).toContain("0 of 18 quotes");
+    expect(narrowed.stderr).toContain("config authors matched no quotes; using the whole book");
+    const whole = await s.cli(["status"]);
+    expect(whole.stdout).toContain("64 quotes:");
+    expect(whole.stderr).toContain("config authors matched no quotes; using the whole book");
+
+    const stoics = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"];
+    const selected = await s.cli(["config", "--authors", "marcus", ...stoics.flatMap((slug) => ["--quotes", `${slug}=none`])]);
+    expect(selected.code).toBe(0);
+    expect(selected.stdout).toContain("0 of 18 quotes");
+    expect(selected.stderr).toContain("quote selection was ignored; using the selected Stoics' lines");
+    expect(selected.stderr).not.toContain("using the whole book");
+    const kept = await s.cli(["status"]);
+    expect(kept.stdout).toContain("18 quotes:");
+    expect(kept.stdout).toContain("Marcus Aurelius");
+    expect(kept.stdout).not.toContain("Seneca");
+    expect(kept.stderr).toContain("quote selection was ignored; using the selected Stoics' lines");
+    expect(kept.stderr).not.toContain("using the whole book");
+  } finally { s.cleanup(); }
+});
+
+test("quote flags keep canonical ids and reject extra spellings", async () => {
+  const s = sandbox();
+  try {
+    const kept = await s.cli(["config", "--quotes", "marcus=q01"]);
+    expect(kept.code).toBe(0);
+    for (const flag of ["*", "marcus=*", "marcus=-", "marcus=q1", "marcus=q001"]) {
+      const rejected = await s.cli(["config", "--quotes", flag]);
+      expect(rejected.code).toBe(1);
+      expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).quotes.marcus).toEqual(["q01"]);
+    }
+    const none = await s.cli(["config", "--quotes", "marcus=none"]);
+    expect(none.code).toBe(0);
+    const all = await s.cli(["config", "--quotes", "marcus=all"]);
+    expect(all.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({});
+    const reset = await s.cli(["config", "--quotes", "marcus=q01", "--quotes", "all"]);
+    expect(reset.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({});
+  } finally { s.cleanup(); }
+});
+
+test("config --add without a value is a usage error", async () => {
+  const s = sandbox();
+  try {
+    const missing = await s.cli(["config", "--add"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("--add expects one author, citation and text");
+
+    const terminal = await s.exec([
+      "python3",
+      "-c",
+      [
+        "import os, pty, select, sys",
+        "pid, fd = pty.fork()",
+        "if pid == 0:",
+        "    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
+        "buf = b''",
+        "while True:",
+        "    ready, _, _ = select.select([fd], [], [], 3)",
+        "    if not ready:",
+        "        os.kill(pid, 15)",
+        "        sys.stderr.write('timed out waiting for --add')",
+        "        raise SystemExit(1)",
+        "    try:",
+        "        chunk = os.read(fd, 4096)",
+        "    except OSError:",
+        "        break",
+        "    if not chunk:",
+        "        break",
+        "    buf += chunk",
+        "_, status = os.waitpid(pid, 0)",
+        "sys.stdout.buffer.write(buf)",
+        "raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)",
+      ].join("\n"),
+      process.execPath,
+      join(root, "src/cli.ts"),
+      "config",
+      "--add",
+    ]);
+    expect(terminal.code).toBe(1);
+    expect(terminal.stdout + terminal.stderr).toContain("--add expects one author, citation and text");
+    expect(terminal.stdout + terminal.stderr).not.toContain("gum is missing");
+    expect(terminal.stdout + terminal.stderr).not.toContain("Author slug");
   } finally { s.cleanup(); }
 });

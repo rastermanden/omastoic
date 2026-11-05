@@ -109,7 +109,7 @@ validates and saves the same settings, restarting the daemon if selected.
 
 `quotes` chooses which **bundled** lines stay in rotation, per Stoic. Ids are
 `q01`, `q02`, … in `data/quotes.tsv` order (`omastoic config --list` prints
-them; `q1` is `q01`). A missing Stoic means every bundled line of theirs. `[]`
+them). A missing Stoic means every bundled line of theirs. `[]`
 means none of their bundled lines. Listing every id for a Stoic is stored as
 the default and the key is omitted. `omastoic config --quotes marcus=q01,q02`
 writes that list; `--quotes marcus=all` and `--quotes all` clear restrictions.

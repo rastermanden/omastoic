@@ -109,15 +109,39 @@ async function customQuotes(): Promise<Quote[]> {
   return parseQuotes(await extra.text());
 }
 
+function warnIgnoredRotation(bundled: BundledQuote[], custom: Quote[], settings: Settings): void {
+  const rotation = inRotation(bundled, custom, settings);
+  if (rotation.ignoredSelection) {
+    const wanted = new Set(settings.authors ?? []);
+    const selected = bundled.filter((quote) => wanted.has(quote.author));
+    const onlySelected =
+      wanted.size > 0 &&
+      selected.length > 0 &&
+      selected.length < bundled.length &&
+      rotation.quotes.length === selected.length &&
+      rotation.quotes.every(
+        (quote, index) =>
+          quote.author === selected[index]?.author &&
+          quote.citation === selected[index]?.citation &&
+          quote.text === selected[index]?.text,
+      );
+    console.error(
+      onlySelected
+        ? "omastoic: quote selection was ignored; using the selected Stoics' lines"
+        : "omastoic: config quotes matched no quotes; using the whole book",
+    );
+  }
+  if (rotation.ignoredAuthors) console.error("omastoic: config authors matched no quotes; using the whole book");
+}
+
 async function quoteBook(): Promise<Quote[]> {
   const bundled = await bundledBook();
   const cfg = await config();
+  const custom = await customQuotes();
   // Lines in quotes.tsv are added to the book. They stay in rotation even when
   // a bundled id for that Stoic is left out.
-  const rotation = inRotation(bundled, await customQuotes(), cfg);
-  if (rotation.ignoredSelection) console.error("omastoic: config quotes matched no quotes; using the whole book");
-  if (rotation.ignoredAuthors) console.error("omastoic: config authors matched no quotes; using the whole book");
-  return rotation.quotes;
+  warnIgnoredRotation(bundled, custom, cfg);
+  return inRotation(bundled, custom, cfg).quotes;
 }
 
 const authors = async () => parseAuthors(await Bun.file(join(ROOT, "data/authors.tsv")).text());
@@ -749,16 +773,6 @@ async function pickQuotes(name: string, choices: BundledQuote[], selected: strin
   });
 }
 
-async function promptQuoteLine(): Promise<string | null> {
-  const author = await gumText(["input", "--header", "Author slug (marcus, seneca, …)", "--placeholder", "marcus"]);
-  if (!author) return null;
-  const citation = await gumText(["input", "--header", "Citation", "--placeholder", "Meditations IX.1"]);
-  if (!citation) return null;
-  const text = await gumText(["input", "--header", "Quote text"]);
-  if (!text) return null;
-  return `${author}\t${citation}\t${text}`;
-}
-
 const QUOTE_HEADER = "# author-slug <TAB> citation <TAB> text\n";
 
 async function appendQuotes(lines: string[]): Promise<number> {
@@ -907,20 +921,11 @@ async function configure(rest: string[]): Promise<number> {
     }
     if (addFlags.length) {
       if (addFlags.some((line) => !line)) {
-        if (addFlags.length !== 1 || !process.stdin.isTTY) {
-          console.error("omastoic: --add expects one author, citation and text, separated by tabs");
-          console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
-          return 1;
-        }
-        if (!Bun.which("gum")) {
-          console.error("omastoic: gum is missing — pass the quote on the command line:");
-          console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
-          return 1;
-        }
-        const prompted = await promptQuoteLine();
-        if (prompted == null) return 0;
-        quoteLines = [prompted];
-      } else quoteLines = addFlags;
+        console.error("omastoic: --add expects one author, citation and text, separated by tabs");
+        console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
+        return 1;
+      }
+      quoteLines = addFlags;
     }
   }
 
@@ -931,8 +936,11 @@ async function configure(rest: string[]): Promise<number> {
   const settingsTouched = interactive || authorsFlag != null || intervalFlag != null || quoteFlags.length > 0;
   if (settingsTouched) await saveSettings(next, slugs, catalog);
   if (settingsTouched || quoteLines) await restartDaemon();
-  printSettings(await config(), roster, catalog);
-  if (list) console.log(formatQuoteList(bundled, await customQuotes(), await config()));
+  const saved = await config();
+  printSettings(saved, roster, catalog);
+  const custom = await customQuotes();
+  warnIgnoredRotation(bundled, custom, saved);
+  if (list) console.log(formatQuoteList(bundled, custom, saved));
   return 0;
 }
 

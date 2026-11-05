@@ -9,17 +9,17 @@ export type Author = { slug: string; name: string; dates: string };
 
 export const ART_GAP = 4;
 
-/** Bundled row ids are `q01`, `q02`, … in `data/quotes.tsv` order. `q1` is the same as `q01`. */
+/** Bundled row ids are `q01`, `q02`, … in `data/quotes.tsv` order. */
 export function canonicalQuoteId(raw: string): string | null {
-  const match = /^q0*([1-9]\d*)$/.exec(raw.trim().toLowerCase());
-  if (!match) return null;
-  return `q${match[1].padStart(2, "0")}`;
+  const id = raw.trim().toLowerCase();
+  if (!/^q(?:0[1-9]|[1-9]\d+)$/.test(id)) return null;
+  return id;
 }
 
 export type BundledQuote = Quote & { id: string };
 
 export function indexBundled(quotes: Quote[]): BundledQuote[] {
-  return quotes.map((quote, index) => ({ ...quote, id: canonicalQuoteId(`q${index + 1}`)! }));
+  return quotes.map((quote, index) => ({ ...quote, id: `q${String(index + 1).padStart(2, "0")}` }));
 }
 
 export function parseQuotes(tsv: string): Quote[] {

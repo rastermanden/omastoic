@@ -90,14 +90,14 @@ export type QuoteFlag = { kind: "reset" } | { kind: "author"; author: string; id
 export function parseQuoteFlag(raw: string): QuoteFlag | null {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed) return null;
-  if (trimmed === "all" || trimmed === "*") return { kind: "reset" };
+  if (trimmed === "all") return { kind: "reset" };
   const eq = trimmed.indexOf("=");
   if (eq <= 0) return null;
   const author = trimmed.slice(0, eq).trim();
   const rest = trimmed.slice(eq + 1).trim();
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(author)) return null;
-  if (rest === "all" || rest === "*") return { kind: "author", author, ids: "all" };
-  if (rest === "none" || rest === "-") return { kind: "author", author, ids: [] };
+  if (rest === "all") return { kind: "author", author, ids: "all" };
+  if (rest === "none") return { kind: "author", author, ids: [] };
   const ids: string[] = [];
   for (const part of rest.split(/[,\s]+/).filter(Boolean)) {
     const id = canonicalQuoteId(part);
