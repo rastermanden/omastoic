@@ -6,6 +6,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## Unreleased
+
+### Fixed
+
+- Fit the quote already on screen again when a screensaver grid becomes known
+  or changes. The same quote stays up, and its remaining display time keeps
+  running.
+- Take that grid from the screensaver terminal. Ignore the 80×24 mapping
+  placeholder, and do not estimate cells from monitors or another terminal.
+  Until a real grid is known, the canvas is 92×24.
+- A failed refresh of an install that already has the Stoics selected leaves
+  that selection and the live canvas in place.
+
 ## 2.2.0 - 2026-11-04
 
 ### Changed

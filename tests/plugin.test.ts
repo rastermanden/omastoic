@@ -60,6 +60,62 @@ for (const failure of ["completion conflict", "enable --now omastoic-prune.path"
   });
 }
 
+test("a failed refresh keeps an already selected Stoics canvas", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  s.put(branding, "original art\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const canvas = readFileSync(branding, "utf8");
+    const written = readFileSync(join(s.state, "written.sha"), "utf8");
+    const displaced = readFileSync(join(s.state, "displaced.kind"), "utf8");
+    const backup = readFileSync(`${branding}.pre-omastoic`, "utf8");
+    expect(existsSync(join(s.home, "toggle"))).toBe(true);
+    expect(existsSync(join(s.home, "omastoic.service.enabled"))).toBe(true);
+    const failed = await s.cli(["setup", "--on-first", "--quiet"], { SYSTEMCTL_FAIL: "enable --now omastoic-prune.path" });
+    expect(failed.code).toBe(1);
+    expect(existsSync(join(s.home, "toggle"))).toBe(true);
+    expect(existsSync(join(s.home, "omastoic.service.enabled"))).toBe(true);
+    expect(existsSync(join(s.home, "omastoic.service.active"))).toBe(true);
+    expect(readFileSync(branding, "utf8")).toBe(canvas);
+    expect(readFileSync(join(s.state, "written.sha"), "utf8")).toBe(written);
+    expect(readFileSync(join(s.state, "displaced.kind"), "utf8")).toBe(displaced);
+    expect(readFileSync(`${branding}.pre-omastoic`, "utf8")).toBe(backup);
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect(existsSync(join(s.home, "toggle"))).toBe(true);
+    expect(readFileSync(branding, "utf8")).toBe(canvas);
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe("original art\n");
+  } finally { s.cleanup(); }
+});
+
+test("a failed upgrade does not restore the host logo over a legacy selection", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const host = process.env.OMARCHY_TEST_ROOT ?? "/usr/share/omarchy";
+  const logo = readFileSync(join(host, "logo.txt"), "utf8");
+  s.put(join(s.env.OMARCHY_PATH, "logo.txt"), logo);
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const canvas = readFileSync(branding, "utf8");
+    const written = readFileSync(join(s.state, "written.sha"), "utf8");
+    expect(existsSync(`${branding}.pre-omastoic`)).toBe(false);
+    rmSync(join(s.state, "displaced.kind"));
+    const failed = await s.cli(["setup", "--on-first", "--quiet"], { SYSTEMCTL_FAIL: "enable --now omastoic-prune.path" });
+    expect(failed.code).toBe(1);
+    expect(existsSync(join(s.home, "toggle"))).toBe(true);
+    expect(readFileSync(branding, "utf8")).toBe(canvas);
+    expect(readFileSync(join(s.state, "written.sha"), "utf8")).toBe(written);
+    expect(readFileSync(`${branding}.pre-omastoic`, "utf8")).toBe(logo);
+    expect(readFileSync(join(s.state, "displaced.kind"), "utf8")).toBe("file");
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe(canvas);
+    expect(existsSync(join(s.home, "toggle"))).toBe(true);
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe(logo);
+  } finally { s.cleanup(); }
+});
+
 test("install activation failure is not marked installed; uninstall failure is retryable", async () => {
   const s = sandbox();
   try {

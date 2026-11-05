@@ -109,12 +109,15 @@ digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
 citations to 256 characters and quote text to 4096; terminal control escapes
 are rejected. An unknown author renders without a portrait.
 
-The shared canvas uses the smallest measured terminal/monitor grid. Portraits
-are hidden when either dimension cannot fit. Wrapping accounts for CJK,
-combining marks, emoji and long words. All bundled entries fit **40×24** and
-the audit's larger grids. In a **20×8** reading area, an entry that cannot fit
-in full shows **“Resize to read quote” plus its citation**, never a truncated
-quotation. Grids too small even for that return a clear error.
+The shared canvas uses the smallest measured screensaver grid. When that grid
+becomes known or changes, the quote already on screen is fitted again without
+advancing to the next quote or restarting its display time. Until a grid is
+known, the canvas is 92×24. Portraits are hidden when either dimension cannot
+fit. Wrapping accounts for CJK, combining marks, emoji and long words. All
+bundled entries fit **40×24** and the audit's larger grids. In a **20×8**
+reading area, an entry that cannot fit in full shows **“Resize to read quote”
+plus its citation**, never a truncated quotation. Grids too small even for
+that return a clear error.
 
 The portraits in this release remain **AI-imagined illustrations**, not
 historical photographs. Rebuild details are in [docs/ART.md](docs/ART.md).

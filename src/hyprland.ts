@@ -1,28 +1,15 @@
 // The little bit of Hyprland omastoic needs: how big the screensaver terminal
 // will be, and when one opens or closes.
 
-import { mkdirSync, readFileSync, readlinkSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readlinkSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const SCREENSAVER_CLASS = "org.omarchy.screensaver";
 
 export type Size = { cols: number; rows: number };
-export type Cell = { width: number; height: number };
-export type CanvasSize = Size & { source: "live" | "cache" | "probe" | "fallback"; cell: Cell };
-export type Monitor = { width: number; height: number; scale?: number; transform?: number };
-export type LiveProbe = { grid: Size; pixels?: { width: number; height: number } };
+export type CanvasSize = Size & { source: "live" | "fallback" };
 
-// Last-resort cell if no screensaver has been measured yet. Omarchy runs the
-// screensaver at 18pt with no padding; this is 18pt JetBrains Mono at 96 DPI.
-export const FALLBACK_CELL: Cell = { width: 14.4, height: 33.3 };
-
-const STATE = join(process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? "", ".local/state"), "omastoic");
-const CELL_FILE = join(STATE, "cell.json");
-const CONFIG_HOME = process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config");
-const DEFAULT_SIZE: Size = { cols: 92, rows: 24 };
-const SCREENSAVER_FONT_SIZE = 18;
-
-let memoryCell: Cell | null = null;
+export const DEFAULT_SIZE: Size = { cols: 92, rows: 24 };
 
 export function socketPath(): string | null {
   const runtime = process.env.XDG_RUNTIME_DIR;
@@ -63,16 +50,6 @@ export function parseSttySize(text: string): Size | null {
   return { cols, rows };
 }
 
-export function parseCell(raw: unknown): Cell | null {
-  if (!raw || typeof raw !== "object") return null;
-  const width = (raw as { width?: unknown }).width;
-  const height = (raw as { height?: unknown }).height;
-  if (typeof width !== "number" || typeof height !== "number") return null;
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  if (width < 4 || width > 40 || height < 8 || height > 80) return null;
-  return { width, height };
-}
-
 export function clampGrid(size: Size): Size {
   return { cols: Math.max(1, Math.floor(size.cols)), rows: Math.max(1, Math.floor(size.rows)) };
 }
@@ -85,95 +62,11 @@ export function minGrid(sizes: Size[]): Size | null {
   });
 }
 
-export function logicalMonitorSize(monitor: Monitor): { width: number; height: number } {
-  const scale = monitor.scale && monitor.scale > 0 ? monitor.scale : 1;
-  const vertical = monitor.transform === 1 || monitor.transform === 3 || monitor.transform === 5 || monitor.transform === 7;
-  const width = (vertical ? monitor.height : monitor.width) / scale;
-  const height = (vertical ? monitor.width : monitor.height) / scale;
-  return { width, height };
-}
-
-export function gridForPixels(pixels: { width: number; height: number }, cell: Cell): Size {
-  return clampGrid({
-    cols: Math.floor(pixels.width / cell.width + 1e-9),
-    rows: Math.floor(pixels.height / cell.height + 1e-9),
-  });
-}
-
-export function cellFromPixels(pixels: { width: number; height: number }, grid: Size): Cell | null {
-  if (grid.cols < 1 || grid.rows < 1) return null;
-  const width = pixels.width / grid.cols;
-  const height = pixels.height / grid.rows;
-  return parseCell({ width, height });
-}
-
-export function innerPixels(
-  window: { width: number; height: number },
-  pad: { x: number; y: number },
-): { width: number; height: number } {
-  return {
-    width: Math.max(1, window.width - 2 * Math.max(0, pad.x)),
-    height: Math.max(1, window.height - 2 * Math.max(0, pad.y)),
-  };
-}
-
-export function scaleCell(cell: Cell, fromPt: number, toPt: number): Cell | null {
-  if (!(fromPt > 0) || !(toPt > 0)) return null;
-  return parseCell({ width: cell.width * (toPt / fromPt), height: cell.height * (toPt / fromPt) });
-}
-
-export function parseGhosttyMetrics(text: string): { fontSize: number; padX: number; padY: number } {
-  const fontSize = Number(/^\s*font-size\s*=\s*([\d.]+)/m.exec(text)?.[1]) || 0;
-  const padX = Number(/^\s*window-padding-x\s*=\s*([\d.]+)/m.exec(text)?.[1]) || 0;
-  const padYMatch = /^\s*window-padding-y\s*=\s*([\d.]+)/m.exec(text);
-  const padY = padYMatch ? Number(padYMatch[1]) : padX;
-  return { fontSize, padX, padY };
-}
-
-export function parseFootMetrics(text: string): { fontSize: number; padX: number; padY: number } {
-  const fontSize = Number(/size=([\d.]+)/.exec(text)?.[1]) || 0;
-  const pad = /pad=([\d.]+)x([\d.]+)/.exec(text);
-  return { fontSize, padX: pad ? Number(pad[1]) : 0, padY: pad ? Number(pad[2]) : 0 };
-}
-
-export function parseKittyMetrics(text: string): { fontSize: number; padX: number; padY: number } {
-  const fontSize = Number(/^\s*font_size\s+([\d.]+)/m.exec(text)?.[1]) || 0;
-  const pad = Number(/^\s*window_padding_width\s+([\d.]+)/m.exec(text)?.[1]) || 0;
-  return { fontSize, padX: pad, padY: pad };
-}
-
-export function parseAlacrittyMetrics(text: string): { fontSize: number; padX: number; padY: number } {
-  const fontSize = Number(/^\s*size\s*=\s*([\d.]+)/m.exec(text)?.[1]) || 0;
-  const padX = Number(/padding\.x\s*=\s*([\d.]+)/.exec(text)?.[1]) || 0;
-  const padY = Number(/padding\.y\s*=\s*([\d.]+)/.exec(text)?.[1]) || padX;
-  return { fontSize, padX, padY };
-}
-
-/**
- * Pick a canvas grid. A live tty wins; otherwise the smallest monitor using a
- * previously measured cell, a cell scaled from an open terminal, or the 18pt fallback.
- */
-export function canvasSizeFrom(
-  live: LiveProbe[],
-  monitors: Monitor[],
-  cached: Cell | null,
-  probed: Cell | null = null,
-): CanvasSize {
-  const real = live.filter((probe) => !isPlaceholderGrid(probe.grid));
-  if (real.length) {
-    const size = minGrid(real.map((probe) => probe.grid)) ?? DEFAULT_SIZE;
-    const sample = real.find((probe) => probe.grid.cols === size.cols && probe.grid.rows === size.rows) ?? real[0];
-    const cell = (sample.pixels && cellFromPixels(sample.pixels, sample.grid)) || cached || probed || FALLBACK_CELL;
-    const safe = minGrid([size, ...monitors.map((monitor) => gridForPixels(logicalMonitorSize(monitor), cell))])!;
-    return { ...safe, source: "live", cell };
-  }
-
-  const cell = cached ?? probed ?? FALLBACK_CELL;
-  const source = cached ? "cache" : probed ? "probe" : "fallback";
-  if (!monitors.length) return { ...DEFAULT_SIZE, source, cell };
-
-  const size = minGrid(monitors.map((monitor) => gridForPixels(logicalMonitorSize(monitor), cell))) ?? DEFAULT_SIZE;
-  return { ...size, source, cell };
+/** Smallest real screensaver grid. An 80×24 mapping placeholder is not one. */
+export function canvasSizeFrom(live: Size[]): CanvasSize {
+  const size = minGrid(live.filter((grid) => !isPlaceholderGrid(grid)));
+  if (size) return { ...size, source: "live" };
+  return { ...DEFAULT_SIZE, source: "fallback" };
 }
 
 async function hyprctlJson(args: string[]): Promise<unknown> {
@@ -298,12 +191,6 @@ async function gridForProcessTree(pid: number): Promise<Size | null> {
   return null;
 }
 
-export function liveProbesFrom(grids: Size[], windows: { width: number; height: number }[]): LiveProbe[] {
-  const real = grids.filter((grid) => !isPlaceholderGrid(grid));
-  const pixels = grids.length === 1 && windows.length === 1 ? windows[0] : undefined;
-  return real.map((grid) => ({ grid, pixels }));
-}
-
 async function gridsFromPids(pids: number[]): Promise<Size[]> {
   const grids: Size[] = [];
   for (const pid of pids) {
@@ -314,167 +201,54 @@ async function gridsFromPids(pids: number[]): Promise<Size[]> {
   return grids;
 }
 
-function screensaverWindows(clients: unknown): { width: number; height: number; pid: number }[] {
+function screensaverPids(clients: unknown): number[] {
   if (!Array.isArray(clients)) return [];
-  const windows: { width: number; height: number; pid: number }[] = [];
+  const pids: number[] = [];
   for (const client of clients) {
     if (!client || typeof client !== "object") continue;
-    const rec = client as { class?: unknown; pid?: unknown; size?: unknown; mapped?: unknown };
+    const rec = client as { class?: unknown; pid?: unknown; mapped?: unknown };
     if (rec.class !== SCREENSAVER_CLASS || rec.mapped === false) continue;
     const pid = rec.pid;
-    const size = rec.size;
     if (typeof pid !== "number" || pid <= 0) continue;
-    if (!Array.isArray(size) || typeof size[0] !== "number" || typeof size[1] !== "number") continue;
-    windows.push({ width: size[0], height: size[1], pid });
+    pids.push(pid);
   }
-  return windows;
+  return pids;
 }
 
-async function liveProbes(): Promise<LiveProbe[]> {
+async function readScreensaverGrids(): Promise<Size[]> {
   // Ghostty (GTK single-instance) reports the same pid for every window, and
   // `/proc/<pid>/task/<pid>/children` often omits the shell. Walk from the
   // window pid would hit the user's ordinary tty. Find omarchy-screensaver /
   // ttfx by cmdline instead; those own the screensaver pts.
   let grids = await gridsFromPids(pidsWhere(isScreensaverArgv));
   if (!grids.length) grids = await gridsFromPids(pidsWhere(isTtfxArgv));
+  if (grids.length) return grids;
 
-  const windows = screensaverWindows(await hyprctlJson(["clients", "-j"]));
-  if (!grids.length) {
-    const seen = new Set<number>();
-    for (const win of windows) {
-      if (seen.has(win.pid)) continue;
-      seen.add(win.pid);
-      const grid = await gridForProcessTree(win.pid);
-      if (grid) grids.push(grid);
-    }
+  const seen = new Set<number>();
+  for (const pid of screensaverPids(await hyprctlJson(["clients", "-j"]))) {
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    const grid = await gridForProcessTree(pid);
+    if (grid) grids.push(grid);
   }
-  return liveProbesFrom(
-    grids,
-    windows.map(({ width, height }) => ({ width, height })),
-  );
+  return grids;
 }
 
-async function loadCachedCell(): Promise<Cell | null> {
-  if (memoryCell) return memoryCell;
-  try {
-    memoryCell = parseCell(JSON.parse(readFileSync(CELL_FILE, "utf8")));
-  } catch {
-    memoryCell = null;
-  }
-  return memoryCell;
-}
-
-async function rememberCell(cell: Cell): Promise<void> {
-  const same = memoryCell && memoryCell.width === cell.width && memoryCell.height === cell.height;
-  memoryCell = cell;
-  if (same) return;
-  try {
-    mkdirSync(STATE, { recursive: true });
-    await Bun.write(CELL_FILE, `${JSON.stringify(cell)}\n`);
-  } catch {
-    // state dir not writable; in-memory cache still helps this process
-  }
-}
-
-type TerminalKind = "ghostty" | "foot" | "kitty" | "alacritty";
-
-function defaultTerminalKind(): TerminalKind | null {
-  const proc = Bun.spawnSync(["xdg-terminal-exec", "--print-id"], { stdout: "pipe", stderr: "ignore" });
-  const id = proc.stdout.toString().toLowerCase();
-  if (id.includes("ghostty")) return "ghostty";
-  if (id.includes("foot")) return "foot";
-  if (id.includes("kitty")) return "kitty";
-  if (id.includes("alacritty")) return "alacritty";
-  return null;
-}
-
-function classMatchesTerminal(kind: TerminalKind, className: string): boolean {
-  const name = className.toLowerCase();
-  if (kind === "ghostty") return name.includes("ghostty");
-  if (kind === "foot") return name.includes("foot");
-  if (kind === "kitty") return name.includes("kitty");
-  return name.includes("alacritty");
-}
-
-function userMetrics(kind: TerminalKind): { fontSize: number; padX: number; padY: number } {
-  const read = (path: string) => {
-    try {
-      return readFileSync(path, "utf8");
-    } catch {
-      return "";
-    }
-  };
-  if (kind === "ghostty") return parseGhosttyMetrics(read(join(CONFIG_HOME, "ghostty/config")));
-  if (kind === "foot") return parseFootMetrics(read(join(CONFIG_HOME, "foot/foot.ini")));
-  if (kind === "kitty") return parseKittyMetrics(read(join(CONFIG_HOME, "kitty/kitty.conf")));
-  return parseAlacrittyMetrics(read(join(CONFIG_HOME, "alacritty/alacritty.toml")));
-}
-
-async function probeCellFromOpenTerminal(): Promise<Cell | null> {
-  const kind = defaultTerminalKind();
-  if (!kind) return null;
-  const metrics = userMetrics(kind);
-  if (!(metrics.fontSize > 0)) return null;
-
-  const clients = await hyprctlJson(["clients", "-j"]);
-  if (!Array.isArray(clients)) return null;
-  const windows: { width: number; height: number; pid: number }[] = [];
-  for (const client of clients) {
-    if (!client || typeof client !== "object") continue;
-    const rec = client as { class?: unknown; pid?: unknown; size?: unknown; mapped?: unknown };
-    if (rec.class === SCREENSAVER_CLASS || rec.mapped === false) continue;
-    if (!classMatchesTerminal(kind, String(rec.class ?? ""))) continue;
-    const pid = rec.pid;
-    const size = rec.size;
-    if (typeof pid !== "number" || pid <= 0) continue;
-    if (!Array.isArray(size) || typeof size[0] !== "number" || typeof size[1] !== "number") continue;
-    windows.push({ width: size[0], height: size[1], pid });
-  }
-  if (!windows.length) return null;
-  windows.sort((a, b) => b.width * b.height - a.width * a.height);
-  const win = windows[0];
-  const grid = await gridForProcessTree(win.pid);
-  if (!grid || isPlaceholderGrid(grid)) return null;
-  const cell = cellFromPixels(innerPixels(win, { x: metrics.padX, y: metrics.padY }), grid);
-  if (!cell) return null;
-  return scaleCell(cell, metrics.fontSize, SCREENSAVER_FONT_SIZE);
-}
-
-/**
- * The grid the screensaver will get, in cells. Prefers a live tty readout from
- * an open screensaver; otherwise the smallest monitor using a measured cell.
- */
+/** The grid a canvas should use: the smallest live screensaver tty, or 92×24. */
 export async function screensaverSize(): Promise<CanvasSize> {
-  const cached = await loadCachedCell();
-  let live: LiveProbe[] = [];
-  let monitors: Monitor[] = [];
   try {
-    live = await liveProbes();
-    const raw = await hyprctlJson(["monitors", "-j"]);
-    if (Array.isArray(raw)) monitors = raw as Monitor[];
+    return canvasSizeFrom(await readScreensaverGrids());
   } catch {
-    // compositor not up
+    return { ...DEFAULT_SIZE, source: "fallback" };
   }
-
-  let probed: Cell | null = null;
-  if (!live.some((probe) => !isPlaceholderGrid(probe.grid)) && !cached) {
-    probed = await probeCellFromOpenTerminal().catch(() => null);
-  }
-
-  const size = canvasSizeFrom(live, monitors, cached, probed);
-  if (size.source === "probe" || live.some((probe) => !isPlaceholderGrid(probe.grid) && probe.pixels && cellFromPixels(probe.pixels, probe.grid))) await rememberCell(size.cell);
-  return size;
 }
 
 /** Poll until a screensaver tty has resized off the 80x24 placeholder. */
 export async function waitForLiveGrid(timeoutMs = 2000): Promise<CanvasSize | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const live = (await liveProbes()).filter((probe) => !isPlaceholderGrid(probe.grid));
-    if (live.length) {
-      const size = await screensaverSize();
-      if (size.source === "live") return size;
-    }
+    const size = await screensaverSize();
+    if (size.source === "live") return size;
     await Bun.sleep(20);
   }
   const size = await screensaverSize();
