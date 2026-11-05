@@ -212,15 +212,13 @@ async function onScreen(): Promise<Quote | null> {
   return typeof index === "number" ? quotes[index] ?? null : null;
 }
 
-async function render(size?: Size, remember = true): Promise<string> {
+async function render(size?: Size): Promise<{ body: string; recent: number[] }> {
   const quotes = await quoteBook();
   if (!quotes.length) throw new Error("the quote book is empty");
 
   const chosen = pick(quotes, await recent());
-  if (remember) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
-
   const grid = size ?? (await screensaverSize());
-  return composeQuote(chosen.quote, grid);
+  return { body: await composeQuote(chosen.quote, grid), recent: chosen.recent };
 }
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
@@ -238,7 +236,10 @@ async function writeBranding(takeSlot = false, size?: Size): Promise<boolean> {
   // measure terminals. All our writers hold the transaction lock.
   const before = await Bun.file(BRANDING).text().catch(() => null);
   if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
-  return commitCanvas(await render(size), before, takeSlot);
+  const drawn = await render(size);
+  if (!(await commitCanvas(drawn.body, before, takeSlot))) return false;
+  atomicWrite(join(STATE, "recent.json"), JSON.stringify(drawn.recent));
+  return true;
 }
 
 async function reflowQuote(size: Size): Promise<boolean> {
@@ -697,11 +698,12 @@ async function daemon(): Promise<number> {
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   const arm = () => {
     if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = null;
+    if (open.size === 0) return;
     pollTimer = setTimeout(() => {
       if (!queue.some((item) => item.kind === "grid")) push({ kind: "grid" });
-    }, open.size > 0 ? GRID_POLL_MS : 60_000);
+    }, GRID_POLL_MS);
   };
-  arm();
 
   while (true) {
     const incoming = await take();
@@ -902,7 +904,7 @@ async function main(): Promise<number> {
     case "show": {
       const cols = flag("cols") ?? (process.stdout.columns || undefined);
       const rows = flag("rows") ?? (process.stdout.rows || undefined);
-      console.log(await render({ cols: cols ?? 92, rows: rows ?? 25 }, false));
+      console.log((await render({ cols: cols ?? 92, rows: rows ?? 25 })).body);
       return 0;
     }
     case "on":

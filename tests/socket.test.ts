@@ -373,6 +373,74 @@ finally:
   }
 }, 20000);
 
+test("a failed publish does not record a quote the canvas never showed", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const history = () => readFileSync(join(s.state, "recent.json"), "utf8");
+  const canvasText = () => readFileSync(branding, "utf8");
+  const entry = { author: "custom", citation: "C".repeat(70), text: "x".repeat(1791) };
+  expect(() => compose(entry, undefined, { cols: 10, rows: 2, art: null })).toThrow(/too small/);
+  const bundled = parseQuotes(readFileSync(join(root, "data/quotes.tsv"), "utf8")).length;
+  const seeded = JSON.stringify([...Array(bundled).keys()]);
+  const fixture = Bun.spawn(["python3", "-u", "-c", `import fcntl, os, pty, struct, subprocess, sys, termios
+master, slave = pty.openpty()
+child = None
+def resize(fd, cols, rows):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+try:
+    resize(slave, 111, 30)
+    child = subprocess.Popen(['sleep', '120'], stdin=slave, stdout=slave, stderr=slave)
+    print(child.pid, flush=True)
+    for line in sys.stdin:
+        parts = line.split()
+        if len(parts) != 2: continue
+        cols, rows = map(int, parts)
+        resize(slave, cols, rows)
+        print('ready', flush=True)
+finally:
+    if child:
+        child.terminate()
+        child.wait()
+    os.close(master)
+    os.close(slave)
+`], { env: s.env, stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+  const reader = fixture.stdout.getReader();
+  const record = async () => {
+    let text = "";
+    while (!text.includes("\n")) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error("PTY fixture exited before readiness");
+      text += new TextDecoder().decode(value);
+    }
+    return text.trim();
+  };
+  try {
+    const pid = Number(await record());
+    s.put(join(s.home, "clients.json"), JSON.stringify([{ address: "large", pid, class: "org.omarchy.screensaver" }]));
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(join(s.config, "omastoic/quotes.tsv"), `custom\t${entry.citation}\t${entry.text}\n`);
+    s.put(join(s.state, "recent.json"), seeded);
+    const canvas = canvasText();
+    fixture.stdin.write("10 2\n");
+    expect(await record()).toBe("ready");
+    const failed = await s.cli(["next"]);
+    expect(failed.code).toBe(1);
+    expect(failed.stderr).toContain("too small");
+    expect(history()).toBe(seeded);
+    expect(canvasText()).toBe(canvas);
+    fixture.stdin.write("60 12\n");
+    expect(await record()).toBe("ready");
+    expect((await s.cli(["next"])).code).toBe(0);
+    expect(JSON.parse(history())[0]).toBe(bundled);
+    expect(canvasText()).toBe(`${compose(entry, undefined, { cols: 60, rows: 12, art: null })}\n`);
+  } finally {
+    fixture.stdin.end();
+    await fixture.exited;
+    reader.releaseLock();
+    s.cleanup();
+  }
+}, 20000);
+
 test("oversized unterminated records reconnect instead of growing without bound", async () => {
   const s = sandbox();
   const socket = join(s.env.XDG_RUNTIME_DIR, "hypr/test/.socket2.sock");
