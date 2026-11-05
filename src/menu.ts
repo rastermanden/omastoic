@@ -9,7 +9,7 @@ export const PARENT = "appearance.branding.screensaver";
 export function rows(): string[] {
   const installed = `[[ -f ~/.config/omarchy/plugins/${PLUGIN_ID}/manifest.json ]]`;
   return [
-    `  "${PARENT}.stoics": {"icon":"󱄄","label":"Stoics","description":"Rotate cited Stoic quotes on the screensaver","when":"${installed}","checked":"omarchy-toggle-enabled omastoic","action":"omastoic toggle"},`,
+    `  "${PARENT}.stoics": {"icon":"󰁰","label":"Stoics","description":"Rotate cited Stoic quotes on the screensaver","when":"${installed}","checked":"omarchy-toggle-enabled omastoic","action":"omastoic toggle"},`,
   ];
 }
 
