@@ -1,4 +1,5 @@
 node_modules/
+.host/
 
 # Commons sources are re-downloadable, so they stay out of the repo.
 # assets/local/ is deliberately NOT ignored: those images cannot be

@@ -1,0 +1,716 @@
+{
+  "schemaVersion": 1,
+  "reviewed": "2026-11-04",
+  "policy": "64 stable entries, one source record per TSV row. Words checked against the linked public-domain editions. Internal omissions marked with ellipsis; capitalization, punctuation and whitespace normalized. Passages are independent source excerpts, not generated from the runtime quote text. Automated consistency tests cannot prove historical authorship.",
+  "quotes": [
+    {
+      "id": "q01",
+      "author": "marcus",
+      "citation": "Meditations II.5",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "what thou hast in hand with perfect and simple dignity, and feeling of affection, and freedom, and justice; and to give thyself relief from all other thoughts. And thou wilt give thyself relief, if thou doest every act of thy life as if it were the last, laying aside all carelessness and passionate aversion from the commands of reason, and all hypocrisy, and self-love, and discontent with the portion which has"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q02",
+      "author": "marcus",
+      "citation": "Meditations IV.17",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "ce. Within ten days thou wilt seem a god to those to whom thou art now a beast and an ape, if thou wilt return to thy principles and the worship of reason. Do not act as if thou wert going to live ten thousand years. Death hangs over thee. While thou livest, while it is in thy power, be good. How much trouble he avoids who does not look to see what his neighbour says or does or thinks, but only to what he does himself, that it may be just and pure"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q03",
+      "author": "marcus",
+      "citation": "Meditations IV.3",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "es it, and rises higher by means of this very material. Let no act be done without a purpose, nor otherwise than according to the perfect principles of art. Men seek retreats for themselves, houses in the country, sea-shores, and mountains; and thou too art wont to desire such things very much. But this is altogether a mark of the most common sort of men, for it is in thy power whenever thou shal",
+        "he country, sea-shores, and mountains; and thou too art wont to desire such things very much. But this is altogether a mark of the most common sort of men, for it is in thy power whenever thou shalt choose to retire into thyself. For nowhere either with more quiet or more freedom from trouble does a man retire than into his own soul, particularly when he has within him such thoughts th"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q04",
+      "author": "marcus",
+      "citation": "Meditations IV.7",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "ave juice. But by all means bear this in mind, that within a very short time both thou and he will be dead; and soon not even your names will be left behind. Take away thy opinion, and then there is taken away the complaint, \"I have been harmed.\" Take away the complaint, \"I have been harmed,\" and the harm is taken away. That which does not make a man worse than he was, also does not make his life worse, nor does it harm him either from without or from within. The nature of"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q05",
+      "author": "marcus",
+      "citation": "Meditations IV.24",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        ": from thee are all things, in thee are all things, to thee all things return. The poet says, Dear city of Cecrops; and wilt not thou say, Dear city of Zeus? Occupy thyself with few things, says the philosopher, if thou wouldst be tranquil.- But consider if it would not be better to say, Do what is necessary, and whatever the reason of the animal which is naturally social requires, and as it requ"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q06",
+      "author": "marcus",
+      "citation": "Meditations V.16",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "or of other things like them, or even when he is deprived of any of them, the more patiently he endures the loss, just in the same degree he is a better man. Such as are thy habitual thoughts, such also will be the character of thy mind; for the soul is dyed by the thoughts. Dye it then with a continuous series of such thoughts as these: for instance, that where a man can live, there he can also live well. But he must live in a pa"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q07",
+      "author": "marcus",
+      "citation": "Meditations V.20",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "d disposition, which have the power of acting conditionally and changing: for the mind converts and changes every hindrance to its activity into an aid; and so that which is a hindrance is made a furtherance to an act; and that which is an obstacle on the road helps us on this road. Reverence that which is best in the universe; and this is that which makes use of all things and directs all things. And in like manner also reverence that"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q08",
+      "author": "marcus",
+      "citation": "Meditations VI.6",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "ll substance is one, or they will be dispersed. The reason which governs knows what its own disposition is, and what it does, and on what material it works. The best way of avenging thyself is not to become like the wrong doer. Take pleasure in one thing and rest in it, in passing from one social act to another social act, thinking of God. The ruling principle is that which rouses"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q09",
+      "author": "marcus",
+      "citation": "Meditations VII.59",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "hem well, and they will be a material for thee to work on. Only attend to thyself, and resolve to be a good man in every act which thou doest: and remember... Look within. Within is the fountain of good, and it will ever bubble up, if thou wilt ever dig. The body ought to be compact, and to show no irregularity either in motion or attitude. For what the mind shows in the face by maintaining in it the express"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q10",
+      "author": "marcus",
+      "citation": "Meditations VIII.47",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "there happens to each thing both what is usual and natural, why shouldst thou complain? For the common nature brings nothing which may not be borne by thee. If thou art pained by any external thing, it is not this thing that disturbs thee, but thy own judgement about it. And it is in thy power to wipe out this judgement now. But if anything in thy own disposition gives thee pain, who hinders thee from correcting thy opinion? And even if thou art pained because thou art not doing s"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q11",
+      "author": "marcus",
+      "citation": "Meditations IX.6",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "ustly acts unjustly to himself, because he makes himself bad. He often acts unjustly who does not do a certain thing; not only he who does a certain thing. Thy present opinion founded on understanding, and thy present conduct directed to social good, and thy present disposition of contentment with everything which happens- that is enough. Wipe out imagination: check desire: extinguish appetite: keep the ruling faculty in its own power. Among the animals which have not reason one life is dis"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q12",
+      "author": "marcus",
+      "citation": "Meditations X.16",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "en see, let them know a real man who lives according to nature. If they cannot endure him, let them kill him. For that is better than to live thus as men do. No longer talk at all about the kind of man that a good man ought to be, but be such. Constantly contemplate the whole of time and the whole of substance, and consider that all individual things as to substance are a grain of a fig, and as to"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q13",
+      "author": "marcus",
+      "citation": "Meditations XII.17",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "e to neigh, and whatever else must of necessity be. For what must a man do who has such a character? If then thou art irritable, cure this man's disposition. If it is not right, do not do it: if it is not true, do not say it. For let thy efforts be- In everything always observe what the thing is which produces for thee an appearance, and resolve it by dividing it into the formal,"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q14",
+      "author": "marcus",
+      "citation": "Meditations VI.2",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "ng evil, for it has no malice, nor does it do evil to anything, nor is anything harmed by it. But all things are made and perfected according to this reason. Let it make no difference to thee whether thou art cold or warm, if thou art doing thy duty; and whether thou art drowsy or satisfied with sleep; and whether ill-spoken of or praised; and whether dying or doing something else. For it is one of the act"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q15",
+      "author": "marcus",
+      "citation": "Meditations III.10",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "gement, and friendship towards men, and obedience to the gods. Throwing away then all things, hold to these only which are few; and besides bear in mind that every man lives only this present time, which is an indivisible point, and that all the rest of his life is either past or it is uncertain. Short then is the time which every man lives, and small the nook of the earth where he lives;",
+        "hen all things, hold to these only which are few; and besides bear in mind that every man lives only this present time, which is an indivisible point, and that all the rest of his life is either past or it is uncertain. Short then is the time which every man lives, and small the nook of the earth where he lives; and short too the longest posthumous fame, and even this only co"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q16",
+      "author": "marcus",
+      "citation": "Meditations VIII.36",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "ings a part of itself, so also the rational animal is able to make every hindrance its own material, and to use it for such purposes as it may have designed. Do not disturb thyself by thinking of the whole of thy life. Let not thy thoughts at once embrace all the various troubles which thou mayest expect to befall thee: but on every occasion ask thyself, What is there in this which is intolerable and past bearing? For thou wilt be ashamed to confess. In the next place remembe"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q17",
+      "author": "marcus",
+      "citation": "Meditations II.1",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "s require the help of the gods and fortune. Among the Quadi at the Granua. ---------------------------------------------------------------------- BOOK TWO Begin the morning by saying to thyself, I shall meet with the busy-body, the ungrateful, arrogant, deceitful, envious, unsocial. All these things happen to them by reason of their ignorance of what is good and evil. But I who have seen the nature of the good that it is beautiful, and of the bad that it is ugly, and the nature of him who does wrong, that it is akin to me,"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q18",
+      "author": "marcus",
+      "citation": "Meditations VII.22",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        ", or in the way which it does not allow, or what it does not allow now. Near is thy forgetfulness of all things; and near the forgetfulness of thee by all. It is peculiar to man to love even those who do wrong. And this happens, if when they do wrong it occurs to thee that they are kinsmen, and that they do wrong through ignorance and unintentionally, and that soon b"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q19",
+      "author": "seneca",
+      "citation": "Letters 13.4",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_13",
+      "passages": [
+        "s gains much strength by being challenged; nevertheless, if you approve, allow me to offer some additional safeguards by which you may fortify yourself. 4. There are more things, Lucilius, likely to frighten us than there are to crush us; we suffer more often in imagination than in reality. I am not speaking with you in the Stoic strain but in my milder style. For it is our Stoic fashion to speak of all those things, which provoke cries and gro"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q20",
+      "author": "seneca",
+      "citation": "Letters 2.6",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_2",
+      "passages": [
+        "enemy's camp, - not as a deserter, but as a scout. He says: \"Contented poverty is an honourable estate.\" Indeed, if it be contented, it is not poverty at all. It is not the man who has too little, but the man who craves more, that is poor. What does it matter how much a man has laid up in his safe, or in his warehouse, how large are his flocks and how fat his dividends, if he covets his neighbo"
+      ],
+      "note": "Seneca comments after quoting Epicurus on contented poverty. This selected sentence is Seneca’s comment, not part of the preceding quotation from Epicurus."
+    },
+    {
+      "id": "q21",
+      "author": "seneca",
+      "citation": "Letters 1.3",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_1",
+      "passages": [
+        "your grasp. Lay hold of to-day's task, and you will not need to depend so much upon to-morrow's. While we are postponing, <Ep1-3> EPISTLE I. life speeds by. Nothing, Lucilius, is ours, except time. We were entrusted by nature with the ownership of this single thing, so fleeting and slippery that anyone who will can oust us from possession. What fools the"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q22",
+      "author": "seneca",
+      "citation": "Letters 71.3",
+      "edition": "gummere-letters-1920",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_71",
+      "passages": [
+        "TLE LXXI. The archer must know what he is seeking to hit; then he must aim and control the weapon by his skill. Our plans miscarry because they have no aim. When a man does not know what harbour he is making for, no wind is the right wind. Chance must necessarily have great influence over our lives, because we live by chance. It is the case with certain men, however, that they do not know that"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q23",
+      "author": "seneca",
+      "citation": "Letters 76.3",
+      "edition": "gummere-letters-1920",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_76",
+      "passages": [
+        "ning as long as you are ignorant, - even to the end of your life, if there is anything in the proverb. And the proverb suits the present case as well as any: \"As long as you live, keep learning how to live.\" For all that, there is also something which I can teach in that school. You ask, do you, what I can teach? That even an old man should keep learning. But"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q24",
+      "author": "seneca",
+      "citation": "Letters 47.11",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_47",
+      "passages": [
+        "question, and to discuss the treatment of slaves, towards whom we Romans are excessively haughty, cruel, and insulting. But this is the kernel of my advice: Treat your inferiors as you would be treated by your betters. And as often as you reflect how much power you have over a slave, remember that your master has just as much power over you. \"But I have no master,\" you say."
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q25",
+      "author": "seneca",
+      "citation": "Letters 101.7",
+      "edition": "gummere-letters-1925",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_101",
+      "passages": [
+        "​on any one day? There is indeed a limit fixed for us, just where the remorseless law of Fate has fixed it; but none of us knows how near he is to this limit. Therefore, let us so order our minds as if we had come to the very end. Let us postpone nothing. Let us balance life’s account every day. 8. The greatest flaw in life is that it is always imperfect, and that a certain part of it is postponed. One who dail"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q26",
+      "author": "seneca",
+      "citation": "Letters 12.8",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_12",
+      "passages": [
+        "and ​and darkness,—and even to eternity day makes these alternations more numerous, not different when it is shorter and different again when it is longer. 8. Hence, every day ought to be regulated as if it closed the series, as if it rounded out and completed our existence. Pacuvius, who by long occupancy made Syria his own, used to hold a regular burial sacrifice in his own honour, with wine and the usual funeral feasting, and"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q27",
+      "author": "seneca",
+      "citation": "Letters 13.10",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_13",
+      "passages": [
+        "so ruinous and so uncontrollable as panic fear. For other fears are groundless, but this fear is witless. 10. Let us, then, look carefully into the matter. It is likely that some troubles will befall us; but it is not a present fact. How often has the unexpected happened! How often has the expected never come to pass! And even though it is ordained to be, what does it avail to run out to meet your suffering? You will suffer soon enough, when it arrives; so look forward me"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q28",
+      "author": "seneca",
+      "citation": "Letters 18.5",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_18",
+      "passages": [
+        ". 5. I am so firmly determined, however, to test the constancy of your mind that, drawing from the teachings of great men, I shall give you also a lesson: Set aside a certain number of days, during which you shall be content with the scantiest and cheapest fare, with coarse and rough dress, saying to yourself the while: “Is this the condition that I feared?” 6. It is precisely in times of immunity from care that the soul should toughen itself beforehand for occasions of greater stress, and it is while Fortune is"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q29",
+      "author": "seneca",
+      "citation": "Letters 3.4",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_3",
+      "passages": [
+        "their closest intimates; and if it were possible, they would not trust even themselves, burying their secrets deep in their hearts. But we should do neither. It is equally faulty to trust everyone and to trust no one. Yet the former fault is, I should say, the more ingenuous, the latter the more safe. 5. In like manner you should rebuke these two kinds of men,—both those w"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q30",
+      "author": "seneca",
+      "citation": "On Anger II.29",
+      "edition": "stewart-dialogues-1889",
+      "url": "https://www.gutenberg.org/ebooks/64576",
+      "passages": [
+        "—have we ever committed any crime of this sort? have we ever fallen into this kind of error? is it for our interest that we should condemn this conduct? XXIX. The greatest remedy for anger is delay: beg anger to grant you this at the first, not in order that it may pardon the offence, but that it may form a right judgment about it: if it delays, it will c"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q31",
+      "author": "seneca",
+      "citation": "On the Shortness of Life 1.3",
+      "edition": "stewart-dialogues-1889",
+      "url": "https://www.gutenberg.org/ebooks/64576",
+      "passages": [
+        "some of them lived for ten or fifteen centuries, while man, although born for many and such great exploits, had the term of his existence cut so much shorter. We do not have a very short time assigned to us, but we lose a great deal of it: life is long enough to carry out the most important projects: we have an ample portion, if we do but arrange the whole of it aright: but when it all runs to"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q32",
+      "author": "seneca",
+      "citation": "On the Shortness of Life 7.8",
+      "edition": "stewart-dialogues-1889",
+      "url": "https://www.gutenberg.org/ebooks/64576",
+      "passages": [
+        "courts, and who draws immense audiences, who crowd all the forum to a far greater distance than they can hear him; “When,” says he, “will vacation-time come?” Every man hurries through his life, and suffers from a yearning for the future, and a weariness of the present: but he who disposes of all his time for his own purposes, who arranges all his days as though he were arranging the plan of his life, neither wishes for nor f"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q33",
+      "author": "seneca",
+      "citation": "On Providence 5.10",
+      "edition": "stewart-dialogues-1889",
+      "url": "https://www.gutenberg.org/ebooks/64576",
+      "passages": [
+        "oubled waters: he must make his way in spite of fortune: he will meet with much that is hard which he must soften, much that is rough that he must make smooth. Fire tries gold, misfortune tries brave men. See how high virtue has to climb: you may be sure that it has no safe path to tread. “Steep is the path at first: the steeds, though strong, Fresh fr"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q34",
+      "author": "seneca",
+      "citation": "On Providence 2.9",
+      "edition": "stewart-dialogues-1889",
+      "url": "https://www.gutenberg.org/ebooks/64576",
+      "passages": [
+        "e more attractive is the sight: yet these are not matters which can attract the attention of the gods, but are mere pastime and diversions of human frivolity. Behold a sight worthy to be viewed by a god interested in his own work, behold a pair worthy of a god, a brave man matched with evil fortune, especially if he himself has given the challenge. I say, I do not know what nobler spectacle Jupiter could find on earth, should he turn his eyes thither, tha"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q35",
+      "author": "seneca",
+      "citation": "Letters 123.16",
+      "edition": "gummere-letters-1925",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_123",
+      "passages": [
+        "f love can endure!” 16. All this may be regarded as a concession to the ways of Greece; we ourselves should preferably turn our attention to words like these: “No man is good by chance. Virtue is something which must be learned. Pleasure is low, petty, to be deemed worthless, shared even by dumb animals—the tiniest and meanest of whom fly towards pleasure. Glory is an empty and fleeti"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q36",
+      "author": "seneca",
+      "citation": "Letters 14.11",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_14",
+      "passages": [
+        "he power to inspire fear has caused many men to be in fear./a Let us withdraw ourselves in every way; for it is as harmful to be scorned as to be admired. One must therefore take refuge in philosophy; this pursuit, not only in the eyes of good men, but also in the eyes of those who are even moderately bad, is a sort of protecting emblem./b For speechmaking at the bar, or any other pursuit that claims the people's attention, wins enemies for a man; but philosophy is peaceful and minds her own b"
+      ],
+      "note": "The old harbour wording was not found in the cited Letters 123.16. Use the documented refuge-in-philosophy passage, Letters 14.11, rather than a modern paraphrase."
+    },
+    {
+      "id": "q37",
+      "author": "epictetus",
+      "citation": "Enchiridion 1",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "as we may say, of the difficulty of his circumstances, and by this very act to ease the burden, by taking a part of it. THE ENCHEIRIDION, OR MANUAL. I. Of things some are in our power, and others are not. In our power are opinion ([Greek: hupolaepsis]), movement towards a thing ([Greek: hormae]), desire, aversion ([Greek: echchlisis]), turning from a thing; and"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q38",
+      "author": "epictetus",
+      "citation": "Enchiridion 5",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "nly that I intended, but I intended also to maintain my will in a way conformable to nature; but I shall not maintain it so if I am vexed at what happens. V. Men are disturbed not by the things which happen, but by the opinions about the things; for example, death is nothing terrible, for if it were it would have seemed so to Socrates; for the opinion about death that it is terrible, is the terrible t"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q39",
+      "author": "epictetus",
+      "citation": "Enchiridion 8",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "hip and leave all those things without regard to them. But if you are old, do not even go far from the ship, lest when you are called you make default. VIII. Seek not that the things which happen should happen as you wish; but wish the things which happen to be as they are, and you will have a tranquil flow of life. IX. Disease is an impediment to the body, but not to the will, unless the will itself chooses. Lameness is an impediment to the leg, but not to the will. An"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q40",
+      "author": "epictetus",
+      "citation": "Enchiridion 11",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "usive words, you will find it to be patience. And if you have been thus formed to the (proper) habit, the appearances will not carry you along with them. XI. Never say about anything, I have lost it, but say I have restored it. Is your child dead? It has been restored. Is your wife dead? She has been restored. Has your estate been taken from you? Has not then this also been restored?"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q41",
+      "author": "epictetus",
+      "citation": "Enchiridion 15",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "hen wishes to be free let him neither wish for anything nor avoid anything which depends on others: if he does not observe this rule, he must be a slave. XV. Remember that in life you ought to behave as at a banquet. Suppose that something is carried round and is opposite to you. Stretch out your hand and take a portion with decency. Suppose that it passes by you. Do not d",
+        "ife you ought to behave as at a banquet. Suppose that something is carried round and is opposite to you. Stretch out your hand and take a portion with decency. Suppose that it passes by you. Do not detain it. Suppose that it is not yet come to you. Do not send your desire forward to it, but wait till it is opposite to you. Do so with respect to children, so with re"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q42",
+      "author": "epictetus",
+      "citation": "Enchiridion 17",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "rds then do not be unwilling to show him sympathy, and even if it happens so, to lament with him. But take care that you do not lament internally also. XVII. Remember that thou art an actor in a play, of such a kind as the teacher (author) may choose; if short, of a short one; if long, of a long one: if he wishes you to act the part of a poor man, see that you act the part naturally; if the part of a lame m",
+        "wishes you to act the part of a poor man, see that you act the part naturally; if the part of a lame man, of a magistrate, of a private person, (do the same). For this is your duty, to act well the part that is given to you; but to select the part, belongs to another. XVIII. When a raven has croaked inauspiciously, let not the appearance hurry you away with it; but straightway make a distinction in your mind and say, None"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q43",
+      "author": "epictetus",
+      "citation": "Enchiridion 20",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        ": prutanis]) or consul, but a free man: and there is only one way to this, to despise (care not for) the things which are not in our power. XX. Remember that it is not he who reviles you or strikes you, who insults you, but it is your opinion about these things as being insulting. When then a man irritates you, you must know that it is your own opinion which has irritated you. Therefore especially try not to be carried away by the appea"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q44",
+      "author": "epictetus",
+      "citation": "Enchiridion 33",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "urdered. XXXIII. Immediately prescribe some character and some form to yourself, which you shall observe both when you are alone and when you meet with men. And let silence be the general rule, or let only what is necessary be said, and in few words. And rarely, and when the occasion calls, we shall say something; but about none of the common subjects, not about gladiators, nor horse-races, nor about athle"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q45",
+      "author": "epictetus",
+      "citation": "Enchiridion 43",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "d about it. If you proceed then from these opinions, you will be mild in temper to him who reviles you; for say on each occasion, It seemed so to him. XLIII. Everything has two handles, the one by which it may be borne, the other by which it may not. If your brother acts unjustly, do not lay hold of the act by that handle wherein he acts unjustly, for this is the handle which cannot be borne; but lay hold"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q46",
+      "author": "epictetus",
+      "citation": "Enchiridion 46",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "her he is acting wrong? Thus it will not happen to you to comprehend some appearances which are capable of being comprehended, but to assent to others. XLVI. On no occasion call yourself a philosopher, and do not speak much among the uninstructed about theorems (philosophical rules, precepts); but do that which follows from them. For example, at a banquet do",
+        "you have not digested. And when a man shall say to you that you know nothing, and you are not vexed, then be sure that you have begun the work (of philosophy). For even sheep do not vomit up their grass and show to the shepherds how much they have eaten; but when they have internally digested the pasture, they produce externally wool and milk. Do you also show not your theorems to the uninstructed, but show th"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q47",
+      "author": "epictetus",
+      "citation": "Enchiridion 48",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "n. XLVIII. The condition and characteristic of an uninstructed person is this: he never expects from himself profit (advantage) nor harm, but from externals. The condition and characteristic of a philosopher is this: he expects all advantage and all harm from himself. The signs (marks) of one who is making progress are these: he censures no man, he praises no man, he blames no man, he accuses no man, he says nothing about h"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q48",
+      "author": "epictetus",
+      "citation": "Enchiridion 50",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "instead of Homer. When, then, any man says to me, Read Chrysippus to me, I rather blush, when I cannot show my acts like to and consistent with his words. L. Whatever things (rules) are proposed to you (for the conduct of life) abide by them, as if they were laws, as if you would be guilty of impiety if you transgressed any of them. And whatever any man shall say about you, do not attend to it; for this is no affair of yours. How long will you then still defer thinking yourself worthy of"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q49",
+      "author": "epictetus",
+      "citation": "Discourses I.1",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "have in readiness in such circumstances? What else than this? What is mine, and what is not mine; and what is permitted to me, and what is not permitted to me. I must die. Must I then die lamenting? I must be put in chains. Must I then also lament? I must go into exile. Does any man then hinder me from going with smiles and cheerfulness and contentment? Tell me the secret which you possess. I will not, for this is in my power. But I will put you in chains. Man, what are you talking about? Me, in chains? You m"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q50",
+      "author": "epictetus",
+      "citation": "Discourses I.24",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "e will burst. I must speak in this way: “Excuse me, as you would excuse lovers; I am not my own master; I am mad.” HOW WE SHOULD STRUGGLE WITH CIRCUMSTANCES.—It is circumstances (difficulties) which show what men are. Therefore when a difficulty falls upon you, remember that God, like a trainer of wrestlers, has matched you with a rough young man. For what purpose? you may"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q51",
+      "author": "epictetus",
+      "citation": "Enchiridion 21",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "tated you. Therefore especially try not to be carried away by the appearance. For if you once gain time and delay, you will more easily master yourself. XXI. Let death and exile and every other thing which appears dreadful be daily before your eyes; but most of all death: and you will never think of anything mean nor will you desire anything extravagantly. XXII. If you desire philosophy, prepare yourself from the beginning to be ridiculed, to expect that many will sneer at you, and say, He has all at once retu"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q52",
+      "author": "epictetus",
+      "citation": "Discourses I.1",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "tment? Tell me the secret which you possess. I will not, for this is in my power. But I will put you in chains. Man, what are you talking about? Me, in chains? You may fetter my leg, but my will not even Zeus himself can overpower. I will throw you into prison. My poor body, you mean. I will cut your head off. When then have I told you that my head alone cannot be cut off? These are the"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q53",
+      "author": "epictetus",
+      "citation": "Discourses IV.1",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "go on for them in the way as they wish, and why we ought to blame no man, accuse no man, and acquiesce in the administration of the universe? ABOUT FREEDOM.—He is free who lives as he wishes to live; who is neither subject to compulsion nor to hindrance, nor to force; whose movements to action ([Greek: hormai]) are not impeded, whose desires attain their purpose, and who does not fall into that which he would avoid ([Greek:"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q54",
+      "author": "epictetus",
+      "citation": "Fragments XXV (Long)",
+      "edition": "long-epictetus-1877",
+      "url": "https://archive.org/details/discoursesepicte00epiciala/page/419/mode/1up",
+      "passages": [
+        "ur to got mine own living and to do my duty in that state of life in which it shall please God to call me.' EHOTETtJa ^19 XXV. It is not poverty which produces sorrow, but desire; nor does wealth release from fear, but reason (the power of reasoning, Xoj/iffjxos), If then you acquire this power of reasoning, you will neither desire wealth nor complain of povert"
+      ],
+      "note": "Attributed fragment XXV in Long, p. 419; not Fragment 8. Long notes that this fragment collection is transmitted under Epictetus, not all securely authentic."
+    },
+    {
+      "id": "q55",
+      "author": "zeno",
+      "citation": "Diogenes Laertius VII.23",
+      "edition": "yonge-diogenes-1895",
+      "url": "https://www.attalus.org/old/diogenes7.html",
+      "passages": [
+        "d not correct, he replied, \"Because I have no confidence in you.\" A young man was talking a great deal of nonsense, and he said to him, \"This is the reason why we have two ears and only one mouth, that we may hear more and speak less.\" G Once, when he was at an entertainment and remained wholly silent, he was asked what the reason was; and so he bade the person who found fault with him"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q56",
+      "author": "zeno",
+      "citation": "Diogenes Laertius VII.26",
+      "edition": "yonge-diogenes-1895",
+      "url": "https://www.attalus.org/old/diogenes7.html",
+      "passages": [
+        "nd Hecaton, in the second book of his Apophthegms, says, that in entertainments of that kind, he used to indulge himself freely. And he used to say that it was better to trip with the feet, than with the tongue. And that goodness was attained by little and little, but was not itself a small thing. Some authors, however, attribute this saying to Socrates. He was a p"
+      ],
+      "note": "Reported speech, not a surviving work by Zeno. Yonge also says some authors attribute the goodness saying to Socrates. Canonical VII.26, not Yonge internal paragraph 22."
+    },
+    {
+      "id": "q57",
+      "author": "zeno",
+      "citation": "Diogenes Laertius VII.26",
+      "edition": "yonge-diogenes-1895",
+      "url": "https://www.attalus.org/old/diogenes7.html",
+      "passages": [
+        "in entertainments of that kind, he used to indulge himself freely. And he used to say that it was better to trip with the feet, than with the tongue. And that goodness was attained by little and little, but was not itself a small thing. Some authors, however, attribute this saying to Socrates. He was a person of great powers of abstinence and endurance; and of very simple habits, living on"
+      ],
+      "note": "Reported speech, not a surviving work by Zeno. Yonge also says some authors attribute the goodness saying to Socrates. Canonical VII.26, not Yonge internal paragraph 22."
+    },
+    {
+      "id": "q58",
+      "author": "zeno",
+      "citation": "Diogenes Laertius VII.87",
+      "edition": "yonge-diogenes-1895",
+      "url": "https://www.attalus.org/old/diogenes7b.html",
+      "passages": [
+        "is as it were the artist who produces the inclination. G On which account Zenon was the first writer who, in his treatise on the Nature of Man, said, that the chief good was confessedly to live according to nature; which is to live according to virtue, for nature leads us to this point. And in like manner Cleanthes speaks in his treatise on Pleasure, and so do Poseidonius and Hecaton in their essays on Ends. And again, to live according to vi"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q59",
+      "author": "cleanthes",
+      "citation": "In Epictetus, Enchiridion 53",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "we lie; but the demonstration that we ought not to lie we have ready to hand. LII. In every thing (circumstance) we should hold these maxims ready to hand: Lead me, O Zeus, and thou O Destiny, The way that I am bid by you to go: To follow I am ready. If I choose not, I make myself a wretch, and still must follow. But whoso nobly yields unto necessity, We hold him wise, and skill’d in things divine. And the third also: O Crito, if so it pleases the gods, so let it be"
+      ],
+      "note": "Four-line prayer to Zeus and Destiny, not the Hymn to Zeus. Quoted in Enchiridion 53 (Long selection numbers it LII). This translation is Long, not Gummere."
+    },
+    {
+      "id": "q60",
+      "author": "seneca",
+      "citation": "Letters 107.11 (after Cleanthes)",
+      "edition": "gummere-letters-1925",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_107",
+      "passages": [
+        "shalt wish. I shall not falter, but obey with speed. And though I would not, I shall go, and suffer, In sin and sorrow what I might have done In noble virtue. Aye, the willing soul Fate leads, but the unwilling drags along. 12. Let us live thus, and speak thus; let Fate find us ready and alert. Here is your great soul—the man who has given himself over to Fate; on the other"
+      ],
+      "note": "Seneca’s Latin adaptation after Cleanthes, translated Gummere. The final willing/unwilling line is Seneca’s expansion, so attribute it to Seneca, not directly to Cleanthes."
+    },
+    {
+      "id": "q61",
+      "author": "cleanthes",
+      "citation": "Diogenes Laertius VII.174",
+      "edition": "yonge-diogenes-1895",
+      "url": "https://www.attalus.org/old/diogenes7d.html",
+      "passages": [
+        "conversing with him by himself, \"You are not talking to a bad man.\" And when some one reproached him with his old age, he rejoined, \"I too wish to depart, but when I perceive myself to be in good health in every respect, and to be able to recite and read, I am content to remain.\" They say too, that he used to write down all that he heard from Zenon on oyster shells, and on the shoulder-blades of oxen, from want of money to buy paper w"
+      ],
+      "note": "The old I have grown old wording is not in VII.171. This is the documented answer about old age in VII.174, Yonge translation."
+    },
+    {
+      "id": "q62",
+      "author": "chrysippus",
+      "citation": "Diogenes Laertius VII.87",
+      "edition": "yonge-diogenes-1895",
+      "url": "https://www.attalus.org/old/diogenes7b.html",
+      "passages": [
+        "leads us to this point. And in like manner Cleanthes speaks in his treatise on Pleasure, and so do Poseidonius and Hecaton in their essays on Ends. And again, to live according to virtue is the same thing as living according to one's experience of those things which happen by nature; as Chrysippus explains it in the first book of his treatise on the Chief Good. G For our individual natures are all parts of universal nature; on which ac"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q63",
+      "author": "chrysippus",
+      "citation": "Diogenes Laertius VII.182",
+      "edition": "yonge-diogenes-1895",
+      "url": "https://www.attalus.org/old/diogenes7d.html",
+      "passages": [
+        ", a horse.] He was once reproached by some one for not attending the lectures of Ariston, who was drawing a great crowd after him at the time; and he replied, \"If I had attended to the multitude I should not have been a philosopher.\" And once, when he saw a dialectician pressing hard on Cleanthes, and proposing sophistical fallacies to him, he said, \"Cease to drag that old man from more i"
+      ],
+      "note": "Excerpt; terminal punctuation and quotation marks normalized."
+    },
+    {
+      "id": "q64",
+      "author": "chrysippus",
+      "citation": "Plutarch, Stoic Contradictions 34",
+      "edition": "smith-goodwin-plutarch-1911",
+      "url": "https://www.gutenberg.org/ebooks/79588",
+      "passages": [
+        "say the like of our virtue and vice, and generally of arts or the ignorance of arts, as I have said.” And a little after, taking away all ambiguity, he says: “For no particular thing, not even the least, can be otherwise than according to common Nature and its reason.” But that common Nature and the common reason of Nature are with him Fate and Providence and Jupiter, is not unknown even to the antipodes. For these things a"
+      ],
+      "note": "Chrysippus quoted critically by Plutarch, Stoic Contradictions 34 (Moralia 1050A). E. Smith translation, revised W. W. Goodwin; not an independently surviving Chrysippus book."
+    }
+  ]
+}

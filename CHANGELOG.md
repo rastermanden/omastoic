@@ -6,6 +6,51 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `manifest.json` and `package.json` carry the same version.
 
+## 2.2.0 - 2026-11-04
+
+### Changed
+
+- Default quote interval is **60 seconds**, configurable in the plugin config
+  file or `omastoic config`. All authors remain selected by default.
+- Exactly one **Stoics** toggle under **Appearance → Branding → Screensaver**;
+  remove the Configure row and migrate old plugin-owned `style.screensaver.*`
+  rows. No app launcher/.desktop entry.
+- Keep all 64 quote entries, checking citations and wording against named
+  public-domain US editions. Correct the reported IV.17 and On Anger II.29
+  errors and additional letter/section/attribution errors found in the complete
+  pass. Replace unsupported wording with the documented source passages;
+  disclose mediated/uncertain attributions. Record every source in CREDITS and
+  the offline review ledger. Use Stewart's 1889 dialogues instead of Basore.
+- Document the tested terminal/ttfx backend and refuse the known unsupported
+  native launcher. Native integration, Bun removal and portrait replacement
+  remain separate work.
+
+### Fixed
+
+- JSONC-safe, validated, atomic menu editing preserves comments and neighbours,
+  including a final row without a trailing comma and the host `items` envelope.
+- Portrait layouts check both dimensions; quote-only wrapping fits narrow/tall
+  grids, long words and Unicode display cells. Tiny grids explicitly request
+  more reading space rather than overflowing or truncating a quotation.
+- Plugin disable/uninstall stops and disables rotation. Hot reload does not
+  spuriously stop it; host Restore Default stands it down cleanly while idle.
+- Setup propagates systemctl/dependency/conflict errors, never marks failed
+  setup installed, and supports retry and idempotent remove/re-add. Generated
+  artifacts and displaced art are ownership-checked; unrelated files survive.
+- Serialize writers, use unique atomic temporary files, validate null/type-wrong
+  config and bound custom input. `next`/`preview` respect changed user art.
+- Buffer fragmented UTF-8 socket events, bound record/queue growth, reconcile
+  existing windows on startup/reconnect, and restart selected daemons on
+  code/data updates, not only unit changes.
+- `show` is now a genuinely read-only text export.
+
+### Added
+
+- GitHub Actions with pinned Bun and audited host revision: regression suite,
+  actual host menu/reset behavior, Bash syntax and `omarchy plugin validate`.
+- Sandboxed CLI failure/lifecycle/ownership/concurrency tests and full audit-grid,
+  socket framing/reconnect and offline citation regression coverage.
+
 ## 2.1.0 - 2026-09-06
 
 ### Changed

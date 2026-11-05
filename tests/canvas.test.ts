@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { compose, parseAuthors, parseQuotes, pick, wrap, type Quote } from "../src/canvas.ts";
+import { cellWidth, compose, parseAuthors, parseQuotes, pick, wrap, type Quote } from "../src/canvas.ts";
 
 const root = join(import.meta.dir, "..");
 const quotes = parseQuotes(readFileSync(join(root, "data/quotes.tsv"), "utf8"));
@@ -9,7 +9,7 @@ const authors = parseAuthors(readFileSync(join(root, "data/authors.tsv"), "utf8"
 const art = (slug: string) =>
   readFileSync(join(root, "art", `${slug}.txt`), "utf8").replace(/\n+$/, "").split("\n");
 
-const width = (block: string) => Math.max(...block.split("\n").map((l) => [...l].length));
+const width = (block: string) => Math.max(...block.split("\n").map(cellWidth));
 const height = (block: string) => block.split("\n").length;
 
 test("the quote book parses and every quote has an author, citation and text", () => {
@@ -30,8 +30,42 @@ test("every author in the book has a name, dates and a portrait", () => {
   }
 });
 
-test("no quote is too long to lay out beside a portrait", () => {
-  for (const q of quotes) expect(q.text.length).toBeLessThanOrEqual(260);
+test("audit grid: all 64 quotes fit, or explicitly request a reading area", () => {
+  for (const [cols, rows] of [[92, 25], [60, 30], [40, 24], [20, 8], [60, 12], [80, 24]]) {
+    for (const q of quotes) {
+      const block = compose(q, authors.get(q.author), { cols, rows, art: art(q.author) });
+      expect(width(block)).toBeLessThanOrEqual(cols);
+      expect(height(block)).toBeLessThanOrEqual(rows);
+      expect(block.replace(/\s/g, "")).toContain(q.citation.replace(/\s/g, ""));
+      if (cols >= 40) expect(block).not.toContain("Resize to read");
+    }
+  }
+});
+
+test("Unicode and unbroken custom text use display cells and retain graphemes", () => {
+  expect(wrap("你好世界", 4)).toEqual(["你好", "世界"]);
+  expect(wrap("e\u0301e\u0301e\u0301", 2)).toEqual(["e\u0301e\u0301", "e\u0301"]);
+  expect(wrap("👩‍💻👩‍💻", 2)).toEqual(["👩‍💻", "👩‍💻"]);
+  expect(wrap("abcdefghij", 3)).toEqual(["abc", "def", "ghi", "j"]);
+  expect(() => compose(quote, undefined, { cols: 1, rows: 1, art: null })).toThrow("too small");
+});
+
+test("untrusted quote files cannot inject terminal escapes or unbounded input", () => {
+  expect(() => parseQuotes("x\tcite\t\x1b[2J")).toThrow("control");
+  expect(() => parseQuotes("x".repeat(1024 * 1024 + 1))).toThrow("1 MiB");
+  expect(() => parseQuotes("../private\tcite\ttext")).toThrow("slug");
+  expect(() => parseQuotes(`custom\tcite\t${"x".repeat(4097)}`)).toThrow("too long");
+});
+
+test("CRLF quote records normalize without accepting embedded carriage returns", () => {
+  expect(parseQuotes("# custom book\r\ncustom\tSource 1\tA thought.\r\nother\tSource 2\tAnother thought.\n")).toEqual([
+    { author: "custom", citation: "Source 1", text: "A thought." },
+    { author: "other", citation: "Source 2", text: "Another thought." },
+  ]);
+  for (const record of ["cus\rtom\tSource 1\tThought.", "custom\tSource\r1\tThought.", "custom\tSource 1\tA\rthought.", "custom\tSource 1\tThought.\r"]) {
+    expect(() => parseQuotes(record)).toThrow("control");
+  }
+  expect(() => compose({ author: "custom", citation: "Source 1", text: "A\rthought." }, undefined, { cols: 60, rows: 12, art: null })).toThrow("control");
 });
 
 test("wrap keeps every line inside the width", () => {
@@ -61,7 +95,6 @@ test("the full canvas fits the grid it was asked for", () => {
 test("every portrait and quote pair fits the smallest grid the layout claims", () => {
   for (const q of quotes) {
     const block = compose(q, authors.get(q.author), { cols: 92, rows: 25, art: art(q.author) });
-    expect({ q: q.citation, w: width(block) }).toEqual({ q: q.citation, w: width(block) });
     expect(width(block)).toBeLessThanOrEqual(92);
     expect(height(block)).toBeLessThanOrEqual(25);
   }

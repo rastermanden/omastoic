@@ -10,16 +10,20 @@ export type Author = { slug: string; name: string; dates: string };
 export const ART_GAP = 4;
 
 export function parseQuotes(tsv: string): Quote[] {
+  if (Buffer.byteLength(tsv) > 1024 * 1024) throw new Error("quote file exceeds 1 MiB");
+  tsv = tsv.replace(/\r\n/g, "\n");
+  if (/[\x00-\x08\x0b-\x1f\x7f-\x9f]/u.test(tsv)) throw new Error("quote file contains terminal control characters");
   return tsv
     .split("\n")
     .filter((line) => line.trim() && !line.startsWith("#"))
     .map((line) => line.split("\t"))
     .filter((f) => f.length >= 3)
-    .map(([author, citation, ...rest]) => ({
-      author: author.trim(),
-      citation: citation.trim(),
-      text: rest.join("\t").trim(),
-    }));
+    .map(([author, citation, ...rest]) => {
+      const quote = { author: author.trim(), citation: citation.trim(), text: rest.join(" ").trim() };
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(quote.author)) throw new Error("invalid quote author slug");
+      if (!quote.citation || quote.citation.length > 256 || !quote.text || quote.text.length > 4096) throw new Error("quote citation/text is empty or too long");
+      return quote;
+    });
 }
 
 export function parseAuthors(tsv: string): Map<string, Author> {
@@ -32,31 +36,37 @@ export function parseAuthors(tsv: string): Map<string, Author> {
   return authors;
 }
 
-/** Greedy wrap. Words longer than the width are left long rather than broken. */
+export const cellWidth = (text: string) => Bun.stringWidth(text);
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Greedy, display-cell-aware wrap, splitting long words only at graphemes. */
 export function wrap(text: string, width: number): string[] {
+  if (!Number.isInteger(width) || width < 1) throw new Error("invalid text width");
   const lines: string[] = [];
   let line = "";
-  for (const word of text.split(/\s+/)) {
-    if (!line) line = word;
-    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
-    else {
-      lines.push(line);
-      line = word;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line && cellWidth(line) + 1 + cellWidth(word) <= width) {
+      line += ` ${word}`;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = "";
+    for (const { segment } of graphemes.segment(word)) {
+      if (cellWidth(segment) > width) throw new Error("grid too narrow for a text grapheme");
+      if (cellWidth(line) + cellWidth(segment) > width) {
+        lines.push(line);
+        line = "";
+      }
+      line += segment;
     }
   }
   if (line) lines.push(line);
   return lines;
 }
 
-const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - [...s].length));
-const centre = (s: string, w: number) => {
-  const left = Math.max(0, Math.floor((w - [...s].length) / 2));
-  return pad(" ".repeat(left) + s, w);
-};
-const right = (s: string, w: number) => {
-  const left = Math.max(0, w - [...s].length);
-  return pad(" ".repeat(left) + s, w);
-};
+const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - cellWidth(s)));
+const centre = (s: string, w: number) => pad(" ".repeat(Math.max(0, Math.floor((w - cellWidth(s)) / 2))) + s, w);
+const right = (s: string, w: number) => pad(" ".repeat(Math.max(0, w - cellWidth(s))) + s, w);
 
 /**
  * Pick a quote at random, avoiding the ones most recently shown. `recent` holds
@@ -86,11 +96,15 @@ export type Layout = { cols: number; rows: number; art: string[] | null };
  */
 export function compose(quote: Quote, author: Author | undefined, layout: Layout): string {
   const { cols, rows, art } = layout;
+  if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) throw new Error("invalid canvas grid");
+  if (/[\x00-\x1f\x7f-\x9f]/u.test(quote.text + quote.citation + quote.author + (author?.name ?? "") + (author?.dates ?? ""))) throw new Error("canvas contains terminal control characters");
+  const fits = (lines: string[]) => lines.length <= rows && lines.every((l) => cellWidth(l) <= cols);
+  const finish = (lines: string[]) => lines.map((l) => l.trimEnd()).join("\n");
   const name = (author?.name ?? quote.author).toUpperCase();
   const dates = author?.dates ?? "";
 
   if (art && art.length) {
-    const artWidth = Math.max(...art.map((l) => [...l].length));
+    const artWidth = Math.max(...art.map(cellWidth));
     const textWidth = Math.min(52, Math.max(30, cols - artWidth - ART_GAP - 2));
     const body = wrap(`“${quote.text}”`, textWidth);
     const text = [...body, "", right(quote.citation, textWidth)];
@@ -110,16 +124,25 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
       const r = i >= offset ? (text[i - offset] ?? "") : "";
       out.push((l + gap + r).replace(/\s+$/, ""));
     }
-    if (out.length <= rows) return out.join("\n");
+    if (fits(out)) return finish(out);
   }
 
-  // Quote alone, centred as a block.
-  const textWidth = Math.min(64, Math.max(28, cols - 8));
-  const body = wrap(`“${quote.text}”`, textWidth);
-  const attribution = dates ? `— ${name} · ${dates}` : `— ${name}`;
-  return [...body, "", right(attribution, textWidth), right(quote.citation, textWidth)]
-    .map((l) => l.replace(/\s+$/, ""))
-    .join("\n");
+  // Lose decoration before content. Try the quiet measure, then the full width,
+  // then remove dates/blank lines. Never truncate a quote or its citation.
+  for (const width of [...new Set([Math.min(64, Math.max(1, cols - 8)), cols])]) {
+    const body = wrap(`“${quote.text}”`, width);
+    const citation = wrap(quote.citation, width).map((l) => right(l, width));
+    for (const compact of [false, true]) {
+      const attribution = wrap(dates && !compact ? `— ${name} · ${dates}` : `— ${name}`, width).map((l) => right(l, width));
+      const lines = [...body, ...(compact ? [] : [""]), ...attribution, ...citation];
+      if (fits(lines)) return finish(lines);
+    }
+  }
+  // Below the supported reading area, show an explicit placeholder, not a
+  // misleading partial quotation. Keep the source so it can still be looked up.
+  const notice = [...wrap("Resize to read quote", cols), ...wrap(quote.citation, cols)];
+  if (fits(notice)) return finish(notice);
+  throw new Error(`grid ${cols}x${rows} too small to show citation: ${quote.citation}`);
 }
 
 /** Read the art for an author, or null when there is no portrait for them. */

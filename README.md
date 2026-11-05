@@ -1,174 +1,163 @@
 # Omastoic
 
-**The Stoics on your Omarchy screensaver.** When the screen goes idle, Marcus
-Aurelius looks back at you and reminds you that the thing bothering you is your
-opinion of the thing. A minute later it is Seneca, or Epictetus, or the man who
-founded the whole school on an Athenian porch.
+**The Stoics on your Omarchy screensaver.** One braille portrait, one thought,
+and a quiet label with its source. Six Stoics and 64 entries from public-domain
+US translations, reviewed against the editions in [CREDITS.md](CREDITS.md).
 
 ![Omastoic on the Omarchy screensaver](https://github.com/rastermanden/omastoic/releases/latest/download/preview.gif)
 
-Six Stoics, each drawn as a braille portrait, and 64 quotes from public-domain
-translations, every one cited by book and section.
-A longer clip is in
-[demo.mp4](https://github.com/rastermanden/omastoic/releases/latest/download/demo.mp4).
+[Longer clip](https://github.com/rastermanden/omastoic/releases/latest/download/demo.mp4)
 
-## Install
+## Compatibility
 
-Requires Omarchy 4+ and [bun](https://bun.sh) (`omarchy pkg add bun`). The
-screensaver itself is Omarchy's (`ttfx`). Enabling the plugin also installs a
-user systemd unit that rotates quotes only while you are logged in.
+This correctness release supports **Omarchy's terminal/ttfx screensaver**,
+audited on Omarchy **4.5.0rc3**, with these regression tests run against the
+installed **4.5.0** host parser/branding CLI. This is sandboxed integration
+evidence, not a live compositor/display matrix. It still requires
+[Bun](https://bun.sh) (tested with **1.4.4**, `omarchy pkg add bun`), plus the host's `ttfx`, systemd,
+`jq` and Python 3. No network is used at runtime.
+
+**The newer native `omarchy-screensaver` backend is not supported.** It reads
+its input once and has no terminal window events. Setup detects the known
+native launcher and refuses installation, rather than promising rotation that
+cannot work. Native integration, runtime removal and historical portrait
+replacement are separate follow-ups, not features of this release.
+
+## Install and update
 
 ```bash
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
+omarchy plugin update io.github.rastermanden.omastoic
 ```
 
-That clones the plugin into
-`~/.config/omarchy/plugins/io.github.rastermanden.omastoic`, backs up
-whatever screensaver art you had, writes the first canvas, puts `omastoic` on
-your PATH, adds **Stoics** under Style → Screensaver, and starts a small user
-service that swaps in a new quote every 20 seconds while the screensaver is
-actually on screen. See it right now:
+Enabling the plugin runs setup inside the existing Omarchy shell. On first
+successful setup it preserves your branding, writes a canvas, links the
+`omastoic` **terminal command**, installs completions and user units, and adds
+exactly one menu row:
+
+**Appearance → Branding → Screensaver → Stoics**
+
+The row toggles Stoics on/off and is checked while selected. There is no app
+launcher/.desktop entry and no Configure menu row. Old plugin-owned
+`style.screensaver.*` rows are migrated within our marked block only. Text,
+Image and Restore Default remain Omarchy's commands.
+
+Defaults are **all six authors and 60 seconds per quote**, with no setup wizard.
+While the saver is active, the service keeps each composed canvas in the
+branding file for 60 seconds before choosing another. `ttfx` rereads the file
+at its next effect boundary: the host controls transitions, so this is not a
+guarantee of exactly 60 uninterrupted, fully legible seconds on screen.
+
+Setup failures return a non-zero status and leave no successful-install marker.
+Fix the reported dependency/user-session error, then retry `omastoic setup`.
+An unchanged setup is idempotent; code/data updates restart an enabled daemon.
+Setup does not steal the slot back after `off` or plugin disable.
+
+For a manual copy from a checkout:
 
 ```bash
-omastoic preview
+./install.sh
 ```
 
-From a checkout instead:
+This preflights dependencies before copying. **Manual copies are not Git
+checkouts:** update your source checkout and rerun `./install.sh`; `omarchy
+plugin update` only updates Git-managed installs. The installer refuses to
+copy over a linked or Git-managed plugin. Coming from 1.x, uninstall the old
+`omastoic` plugin ID before adding the current one.
+
+## Use
 
 ```bash
-./install.sh          # copies a clean tree into ~/.config/omarchy/plugins/io.github.rastermanden.omastoic and sets up
+omastoic toggle                # select Stoics, or restore displaced art
+omastoic next                  # another quote, only if we still own the slot
+omastoic preview               # MUTATING: select Stoics and launch the saver
+omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
+omastoic status
+omastoic config                # terminal author/interval picker (gum)
+omastoic config --authors marcus,seneca --interval 90
+omastoic config --authors all --interval 60
 ```
 
-Update with `omarchy plugin update io.github.rastermanden.omastoic`. That also
-refreshes the menu, completions and unit. Coming from 1.x, the plugin id changed
-in 2.0, so an old install does not see this as an update — `omastoic uninstall`
-first, then add it again. Tab completion for `omastoic` is installed for bash
-(and fish); open a new terminal, or:
+**Omarchy's branding commands win.** Edit Text, Set From Image and Restore
+Default hand the slot back, including while idle. The reconciler turns Stoics
+off without overwriting the new art. Select Stoics again to opt back in; turning
+them off then restores that newly displaced art.
 
-```bash
-source ~/.local/share/bash-completion/completions/omastoic
+Disabling the shell plugin stops **and disables** its rotation service and
+restores branding only if it is still ours. QML hot reload does not count as a
+disable. Re-enable the plugin, then select Stoics again when wanted.
+
+### Settings and custom quotes
+
+Settings are in `~/.config/omastoic/config.json` (or `$XDG_CONFIG_HOME/omastoic/`):
+
+```json
+{
+  "interval": 60,
+  "authors": ["marcus", "epictetus"]
+}
 ```
+
+`interval` is a whole number of seconds from **1 to 3600**. Omit `authors` for
+all six. Invalid/null/type-wrong hand-edited settings fall back to defaults;
+the next interval is read from the file at each rotation. `omastoic config`
+validates and saves the same settings, restarting the daemon if selected.
+
+Your own `quotes.tsv` in that directory adds entries to the bundled book:
+**author slug, citation, text**, separated by tabs. Slugs contain letters,
+digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
+citations to 256 characters and quote text to 4096; terminal control escapes
+are rejected. An unknown author renders without a portrait.
+
+The shared canvas uses the smallest measured terminal/monitor grid. Portraits
+are hidden when either dimension cannot fit. Wrapping accounts for CJK,
+combining marks, emoji and long words. All bundled entries fit **40×24** and
+the audit's larger grids. In a **20×8** reading area, an entry that cannot fit
+in full shows **“Resize to read quote” plus its citation**, never a truncated
+quotation. Grids too small even for that return a clear error.
+
+The portraits in this release remain **AI-imagined illustrations**, not
+historical photographs. Rebuild details are in [docs/ART.md](docs/ART.md).
 
 ## Remove
 
 ```bash
 omastoic uninstall
+# Or use Omarchy's normal removal:
+omarchy plugin remove io.github.rastermanden.omastoic
 ```
 
-That restores your old art, removes the service, the menu row and the plugin,
-so a later `omarchy plugin add` is a clean install. `omarchy plugin remove
-io.github.rastermanden.omastoic` also fails closed: the menu rows hide once
-the folder is gone, and
-a leftover cleaner takes the launcher, completions and unit with it. Quotes
-and settings stay in `~/.config/omastoic/`; `omastoic uninstall --purge`
-drops those too.
+CLI uninstall stops/disables the service, restores owned branding, removes its
+menu block and owned plumbing, and asks Omarchy to remove the plugin. Host
+removal also triggers the independent Bash cleanup watcher. Quotes/settings
+remain; `omastoic uninstall --purge` removes those too. Changed/unrelated
+launchers, completions, unit files and art are not overwritten or deleted.
+Conflicts are reported instead of hidden. A failed/partial setup can be retried
+or removed with the same commands (or `./uninstall.sh` from the checkout).
 
-## Usage
-
-Omarchy already owns the screensaver slot. Omastoic adds one row next to the
-commands that write it:
-
-**Style → Screensaver → Stoics** — ✓ when they have the slot. The same toggle
-from a terminal is `omastoic toggle`. Off puts back the art they displaced.
-**Configure** picks which Stoics appear and how many seconds between quotes.
-
-**Omarchy's own commands win.** Edit Text, Set From Image and Restore Default
-are unchanged. If they write the slot, omastoic notices it is no longer its
-own, turns itself off and leaves the new art alone — rather than quietly
-reverting you on the next rotation, which would look like a bug in Omarchy.
-Turn the Stoics back on whenever you want them.
-
-State lives where Omarchy keeps its own: the on/off flag is
-`omarchy-toggle omastoic`, which is what the menu row's ✓ reads.
-
-## How it works
-
-Omarchy's screensaver runs `ttfx` in a fullscreen terminal, in a loop, over
-`~/.config/omarchy/branding/screensaver.txt` — and it re-reads that file every
-time round the loop. So Omastoic replaces, shadows and patches nothing: it just
-keeps a freshly composed canvas in the file Omarchy already reads, and swaps it
-for another one between effects.
-
-Enabling the plugin loads `Service.qml` inside `omarchy-shell` — not a second
-Quickshell. That service writes a user systemd unit which listens on Hyprland's
-event socket rather than polling. It wakes when a window of class
-`org.omarchy.screensaver` opens, rotates quotes while one is up, writes one last
-canvas when the screensaver closes so the next one is already fresh, and then
-goes back to sleep. Nothing runs on a timer when you are working.
-
-The canvas is sized for the smallest attached monitor. While the screensaver
-is up, that grid comes from the terminal's own tty; the cell size is remembered
-so the next canvas already fits, whichever of Alacritty, Foot, Ghostty or Kitty
-is the default. If a screen is too small for a portrait — a short terminal,
-mostly — the quote is laid out on its own instead.
-
-## Commands
-
-| Command | Does |
-| --- | --- |
-| `omastoic toggle` | hand the screensaver to the Stoics, or give it back |
-| `omastoic preview` | write a new canvas and start the screensaver now |
-| `omastoic config` | choose which Stoics appear, and seconds between quotes |
-| `omastoic status` | who has the screensaver, and what's in the quote book |
-| `omastoic uninstall` | take the service, menu row and plugin back out |
-
-## Configure
-
-```bash
-omastoic config
-```
-
-Pick the Stoics who should appear (`x` or `tab` to toggle, enter to confirm),
-then enter the seconds between quotes while the screensaver is up. From the
-menu: Style → Screensaver → Configure. Non-interactive:
-
-```bash
-omastoic config --authors marcus,seneca --interval 15
-omastoic config --authors all
-```
-
-**Your own quotes** go in `~/.config/omastoic/quotes.tsv`, in the same three
-tab-separated columns as `data/quotes.tsv` — author slug, citation, text. They
-are added to the book, not swapped in for it. An author slug with a portrait in
-`art/` gets that portrait; anything else renders as a quote on its own.
-
-**Settings** live in `~/.config/omastoic/config.json`:
-
-```json
-{
-  "interval": 20,
-  "authors": ["marcus", "epictetus"]
-}
-```
-
-`interval` is seconds between quotes while the screensaver is up. `authors`
-narrows the roster — leave it out for all six.
-
-**Portraits.** `art/*.txt` is generated, not hand-drawn — `bun
-scripts/transcode.ts` rebuilds it from the sources named in
-`assets/portraits.json`. Changing a portrait, adding a seventh Stoic, and
-remaking the listing art are all in [docs/ART.md](docs/ART.md).
+Implementation details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Tests
 
 ```bash
-bun test
+bun test tests
 omarchy plugin validate .
 ```
 
-`bun test` checks the quote book parses, every author has a portrait and dates,
-and every quote in the book lays out inside the smallest grid the layout claims
-to support — including the fallback when there is no room for a portrait. The
-menu tests cover the part most likely to hurt someone: that adding and removing
-the menu row leaves the rest of `omarchy-menu.jsonc` — comments, and other
-tools' blocks — exactly as it was found. `omarchy plugin validate` is the same
-manifest check Omarchy runs before `plugin add`.
+Tests require the real Omarchy host parser, defaults and branding reset command.
+On an Omarchy desktop they are read from `/usr/share/omarchy`; elsewhere set
+`OMARCHY_TEST_ROOT` to a checkout of the audited host revision
+`5eb922f137422ff32a90869a9ba47525a428792d`. GitHub Actions uses that pinned host,
+Bun 1.4.4, sandboxed HOME/XDG directories, the Bun suite, Bash syntax checks and
+`omarchy plugin validate`. No test launches a real saver or changes installed
+plugins, shell config, services or branding.
 
-## Credits
+Coverage includes the actual host menu parser/parent graph, migration and
+comment-preserving round trips, every quote across the audit size grid,
+config/file ownership, setup failure/retry, concurrent writes, host disable and
+remove/re-add, Restore Default, fragmented socket events and reconnect snapshots.
+The offline source-ledger checks protect the reviewed citations and wording;
+they are not a claim that software can verify ancient authorship.
 
-Portrait sources and translations are listed in [CREDITS.md](CREDITS.md). The
-portraits are AI-generated likenesses, not photographs of surviving busts; every
-translation is out of copyright. Release history is in
-[CHANGELOG.md](CHANGELOG.md).
-
-MIT licensed.
+MIT licensed code. Translation editions and artwork provenance:
+[CREDITS.md](CREDITS.md). Release history: [CHANGELOG.md](CHANGELOG.md).

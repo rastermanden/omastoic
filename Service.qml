@@ -38,6 +38,9 @@ Item {
 
   Process {
     id: setupProcess
+    onExited: (exitCode) => {
+      if (exitCode !== 0) console.error("omastoic: setup failed; run omastoic setup in a terminal for diagnostics")
+    }
   }
 
   // A git checkout writes many files; wait until the tree is still, then setup
@@ -63,4 +66,8 @@ Item {
   }
 
   Component.onCompleted: root.runSetup(true)
+  // Read durable host state, rather than unconditionally stopping on QML hot
+  // reload. The same reconciler is also triggered by a systemd path watcher,
+  // including when the plugin tree has already been removed.
+  Component.onDestruction: Quickshell.execDetached([Quickshell.env("HOME") + "/.local/lib/omastoic/prune.sh"])
 }

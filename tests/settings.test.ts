@@ -4,9 +4,16 @@ import {
   describeSettings,
   parseAuthorList,
   parseInterval,
+  DEFAULT_INTERVAL,
+  normalizeSettings,
 } from "../src/settings.ts";
 
 const roster = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"];
+
+test("hand-edited config is schema-validated at the boundary", () => {
+  for (const raw of [null, [], 3, "text", { interval: 0, authors: "marcus" }, { interval: -1 }, { interval: Infinity }, { interval: "60" }, { authors: [null] }]) expect(normalizeSettings(raw, roster)).toEqual({});
+  expect(normalizeSettings({ interval: 90, authors: ["marcus", "marcus"] }, roster)).toEqual({ interval: 90, authors: ["marcus"] });
+});
 
 test("interval must be a whole number of seconds in range", () => {
   expect(parseInterval("20")).toBe(20);
@@ -39,6 +46,7 @@ test("describeSettings names the roster and the interval", () => {
     ["marcus", { name: "Marcus Aurelius" }],
     ["seneca", { name: "Seneca" }],
   ]);
-  expect(describeSettings({}, names)).toBe("all six · every 20s");
+  expect(DEFAULT_INTERVAL).toBe(60);
+  expect(describeSettings({}, names)).toBe("all six · every 60s");
   expect(describeSettings({ interval: 8, authors: ["marcus"] }, names)).toBe("Marcus Aurelius · every 8s");
 });
