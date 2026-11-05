@@ -275,6 +275,104 @@ finally:
   }
 }, 25000);
 
+test("a live grid compose rejects is not refit again until the grid changes", async () => {
+  const s = sandbox();
+  const socket = join(s.env.XDG_RUNTIME_DIR, "hypr/test/.socket2.sock");
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const history = () => readFileSync(join(s.state, "recent.json"), "utf8");
+  const canvasText = () => { try { return readFileSync(branding, "utf8"); } catch { return ""; } };
+  let errors = "";
+  const until = async (check: () => boolean, timeout = 4000) => {
+    const deadline = Date.now() + timeout;
+    while (!check() && Date.now() < deadline) await Bun.sleep(20);
+    expect(check(), errors).toBe(true);
+  };
+  const entry = { author: "custom", citation: "C".repeat(70), text: "x".repeat(1791) };
+  const fitted = (cols: number, rows: number) => `${compose(entry, undefined, { cols, rows, art: null })}\n`;
+  const tooSmall = () => errors.match(/too small/g)?.length ?? 0;
+  expect(() => compose(entry, undefined, { cols: 10, rows: 2, art: null })).toThrow(/too small/);
+  const bundled = parseQuotes(readFileSync(join(root, "data/quotes.tsv"), "utf8")).length;
+  mkdirSync(dirname(socket), { recursive: true });
+  const fixture = Bun.spawn(["python3", "-u", "-c", `import fcntl, os, pty, struct, subprocess, sys, termios
+master, slave = pty.openpty()
+child = None
+def resize(fd, cols, rows):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+try:
+    resize(slave, 80, 24)
+    child = subprocess.Popen(['sleep', '120'], stdin=slave, stdout=slave, stderr=slave)
+    print(child.pid, flush=True)
+    for line in sys.stdin:
+        parts = line.split()
+        if len(parts) != 2: continue
+        cols, rows = map(int, parts)
+        resize(slave, cols, rows)
+        print('ready', flush=True)
+finally:
+    if child:
+        child.terminate()
+        child.wait()
+    os.close(master)
+    os.close(slave)
+`], { env: s.env, stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+  const reader = fixture.stdout.getReader();
+  const record = async () => {
+    let text = "";
+    while (!text.includes("\n")) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error("PTY fixture exited before readiness");
+      text += new TextDecoder().decode(value);
+    }
+    return text.trim();
+  };
+  let connections = 0;
+  const server = Bun.listen({ unix: socket, socket: { open() { connections++; }, data() {} } });
+  let daemon: ReturnType<typeof Bun.spawn> | undefined;
+  let capture: Promise<void> | undefined;
+  try {
+    const pid = Number(await record());
+    s.put(join(s.home, "clients.json"), JSON.stringify([{ address: "large", pid, class: "org.omarchy.screensaver" }]));
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(join(s.config, "omastoic/quotes.tsv"), `custom\t${entry.citation}\t${entry.text}\n`);
+    s.put(join(s.config, "omastoic/config.json"), JSON.stringify({ interval: 60 }));
+    s.put(join(s.state, "recent.json"), JSON.stringify([...Array(bundled).keys()]));
+    fixture.stdin.write("111 30\n");
+    expect(await record()).toBe("ready");
+    daemon = Bun.spawn([process.execPath, join(root, "src/cli.ts"), "daemon"], { cwd: root, env: s.env, stdout: "ignore", stderr: "pipe" });
+    const stderr = (daemon.stderr as ReadableStream<Uint8Array>).getReader();
+    capture = (async () => { while (true) { const { done, value } = await stderr.read(); if (done) break; errors += new TextDecoder().decode(value); } })();
+    const wantLarge = fitted(111, 30);
+    await until(() => connections >= 1);
+    await until(() => canvasText() === wantLarge);
+    const stable = canvasText();
+    const quote = history();
+    fixture.stdin.write("10 2\n");
+    expect(await record()).toBe("ready");
+    await until(() => tooSmall() >= 1);
+    await Bun.sleep(1200);
+    expect(tooSmall(), errors).toBe(1);
+    expect(canvasText(), errors).toBe(stable);
+    expect(history()).toBe(quote);
+    fixture.stdin.write("60 12\n");
+    expect(await record()).toBe("ready");
+    const wantSmall = fitted(60, 12);
+    await until(() => canvasText() === wantSmall);
+    expect(tooSmall(), errors).toBe(1);
+    expect(history()).toBe(quote);
+    const lines = canvasText().replace(/\n$/, "").split("\n");
+    expect(lines.length, errors).toBeLessThanOrEqual(12);
+    for (const line of lines) expect(Bun.stringWidth(line), errors).toBeLessThanOrEqual(60);
+  } finally {
+    if (daemon) { daemon.kill(); await daemon.exited; }
+    await capture;
+    fixture.stdin.end();
+    await fixture.exited;
+    reader.releaseLock();
+    server.stop(true);
+    s.cleanup();
+  }
+}, 20000);
+
 test("oversized unterminated records reconnect instead of growing without bound", async () => {
   const s = sandbox();
   const socket = join(s.env.XDG_RUNTIME_DIR, "hypr/test/.socket2.sock");

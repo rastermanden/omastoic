@@ -611,10 +611,10 @@ async function daemon(): Promise<number> {
   const sameGrid = (grid: Size) => fitted?.cols === grid.cols && fitted?.rows === grid.rows;
 
   const rotate = async (): Promise<boolean> => {
-    const grid = await screensaverSize();
-    let wrote = false;
     await locked(STATE, async () => {
-      if (enabled()) wrote = await writeBranding(false, grid);
+      if (!enabled()) return;
+      const grid = await screensaverSize();
+      if (await writeBranding(false, grid)) fitted = grid.source === "live" ? grid : null;
     }).catch((err) => { console.error(`omastoic: ${err.message}`); });
     if (!enabled()) {
       stopRotating();
@@ -625,16 +625,22 @@ async function daemon(): Promise<number> {
       stopRotating();
       return false;
     }
-    if (wrote) fitted = grid.source === "live" ? grid : null;
     return true;
   };
 
   const refit = async (): Promise<boolean> => {
-    const grid = await screensaverSize();
-    if (grid.source !== "live" || sameGrid(grid)) return enabled() && await ownsBranding();
-    let wrote = false;
+    const seen = await screensaverSize();
+    if (seen.source !== "live" || sameGrid(seen)) return enabled() && await ownsBranding();
     await locked(STATE, async () => {
-      if (enabled()) wrote = await reflowQuote(grid);
+      if (!enabled()) return;
+      const grid = await screensaverSize();
+      if (grid.source !== "live" || sameGrid(grid)) return;
+      try {
+        if (await reflowQuote(grid)) fitted = grid;
+      } catch (err) {
+        fitted = grid;
+        throw err;
+      }
     }).catch((err) => { console.error(`omastoic: ${err.message}`); });
     if (!enabled()) {
       stopRotating();
@@ -645,7 +651,6 @@ async function daemon(): Promise<number> {
       stopRotating();
       return false;
     }
-    if (wrote) fitted = grid;
     return true;
   };
 
