@@ -7,6 +7,14 @@ import { root, sandbox } from "./sandbox.ts";
 
 const roster = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"];
 
+test("a checkbox label keeps a long quote whole", () => {
+  const text = "A sentence long enough that a forty-eight character cut would drop the ending of the line.";
+  const label = checkboxLabel({ id: "q99", citation: "Meditations XII.1", text });
+  expect(label).toBe(`q99  Meditations XII.1  ${text}`);
+  expect(label.endsWith("…")).toBe(false);
+  expect(label).toContain(text);
+});
+
 test("quote checkboxes are grouped by Stoic and cover bundled and added lines", () => {
   const rows = [
     { label: checkboxLabel({ id: "q01", citation: "Meditations II.5", text: "And thou wilt give thyself relief." }), on: true },

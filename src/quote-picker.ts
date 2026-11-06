@@ -8,8 +8,7 @@ export const UNCHECKED = "[ ] ";
 export type CheckQuote = { id: string; citation: string; text: string };
 
 export function checkboxLabel(quote: CheckQuote): string {
-  const text = quote.text.length > 48 ? `${quote.text.slice(0, 47)}…` : quote.text;
-  return `${quote.id}  ${quote.citation}  ${text}`;
+  return `${quote.id}  ${quote.citation}  ${quote.text}`;
 }
 
 /** gum splits each `--selected` value on commas. A comma in a citation stays one item. */
