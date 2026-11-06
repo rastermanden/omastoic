@@ -124,8 +124,11 @@ until you change them. It then asks whether to add one of your own quotes.
 }
 ```
 
-Your own `quotes.tsv` in that directory adds entries to the bundled book, and
-those lines stay in rotation even when that Stoic's bundled ids are limited.
+Your own `quotes.tsv` in that directory adds entries to the bundled book.
+Each line is `c01`, `c02`, … in that file. `omastoic config --list` stars the
+ones in rotation, and the gum quote checkboxes include them already checked.
+A bundled-only id list still keeps every custom line, so a new quote shows up
+without typing its id. Unchecking it in the checkbox then leaves it out.
 The file lives only under `~/.config/omastoic/`, never in the plugin checkout,
 so `omarchy plugin update` cannot overwrite it or `config.json`. Uninstall
 leaves both in place; `omastoic uninstall --purge` removes them.

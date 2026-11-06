@@ -314,7 +314,7 @@ test("omastoic config offers a gum quote after the Stoic prompts", async () => {
     expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({
       authors: ["marcus"],
       interval: 30,
-      quotes: { marcus: [] },
+      quotes: { marcus: ["c01"] },
     });
     expect(readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8")).toContain("marcus\tDesk note\tA custom sentence for the saver.\n");
   } finally { s.cleanup(); }
@@ -417,6 +417,52 @@ test("accepted settings survive a cancelled or invalid optional quote", async ()
     expect(unreadable.stderr).toContain("invalid quote author slug");
     expect(readFileSync(quotesPath, "utf8")).toBe(broken);
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ authors: ["seneca"], interval: 15 });
+  } finally { s.cleanup(); }
+});
+
+test("a bundled allow-list still shows a custom quote in the list, checkbox, and rotation", async () => {
+  const s = sandbox();
+  const settingsPath = join(s.config, "omastoic/config.json");
+  try {
+    s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01"] } }));
+    s.put(join(s.config, "omastoic/quotes.tsv"), "marcus\tDesk note\tA custom sentence for the saver.\n");
+
+    const listed = await s.cli(["config", "--list"]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain("2 of 19 quotes");
+    expect(listed.stdout).toContain("* c01  marcus  Desk note  A custom sentence for the saver.");
+    expect(listed.stdout).toContain("* q01  marcus");
+
+    const status = await s.cli(["status"]);
+    expect(status.stdout).toContain("2 quotes:");
+    const seen = new Set<string>();
+    for (let i = 0; i < 24; i++) {
+      const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+      expect(shown.code).toBe(0);
+      if (shown.stdout.includes("A custom sentence for the saver.")) seen.add("custom");
+      if (shown.stdout.includes("Meditations II.5")) seen.add("bundled");
+    }
+    expect([...seen].sort()).toEqual(["bundled", "custom"]);
+
+    s.stub("gum", [
+      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
+      "case \"$1\" in",
+      "  choose)",
+      "    case \"$*\" in",
+      "      *Stoics*) echo 'Marcus Aurelius' ;;",
+      "    esac",
+      "    ;;",
+      "  input) echo 30 ;;",
+      "  confirm) exit 1 ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const configured = await pty(s, ["config"]);
+    expect(configured.code).toBe(0);
+    const gum = readFileSync(join(s.home, "gum.log"), "utf8");
+    expect(gum).toContain("Desk note");
+    expect(gum).toContain("A custom sentence for the saver.");
+    expect(gum).toContain("--selected");
   } finally { s.cleanup(); }
 });
 

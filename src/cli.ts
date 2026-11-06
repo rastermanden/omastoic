@@ -14,7 +14,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, indexBundled, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
+import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
@@ -26,6 +26,7 @@ import {
   DEFAULT_INTERVAL,
   describeSettings,
   inRotation,
+  quoteKept,
   parseAuthorList,
   parseInterval,
   normalizeSettings,
@@ -74,13 +75,21 @@ async function bundledBook(): Promise<BundledQuote[]> {
   return indexBundled(parseQuotes(await Bun.file(join(ROOT, "data/quotes.tsv")).text()));
 }
 
-const choicesOf = (bundled: BundledQuote[]): QuoteChoice[] => bundled.map(({ id, author }) => ({ id, author }));
+const choicesOf = (quotes: BundledQuote[]): QuoteChoice[] => quotes.map(({ id, author }) => ({ id, author }));
+
+async function indexedCustom(): Promise<BundledQuote[]> {
+  try {
+    return indexCustom(await customQuotes());
+  } catch {
+    return [];
+  }
+}
 
 async function config(): Promise<Settings> {
   const file = Bun.file(SETTINGS_FILE);
   if (!(await file.exists())) return {};
   const roster = [...(await authors()).keys()];
-  const catalog = choicesOf(await bundledBook());
+  const catalog = [...choicesOf(await bundledBook()), ...choicesOf(await indexedCustom())];
   try {
     if (file.size > 65536) throw new Error("config exceeds 64 KiB");
     return normalizeSettings(await file.json(), roster, catalog);
@@ -137,9 +146,9 @@ function warnIgnoredRotation(bundled: BundledQuote[], custom: Quote[], settings:
 async function quoteBook(): Promise<Quote[]> {
   const bundled = await bundledBook();
   const cfg = await config();
-  const custom = await customQuotes();
-  // Lines in quotes.tsv are added to the book. They stay in rotation even when
-  // a bundled id for that Stoic is left out.
+  const custom = indexCustom(await customQuotes());
+  // A bundled-only allow-list still keeps every custom line, so a new quote
+  // shows up without an id being typed by hand.
   warnIgnoredRotation(bundled, custom, cfg);
   return inRotation(bundled, custom, cfg).quotes;
 }
@@ -898,19 +907,34 @@ async function appendQuotes(lines: string[]): Promise<number> {
   return 0;
 }
 
-function formatQuoteList(bundled: BundledQuote[], custom: Quote[], settings: Settings): string {
+function formatQuoteList(bundled: BundledQuote[], custom: BundledQuote[], settings: Settings): string {
   const lines = ["bundled:"];
-  for (const quote of bundled) {
+  const row = (quote: BundledQuote) => {
     const authorOn = !settings.authors?.length || settings.authors.includes(quote.author);
-    const ids = settings.quotes?.[quote.author];
-    const kept = authorOn && (ids == null || ids.includes(quote.id));
+    const kept = authorOn && quoteKept(quote.id, settings.quotes?.[quote.author]);
     const text = quote.text.length > 60 ? `${quote.text.slice(0, 59)}…` : quote.text;
-    lines.push(`${kept ? "*" : " "} ${quote.id}  ${quote.author}  ${quote.citation}  ${text}`);
-  }
+    return `${kept ? "*" : " "} ${quote.id}  ${quote.author}  ${quote.citation}  ${text}`;
+  };
+  for (const quote of bundled) lines.push(row(quote));
   lines.push("custom:");
   if (!custom.length) lines.push("  (none)");
-  for (const quote of custom) lines.push(`  ${quote.author}  ${quote.citation}  ${quote.text}`);
+  for (const quote of custom) lines.push(row(quote));
   return lines.join("\n");
+}
+
+/** A bundled-only list gains every custom id. An explicit custom list gains the quote just added. */
+function rememberAddedQuote(settings: Settings, custom: BundledQuote[], added: Quote): Settings {
+  const list = settings.quotes?.[added.author];
+  if (!list) return settings;
+  const mine = custom.filter((quote) => quote.author === added.author);
+  const addedRow = mine.find((quote) => quote.citation === added.citation && quote.text === added.text);
+  if (!addedRow) return settings;
+  const explicit = list.some((id) => id.startsWith("c") && id !== "c00");
+  const ids = list.filter((id) => id !== "c00");
+  for (const id of explicit ? [addedRow.id] : mine.map((quote) => quote.id)) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return { ...settings, quotes: { ...settings.quotes, [added.author]: ids } };
 }
 
 function printSettings(settings: Settings, names: Map<string, { name: string }>, catalog: QuoteChoice[]): void {
@@ -921,7 +945,8 @@ async function configure(rest: string[]): Promise<number> {
   const roster = await authors();
   const slugs = [...roster.keys()];
   const bundled = await bundledBook();
-  const catalog = choicesOf(bundled);
+  const customBook = await indexedCustom();
+  let catalog = [...choicesOf(bundled), ...choicesOf(customBook)];
   const current = await config();
   const authorsFlag = stringFlag(rest, "authors");
   const intervalFlag = stringFlag(rest, "interval");
@@ -960,12 +985,16 @@ async function configure(rest: string[]): Promise<number> {
     const editing = picked.length ? picked : slugs;
     next.quotes = { ...(current.quotes ?? {}) };
     for (const slug of editing) {
-      const choices = bundled.filter((quote) => quote.author === slug);
+      const choices = [...bundled.filter((quote) => quote.author === slug), ...customBook.filter((quote) => quote.author === slug)];
       if (!choices.length) continue;
-      const selected = current.quotes && Object.hasOwn(current.quotes, slug) ? current.quotes[slug] : null;
+      const selected = current.quotes && Object.hasOwn(current.quotes, slug)
+        ? choices.filter((quote) => quoteKept(quote.id, current.quotes?.[slug])).map((quote) => quote.id)
+        : null;
       const ids = await pickQuotes(roster.get(slug)?.name ?? slug, choices, selected);
       if (ids == null) return 0;
-      next.quotes[slug] = ids;
+      const picked = ids.filter((id) => id !== "c00");
+      if (choices.some((quote) => quote.id.startsWith("c")) && !picked.some((id) => id.startsWith("c"))) picked.push("c00");
+      next.quotes[slug] = picked;
     }
     const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL);
     if (seconds == null) return 0;
@@ -1020,11 +1049,25 @@ async function configure(rest: string[]): Promise<number> {
   }
 
   const settingsTouched = interactive || authorsFlag != null || intervalFlag != null || quoteFlags.length > 0;
-  if (settingsTouched) await saveSettings(next, slugs, catalog);
+  let selectionTouched = false;
   if (quoteLines) {
     const code = await appendQuotes(quoteLines);
     if (code !== 0) quoteFailure = code;
+    else {
+      const customNow = indexCustom(await customQuotes());
+      catalog = [...choicesOf(bundled), ...choicesOf(customNow)];
+      for (const line of quoteLines) {
+        const added = parseQuotes(line.endsWith("\n") ? line : `${line}\n`)[0];
+        if (!added) continue;
+        const updated = rememberAddedQuote(next, customNow, added);
+        if (updated !== next) {
+          next = updated;
+          selectionTouched = true;
+        }
+      }
+    }
   }
+  if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog);
   if (quoteFailure != null) {
     if (settingsTouched) {
       await restartDaemon();
@@ -1036,7 +1079,7 @@ async function configure(rest: string[]): Promise<number> {
   if (settingsTouched || quoteLines) await restartDaemon();
   const saved = await config();
   printSettings(saved, roster, catalog);
-  const custom = await customQuotes();
+  const custom = indexCustom(await customQuotes());
   warnIgnoredRotation(bundled, custom, saved);
   if (list) console.log(formatQuoteList(bundled, custom, saved));
   return 0;
@@ -1061,7 +1104,7 @@ async function status(): Promise<number> {
 
   console.log(`
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
-settings:         ${describeSettings(await config(), names, choicesOf(await bundledBook()))}
+settings:         ${describeSettings(await config(), names, [...choicesOf(await bundledBook()), ...choicesOf(await indexedCustom())])}
 grid:             ${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)
 canvas file:      ${BRANDING}
 rotation service: ${unit.stdout.toString().trim() || "not installed"}`);

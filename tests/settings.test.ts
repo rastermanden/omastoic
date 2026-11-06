@@ -114,6 +114,9 @@ test("rotation keeps custom lines and falls back when a filter matches nothing",
   const custom: Quote[] = [{ author: "marcus", citation: "Mine", text: "added" }];
   expect(bundled.map((quote) => quote.id)).toEqual(["q01", "q02", "q03"]);
   expect(inRotation(bundled, custom, { quotes: { marcus: ["q02"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third", "added"]);
+  const indexed = [{ ...custom[0], id: "c01" }];
+  expect(inRotation(bundled, indexed, { quotes: { marcus: ["q02"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third", "added"]);
+  expect(inRotation(bundled, indexed, { quotes: { marcus: ["q02", "c00"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third"]);
   expect(inRotation(bundled, [], { authors: ["seneca"], quotes: { seneca: [] } })).toEqual({
     quotes: bundled,
     ignoredSelection: false,
