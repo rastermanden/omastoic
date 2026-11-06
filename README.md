@@ -131,10 +131,11 @@ so `omarchy plugin update` cannot overwrite it or `config.json`. Uninstall
 leaves both in place; `omastoic uninstall --purge` removes them.
 
 `omastoic config --add` in a terminal asks for the author slug, the citation,
-and the text. `omastoic config` offers the same three questions. From a script,
-or when gum is missing, pass one tab-separated line, or edit the file:
-**author slug, citation, text**. Slugs contain letters,
-digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
+and the text. Each field opens with an editable example: `marcus`,
+`Meditations IX.1`, and `Your line.`. `omastoic config` offers the same three
+questions. From a script, or when gum is missing, pass one tab-separated line,
+or edit the file: **author slug, citation, text**. Slugs contain lowercase
+letters, digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
 citations to 256 characters and quote text to 4096; terminal control escapes
 are rejected. An unknown author renders without a portrait. A quote selection
 that matches nothing is ignored. The selected Stoics' lines are used when an
