@@ -19,8 +19,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   A new line stays on until its box is cleared. `--quotes` still edits bundled
   ids only.
 - `omastoic config --add` appends a tab-separated line to
-  `~/.config/omastoic/quotes.tsv`. Custom lines stay in rotation alongside any
-  bundled selection.
+  `~/.config/omastoic/quotes.tsv`. A bundled selection does not drop that line.
 
 ## 2.2.0 - 2026-11-04
 
