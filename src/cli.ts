@@ -14,12 +14,13 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, indexBundled, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
+import { compose, indexAdded, indexBundled, loadArt, parseAuthors, parseQuotes, pick, type AddedQuote, type BundledQuote, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
+import { checkboxLabel, idsFromCheckboxOutput, quoteCheckboxArgs, stoicGroups } from "./quote-picker.ts";
 import {
   applyQuoteFlags,
   compactSettings,
@@ -81,18 +82,26 @@ async function config(): Promise<Settings> {
   if (!(await file.exists())) return {};
   const roster = [...(await authors()).keys()];
   const catalog = choicesOf(await bundledBook());
+  // A bad quotes.tsv is reported by the rotation that reads it. Interval reads
+  // must keep working while that file is invalid, or the daemon stops ticking.
+  let addedCatalog: QuoteChoice[] = [];
+  try {
+    addedCatalog = choicesOf(indexAdded(await customQuotes()));
+  } catch {
+    addedCatalog = [];
+  }
   try {
     if (file.size > 65536) throw new Error("config exceeds 64 KiB");
-    return normalizeSettings(await file.json(), roster, catalog);
+    return normalizeSettings(await file.json(), roster, catalog, addedCatalog);
   } catch {
     console.error(`omastoic: ignoring unreadable ${SETTINGS_FILE}`);
     return {};
   }
 }
 
-async function saveSettings(settings: Settings, roster: string[], catalog: QuoteChoice[]): Promise<void> {
+async function saveSettings(settings: Settings, roster: string[], catalog: QuoteChoice[], addedCatalog: QuoteChoice[]): Promise<void> {
   mkdirSync(USER_CONFIG, { recursive: true });
-  const next = compactSettings(settings, roster, catalog);
+  const next = compactSettings(settings, roster, catalog, addedCatalog);
   atomicWrite(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
 }
 
@@ -138,8 +147,8 @@ async function quoteBook(): Promise<Quote[]> {
   const bundled = await bundledBook();
   const cfg = await config();
   const custom = await customQuotes();
-  // Lines in quotes.tsv are added to the book. They stay in rotation even when
-  // a bundled id for that Stoic is left out.
+  // Lines in quotes.tsv join the book. They stay in rotation when a bundled id
+  // is left out, unless the checkbox list turned that added line off.
   warnIgnoredRotation(bundled, custom, cfg);
   return inRotation(bundled, custom, cfg).quotes;
 }
@@ -745,32 +754,12 @@ async function pickInterval(current: number): Promise<number | undefined> {
   return n;
 }
 
-function quoteLabel(quote: BundledQuote): string {
-  const text = quote.text.length > 48 ? `${quote.text.slice(0, 47)}…` : quote.text;
-  return `${quote.id}  ${quote.citation}  ${text}`;
-}
-
-async function pickQuotes(name: string, choices: BundledQuote[], selected: string[] | null): Promise<string[] | undefined> {
-  const byLabel = new Map(choices.map((quote) => [quoteLabel(quote), quote.id]));
-  const args = [
-    "choose",
-    "--no-limit",
-    "--limit",
-    String(choices.length + 1),
-    "--header",
-    `Quotes from ${name}  (x or tab to toggle, enter to confirm)`,
-  ];
-  const chosen = selected ?? choices.map((quote) => quote.id);
-  if (chosen.length === choices.length) args.push("--selected", "*");
-  else for (const quote of choices) if (chosen.includes(quote.id)) args.push("--selected", quoteLabel(quote));
-  args.push(...byLabel.keys());
-  const out = await gumText(args);
+async function pickQuotes(name: string, rows: { id: string; citation: string; text: string; on: boolean }[]): Promise<string[] | undefined> {
+  const labeled = rows.map((row) => ({ label: checkboxLabel(row), id: row.id, on: row.on }));
+  const byLabel = new Map(labeled.map((row) => [row.label, row.id]));
+  const out = await gumText(quoteCheckboxArgs(name, labeled.map((row) => ({ label: row.label, on: row.on }))));
   if (out == null) return undefined;
-  if (!out) return [];
-  return out.split("\n").flatMap((line) => {
-    const id = byLabel.get(line.trim());
-    return id ? [id] : [];
-  });
+  return idsFromCheckboxOutput(out, byLabel);
 }
 
 const QUOTE_HEADER = "# author-slug <TAB> citation <TAB> text\n";
@@ -835,7 +824,13 @@ function formatQuoteList(bundled: BundledQuote[], custom: Quote[], settings: Set
   }
   lines.push("custom:");
   if (!custom.length) lines.push("  (none)");
-  for (const quote of custom) lines.push(`  ${quote.author}  ${quote.citation}  ${quote.text}`);
+  for (const quote of indexAdded(custom)) {
+    const authorOn = !settings.authors?.length || settings.authors.includes(quote.author);
+    const off = settings.addedOff?.[quote.author];
+    const kept = authorOn && (off == null || !off.includes(quote.id));
+    const text = quote.text.length > 60 ? `${quote.text.slice(0, 59)}…` : quote.text;
+    lines.push(`${kept ? "*" : " "} ${quote.id}  ${quote.author}  ${quote.citation}  ${text}`);
+  }
   return lines.join("\n");
 }
 
@@ -855,6 +850,18 @@ async function configure(rest: string[]): Promise<number> {
   const addFlags = flagValues(rest, "add");
   const list = rest.includes("--list");
   const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && !list;
+  // Checkboxes need the added lines. A bad quotes.tsv stops that screen, and
+  // still lets a flag such as --interval save before the read is reported.
+  let added: AddedQuote[] = [];
+  try {
+    added = indexAdded(await customQuotes());
+  } catch (error) {
+    if (interactive) {
+      console.error(`omastoic: ${(error as Error).message}`);
+      return 1;
+    }
+  }
+  const addedCatalog = choicesOf(added);
 
   if (interactive && !process.stdin.isTTY) {
     printSettings(current, roster, catalog);
@@ -881,15 +888,23 @@ async function configure(rest: string[]): Promise<number> {
     const picked = await pickAuthors(roster, current.authors ?? []);
     if (picked == null) return 0;
     next.authors = picked;
-    const editing = picked.length ? picked : slugs;
     next.quotes = { ...(current.quotes ?? {}) };
-    for (const slug of editing) {
-      const choices = bundled.filter((quote) => quote.author === slug);
-      if (!choices.length) continue;
-      const selected = current.quotes && Object.hasOwn(current.quotes, slug) ? current.quotes[slug] : null;
-      const ids = await pickQuotes(roster.get(slug)?.name ?? slug, choices, selected);
+    next.addedOff = { ...(current.addedOff ?? {}) };
+    for (const slug of stoicGroups(picked, slugs, added.map((quote) => quote.author))) {
+      const bundledRows = bundled.filter((quote) => quote.author === slug);
+      const addedRows = added.filter((quote) => quote.author === slug);
+      if (!bundledRows.length && !addedRows.length) continue;
+      const bundledOn = current.quotes && Object.hasOwn(current.quotes, slug) ? new Set(current.quotes[slug]) : null;
+      const addedOff = new Set(current.addedOff?.[slug] ?? []);
+      const ids = await pickQuotes(roster.get(slug)?.name ?? slug, [
+        ...bundledRows.map((quote) => ({ ...quote, on: bundledOn == null || bundledOn.has(quote.id) })),
+        ...addedRows.map((quote) => ({ ...quote, on: !addedOff.has(quote.id) })),
+      ]);
       if (ids == null) return 0;
-      next.quotes[slug] = ids;
+      if (slugs.includes(slug)) next.quotes[slug] = ids.filter((id) => id.startsWith("q"));
+      const off = addedRows.map((quote) => quote.id).filter((id) => !ids.includes(id));
+      if (off.length) next.addedOff[slug] = off;
+      else delete next.addedOff[slug];
     }
     const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL);
     if (seconds == null) return 0;
@@ -934,7 +949,7 @@ async function configure(rest: string[]): Promise<number> {
     if (code !== 0) return code;
   }
   const settingsTouched = interactive || authorsFlag != null || intervalFlag != null || quoteFlags.length > 0;
-  if (settingsTouched) await saveSettings(next, slugs, catalog);
+  if (settingsTouched) await saveSettings(next, slugs, catalog, addedCatalog);
   if (settingsTouched || quoteLines) await restartDaemon();
   const saved = await config();
   printSettings(saved, roster, catalog);

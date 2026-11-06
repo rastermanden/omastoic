@@ -1,4 +1,4 @@
-import { canonicalQuoteId, type BundledQuote, type Quote } from "./canvas.ts";
+import { canonicalAddedId, canonicalQuoteId, indexAdded, type BundledQuote, type Quote } from "./canvas.ts";
 
 export type QuoteChoice = { id: string; author: string };
 export type Settings = {
@@ -6,46 +6,70 @@ export type Settings = {
   authors?: string[];
   /** Bundled quote ids kept for that Stoic. A missing author means every bundled line. */
   quotes?: Record<string, string[]>;
+  /** Added quote ids left out of rotation. A missing author means every added line stays. */
+  addedOff?: Record<string, string[]>;
 };
 
 export const DEFAULT_INTERVAL = 60;
 
 /**
- * A per-author allow-list. `null` means the field is malformed and must be
- * ignored. A Stoic whose list is the whole bundled set is omitted.
+ * A per-author id list. `null` means the field is malformed and must be
+ * ignored. `keepEmpty` retains `[]` and omits a list that names every catalog
+ * id. Otherwise an empty list is omitted and a non-empty list is kept.
  */
-function quoteAllowList(raw: unknown, roster: string[], catalog: QuoteChoice[]): Record<string, string[]> | undefined | null {
+function allowList(
+  raw: unknown,
+  authors: string[],
+  catalog: QuoteChoice[],
+  canonical: (raw: string) => string | null,
+  keepEmpty: boolean,
+): Record<string, string[]> | undefined | null {
   if (raw == null) return undefined;
   if (typeof raw !== "object" || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
   for (const [author, ids] of Object.entries(record)) {
-    if (!roster.includes(author) || !Array.isArray(ids)) return null;
+    if (!authors.includes(author) || !Array.isArray(ids)) return null;
     if (!ids.every((id) => {
-      const canonical = typeof id === "string" ? canonicalQuoteId(id) : null;
-      return !!canonical && (catalog.length === 0 || catalog.some((row) => row.author === author && row.id === canonical));
+      const value = typeof id === "string" ? canonical(id) : null;
+      return !!value && (catalog.length === 0 || catalog.some((row) => row.author === author && row.id === value));
     })) return null;
   }
   if (!catalog.length) {
     const trusted: Record<string, string[]> = {};
-    for (const author of roster) {
+    for (const author of authors) {
       if (!Object.hasOwn(record, author)) continue;
-      trusted[author] = [...new Set((record[author] as string[]).map((id) => canonicalQuoteId(id)!))];
+      const ids = [...new Set((record[author] as string[]).map((id) => canonical(id)!))];
+      if (keepEmpty || ids.length) trusted[author] = ids;
     }
     return Object.keys(trusted).length ? trusted : undefined;
   }
   const quotes: Record<string, string[]> = {};
-  for (const author of roster) {
+  for (const author of authors) {
     if (!Object.hasOwn(record, author)) continue;
-    const wanted = new Set((record[author] as string[]).map((id) => canonicalQuoteId(id)!));
+    const wanted = new Set((record[author] as string[]).map((id) => canonical(id)!));
     const known = catalog.filter((row) => row.author === author).map((row) => row.id);
     const ordered = known.filter((id) => wanted.has(id));
-    if (ordered.length !== known.length) quotes[author] = ordered;
+    if (keepEmpty ? ordered.length !== known.length : ordered.length) quotes[author] = ordered;
   }
   return Object.keys(quotes).length ? quotes : undefined;
 }
 
+function quoteAllowList(raw: unknown, roster: string[], catalog: QuoteChoice[]): Record<string, string[]> | undefined | null {
+  return allowList(raw, roster, catalog, canonicalQuoteId, true);
+}
+
+function addedOffList(raw: unknown, roster: string[], catalog: QuoteChoice[]): Record<string, string[]> | undefined | null {
+  const authors = [...new Set([...roster, ...catalog.map((row) => row.author)])];
+  return allowList(raw, authors, catalog, canonicalAddedId, false);
+}
+
 /** Treat hand-edited JSON as untrusted input, just like CLI arguments. */
-export function normalizeSettings(raw: unknown, roster: string[], catalog: QuoteChoice[] = []): Settings {
+export function normalizeSettings(
+  raw: unknown,
+  roster: string[],
+  catalog: QuoteChoice[] = [],
+  addedCatalog: QuoteChoice[] = [],
+): Settings {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const value = raw as Record<string, unknown>;
   const result: Settings = {};
@@ -56,6 +80,10 @@ export function normalizeSettings(raw: unknown, roster: string[], catalog: Quote
   if (Object.hasOwn(value, "quotes")) {
     const quotes = quoteAllowList(value.quotes, roster, catalog);
     if (quotes) result.quotes = quotes;
+  }
+  if (Object.hasOwn(value, "addedOff")) {
+    const addedOff = addedOffList(value.addedOff, roster, addedCatalog);
+    if (addedOff) result.addedOff = addedOff;
   }
   return result;
 }
@@ -138,7 +166,12 @@ export function applyQuoteFlags(
 }
 
 /** Drop authors when the list is empty or the full roster — that is the default. */
-export function compactSettings(settings: Settings, roster: string[], catalog: QuoteChoice[] = []): Settings {
+export function compactSettings(
+  settings: Settings,
+  roster: string[],
+  catalog: QuoteChoice[] = [],
+  addedCatalog: QuoteChoice[] = [],
+): Settings {
   const out: Settings = {};
   if (settings.interval != null) out.interval = settings.interval;
   const authors = settings.authors;
@@ -149,26 +182,34 @@ export function compactSettings(settings: Settings, roster: string[], catalog: Q
     const quotes = quoteAllowList(settings.quotes, roster, catalog);
     if (quotes) out.quotes = quotes;
   }
+  if (settings.addedOff) {
+    const addedOff = addedOffList(settings.addedOff, roster, addedCatalog);
+    if (addedOff) out.addedOff = addedOff;
+  }
   return out;
 }
 
 /**
- * Bundled lines kept by a per-author allow-list, plus every custom line.
- * An allow-list that matches nothing is ignored and the author list is applied
- * to the full book. An author list that matches nothing falls back to every
- * bundled and custom line.
+ * Bundled lines kept by a per-author allow-list, plus custom lines that are
+ * not in `addedOff`. An allow-list that matches nothing is ignored and the
+ * author list is applied to the full book. An author list that matches
+ * nothing falls back to every bundled and custom line.
  */
 export function inRotation(
   bundled: BundledQuote[],
   custom: Quote[],
   settings: Settings,
 ): { quotes: Quote[]; ignoredSelection: boolean; ignoredAuthors: boolean } {
+  const added = indexAdded(custom);
   const picked = [
     ...bundled.filter((quote) => {
       const ids = settings.quotes?.[quote.author];
       return ids == null || ids.includes(quote.id);
     }),
-    ...custom,
+    ...added.filter((quote) => {
+      const off = settings.addedOff?.[quote.author];
+      return off == null || !off.includes(quote.id);
+    }).map(({ author, citation, text }) => ({ author, citation, text })),
   ];
   const ignoredSelection = picked.length === 0 && bundled.length + custom.length > 0;
   const pool = ignoredSelection ? [...bundled, ...custom] : picked;

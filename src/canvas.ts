@@ -16,10 +16,22 @@ export function canonicalQuoteId(raw: string): string | null {
   return id;
 }
 
+/** Added row ids are `a01`, `a02`, … in the user's `quotes.tsv` order. */
+export function canonicalAddedId(raw: string): string | null {
+  const id = raw.trim().toLowerCase();
+  if (!/^a(?:0[1-9]|[1-9]\d+)$/.test(id)) return null;
+  return id;
+}
+
 export type BundledQuote = Quote & { id: string };
+export type AddedQuote = Quote & { id: string };
 
 export function indexBundled(quotes: Quote[]): BundledQuote[] {
   return quotes.map((quote, index) => ({ ...quote, id: `q${String(index + 1).padStart(2, "0")}` }));
+}
+
+export function indexAdded(quotes: Quote[]): AddedQuote[] {
+  return quotes.map((quote, index) => ({ ...quote, id: `a${String(index + 1).padStart(2, "0")}` }));
 }
 
 export function parseQuotes(tsv: string): Quote[] {
