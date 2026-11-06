@@ -108,6 +108,20 @@ test("config warns when an empty selection is ignored at rotation", async () => 
     expect(kept.stdout).not.toContain("Seneca");
     expect(kept.stderr).toContain("quote selection was ignored; using the selected Stoics' lines");
     expect(kept.stderr).not.toContain("using the whole book");
+
+    s.put(join(s.config, "omastoic/quotes.tsv"), "marcus\tDesk note\tA custom sentence for the saver.\n");
+    s.put(join(s.config, "omastoic/config.json"), JSON.stringify({
+      authors: ["marcus"],
+      quotes: Object.fromEntries(stoics.map((slug) => [slug, []])),
+      addedOff: { marcus: ["a01"] },
+    }));
+    const customStatus = await s.cli(["status"]);
+    expect(customStatus.code).toBe(0);
+    expect(customStatus.stdout).toContain("19 quotes:");
+    expect(customStatus.stdout).toContain("Marcus Aurelius");
+    expect(customStatus.stdout).not.toContain("Seneca");
+    expect(customStatus.stderr).toContain("quote selection was ignored; using the selected Stoics' lines");
+    expect(customStatus.stderr).not.toContain("using the whole book");
   } finally { s.cleanup(); }
 });
 

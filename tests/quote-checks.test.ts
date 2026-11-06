@@ -14,15 +14,21 @@ test("a checkbox label keeps a long quote whole", () => {
   expect(label).toBe(`q99  Meditations XII.1  ${text}`);
   expect(label.endsWith("…")).toBe(false);
   expect(label).toContain(text);
+  const chrome = Bun.stringWidth("> ") + Math.max(Bun.stringWidth(CHECKED), Bun.stringWidth(UNCHECKED));
+  const lead = "q99  Meditations XII.1  ";
   const wrapped = checkboxLabel(quote, 48);
   expect(wrapped.includes("…")).toBe(false);
   expect(wrapped.split("\n").length).toBeGreaterThan(1);
-  const pad = " ".repeat(Bun.stringWidth("q99  Meditations XII.1  "));
-  const joined = wrapped.split("\n").map((line, index) => index === 0 ? line.slice("q99  Meditations XII.1  ".length) : line.slice(pad.length)).join(" ");
+  const joined = wrapped.split("\n").map((line, index) => index === 0 ? line.slice(lead.length) : line.slice(chrome + lead.length)).join(" ");
   expect(joined).toBe(text);
-  expect(wrapped.split("\n").every((line) => Bun.stringWidth(line) <= 48)).toBe(true);
-  const byLabel = new Map([[wrapped, "q99"]]);
+  const [first, ...rest] = wrapped.split("\n");
+  expect(Bun.stringWidth(first!) + chrome).toBeLessThanOrEqual(48);
+  expect(rest.every((line) => line.startsWith(" ".repeat(chrome + lead.length)) && Bun.stringWidth(line) <= 48)).toBe(true);
+  const byLabel = new Map([[wrapped, "q99"], ["q02  On Anger  Delay.", "q02"]]);
+  expect(idsFromCheckboxOutput(wrapped, byLabel)).toEqual(["q99"]);
+  expect(idsFromCheckboxOutput(`${wrapped}\n`, byLabel)).toEqual(["q99"]);
   expect(idsFromCheckboxOutput(`${wrapped}\x1e`, byLabel)).toEqual(["q99"]);
+  expect(idsFromCheckboxOutput(`${wrapped}${String.fromCharCode(0x1e)}q02  On Anger  Delay.\n`, byLabel)).toEqual(["q99", "q02"]);
 });
 
 test("quote checkboxes are grouped by Stoic and cover bundled and added lines", () => {
@@ -47,9 +53,57 @@ test("quote checkboxes are grouped by Stoic and cover bundled and added lines", 
   expect(args.slice(-3)).toEqual(rows.map((row) => row.label));
   expect(idsFromCheckboxOutput(`${rows[0].label}\n${rows[2].label}\n`, new Map(rows.map((row) => [row.label, row.label.slice(0, 3)])))).toEqual(["q01", "a01"]);
   expect(idsFromCheckboxOutput("", new Map())).toEqual([]);
+  const screenRows = 24;
+  const tall = Array.from({ length: 15 }, (_, index) => `line ${index}`).join("\n");
+  const paged = [
+    ...Array.from({ length: 10 }, (_, index) => ({ label: `s${index}`, on: true })),
+    { label: tall, on: true },
+    ...Array.from({ length: 10 }, (_, index) => ({ label: `t${index}`, on: true })),
+  ];
+  const pagedArgs = quoteCheckboxArgs("Seneca", paged, { rows: screenRows });
+  const pagedHeight = Number(pagedArgs[pagedArgs.indexOf("--height") + 1]);
+  const pagedLines = paged.map((row) => row.label.split("\n").length);
+  let worst = 0;
+  for (let start = 0; start + pagedHeight <= pagedLines.length; start++) {
+    let sum = 0;
+    for (let i = 0; i < pagedHeight; i++) sum += pagedLines[start + i]!;
+    worst = Math.max(worst, sum);
+  }
+  expect(pagedHeight).toBeGreaterThan(0);
+  expect(pagedHeight).toBeLessThan(paged.length);
+  expect(worst + 5).toBeLessThanOrEqual(screenRows);
   expect(stoicGroups(["marcus"], roster, ["plato"])).toEqual(["marcus"]);
   expect(stoicGroups([], roster, ["plato", "marcus"])).toEqual([...roster, "plato"]);
   expect(stoicGroups(roster, roster, ["plato"])).toEqual([...roster, "plato"]);
+});
+
+test("wrapped quotes stay inside the terminal on every page", () => {
+  const bundled = indexBundled(parseQuotes(readFileSync(join(root, "data/quotes.tsv"), "utf8")));
+  const chrome = Bun.stringWidth("> ") + Math.max(Bun.stringWidth(CHECKED), Bun.stringWidth(UNCHECKED));
+  for (const [columns, screenRows] of [[80, 24], [100, 40], [120, 24]] as const) {
+    const quotes = bundled.filter((quote) => quote.author === "marcus");
+    const rows = quotes.map((quote) => ({ label: checkboxLabel(quote, columns), on: true }));
+    const args = quoteCheckboxArgs("Marcus Aurelius", rows, { rows: screenRows });
+    const height = Number(args[args.indexOf("--height") + 1]);
+    const lines = rows.map((row) => row.label.split("\n").length);
+    const frame = height < lines.length ? 5 : 4;
+    let worst = height >= lines.length ? lines.reduce((sum, count) => sum + count, 0) : 0;
+    for (let start = 0; start + height <= lines.length; start++) {
+      let sum = 0;
+      for (let i = 0; i < height; i++) sum += lines[start + i]!;
+      worst = Math.max(worst, sum);
+    }
+    expect(height).toBeGreaterThan(0);
+    expect(worst + frame).toBeLessThanOrEqual(screenRows);
+    for (const row of rows) {
+      const [first, ...rest] = row.label.split("\n");
+      expect(Bun.stringWidth(first!) + chrome).toBeLessThanOrEqual(columns);
+      for (const line of rest) {
+        expect(line.startsWith(" ".repeat(chrome))).toBe(true);
+        expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+      }
+    }
+  }
 });
 
 test("the config checkbox list turns bundled and added quotes on and off", async () => {
