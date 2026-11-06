@@ -218,6 +218,40 @@ test("config --add prompts for author, citation and text", async () => {
   } finally { s.cleanup(); }
 });
 
+test("accepting the prefilled quote suggestion writes that line", async () => {
+  const s = sandbox();
+  try {
+    s.stub("gum", [
+      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
+      "value=\"\"",
+      "prev=\"\"",
+      "for arg in \"$@\"; do",
+      "  if [[ \"$prev\" == --value ]]; then value=\"$arg\"; fi",
+      "  prev=\"$arg\"",
+      "done",
+      "case \"$1\" in",
+      "  input|write)",
+      "    [[ -n \"$value\" ]] || { echo \"no editable value\" >&2; exit 1; }",
+      "    printf '%s\\n' \"$value\"",
+      "    ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const added = await pty(s, ["config", "--add"]);
+    expect(added.code).toBe(0);
+    expect(readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8")).toBe(
+      "# author-slug <TAB> citation <TAB> text\nmarcus\tMeditations IX.1\tYour line.\n",
+    );
+    const log = readFileSync(join(s.home, "gum.log"), "utf8");
+    expect(log).toContain("Author slug");
+    expect(log).toContain("Citation");
+    expect(log).toContain("Quote text");
+    expect(log).toContain("--value marcus");
+    expect(log).toContain("--value Meditations IX.1");
+    expect(log).toContain("--value Your line.");
+  } finally { s.cleanup(); }
+});
+
 test("cancelling the add prompt writes nothing, and a bad slug is rejected", async () => {
   const s = sandbox();
   try {
