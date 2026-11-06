@@ -29,10 +29,10 @@ _omastoic() {
       COMPREPLY=("${hits[@]/#/${prefix}}")
       return 0
     fi
-    if [[ $prev == --interval ]]; then
+    if [[ $prev == --interval || $prev == --quotes || $prev == --add ]]; then
       return 0
     fi
-    mapfile -t COMPREPLY < <(compgen -W "--authors --interval" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--authors --interval --quotes --add --list" -- "$cur")
     ;;
   uninstall)
     mapfile -t COMPREPLY < <(compgen -W "--purge" -- "$cur")

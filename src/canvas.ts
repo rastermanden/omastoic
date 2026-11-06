@@ -9,6 +9,19 @@ export type Author = { slug: string; name: string; dates: string };
 
 export const ART_GAP = 4;
 
+/** Bundled row ids are `q01`, `q02`, … in `data/quotes.tsv` order. */
+export function canonicalQuoteId(raw: string): string | null {
+  const id = raw.trim().toLowerCase();
+  if (!/^q(?:0[1-9]|[1-9]\d+)$/.test(id)) return null;
+  return id;
+}
+
+export type BundledQuote = Quote & { id: string };
+
+export function indexBundled(quotes: Quote[]): BundledQuote[] {
+  return quotes.map((quote, index) => ({ ...quote, id: `q${String(index + 1).padStart(2, "0")}` }));
+}
+
 export function parseQuotes(tsv: string): Quote[] {
   if (Buffer.byteLength(tsv) > 1024 * 1024) throw new Error("quote file exceeds 1 MiB");
   tsv = tsv.replace(/\r\n/g, "\n");

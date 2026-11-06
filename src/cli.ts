@@ -14,19 +14,22 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, loadArt, parseAuthors, parseQuotes, pick, type Quote } from "./canvas.ts";
+import { compose, indexBundled, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
 import {
+  applyQuoteFlags,
   compactSettings,
   DEFAULT_INTERVAL,
   describeSettings,
+  inRotation,
   parseAuthorList,
   parseInterval,
   normalizeSettings,
+  type QuoteChoice,
   type Settings,
 } from "./settings.ts";
 
@@ -67,21 +70,29 @@ const SETTINGS_FILE = join(USER_CONFIG, "config.json");
 const owned = new OwnedFiles(STATE);
 const DISPLACED = join(STATE, "displaced.kind");
 
+async function bundledBook(): Promise<BundledQuote[]> {
+  return indexBundled(parseQuotes(await Bun.file(join(ROOT, "data/quotes.tsv")).text()));
+}
+
+const choicesOf = (bundled: BundledQuote[]): QuoteChoice[] => bundled.map(({ id, author }) => ({ id, author }));
+
 async function config(): Promise<Settings> {
   const file = Bun.file(SETTINGS_FILE);
   if (!(await file.exists())) return {};
+  const roster = [...(await authors()).keys()];
+  const catalog = choicesOf(await bundledBook());
   try {
     if (file.size > 65536) throw new Error("config exceeds 64 KiB");
-    return normalizeSettings(await file.json(), [...(await authors()).keys()]);
+    return normalizeSettings(await file.json(), roster, catalog);
   } catch {
     console.error(`omastoic: ignoring unreadable ${SETTINGS_FILE}`);
     return {};
   }
 }
 
-async function saveSettings(settings: Settings, roster: string[]): Promise<void> {
+async function saveSettings(settings: Settings, roster: string[], catalog: QuoteChoice[]): Promise<void> {
   mkdirSync(USER_CONFIG, { recursive: true });
-  const next = compactSettings(settings, roster);
+  const next = compactSettings(settings, roster, catalog);
   atomicWrite(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
 }
 
@@ -91,24 +102,46 @@ async function restartDaemon(): Promise<void> {
   }
 }
 
-async function quoteBook(): Promise<Quote[]> {
-  const cfg = await config();
-  let quotes = parseQuotes(await Bun.file(join(ROOT, "data/quotes.tsv")).text());
-
-  // Anything the user drops in is added to the book rather than replacing it.
+async function customQuotes(): Promise<Quote[]> {
   const extra = Bun.file(join(USER_CONFIG, "quotes.tsv"));
-  if (await extra.exists()) {
-    if (extra.size > 1024 * 1024) throw new Error("custom quote file exceeds 1 MiB");
-    quotes = [...quotes, ...parseQuotes(await extra.text())];
-  }
+  if (!(await extra.exists())) return [];
+  if (extra.size > 1024 * 1024) throw new Error("custom quote file exceeds 1 MiB");
+  return parseQuotes(await extra.text());
+}
 
-  if (cfg.authors?.length) {
-    const wanted = new Set(cfg.authors);
-    const filtered = quotes.filter((q) => wanted.has(q.author));
-    if (filtered.length) return filtered;
-    console.error("omastoic: config authors matched no quotes; using the whole book");
+function warnIgnoredRotation(bundled: BundledQuote[], custom: Quote[], settings: Settings): void {
+  const rotation = inRotation(bundled, custom, settings);
+  if (rotation.ignoredSelection) {
+    const wanted = new Set(settings.authors ?? []);
+    const selected = bundled.filter((quote) => wanted.has(quote.author));
+    const onlySelected =
+      wanted.size > 0 &&
+      selected.length > 0 &&
+      selected.length < bundled.length &&
+      rotation.quotes.length === selected.length &&
+      rotation.quotes.every(
+        (quote, index) =>
+          quote.author === selected[index]?.author &&
+          quote.citation === selected[index]?.citation &&
+          quote.text === selected[index]?.text,
+      );
+    console.error(
+      onlySelected
+        ? "omastoic: quote selection was ignored; using the selected Stoics' lines"
+        : "omastoic: config quotes matched no quotes; using the whole book",
+    );
   }
-  return quotes;
+  if (rotation.ignoredAuthors) console.error("omastoic: config authors matched no quotes; using the whole book");
+}
+
+async function quoteBook(): Promise<Quote[]> {
+  const bundled = await bundledBook();
+  const cfg = await config();
+  const custom = await customQuotes();
+  // Lines in quotes.tsv are added to the book. They stay in rotation even when
+  // a bundled id for that Stoic is left out.
+  warnIgnoredRotation(bundled, custom, cfg);
+  return inRotation(bundled, custom, cfg).quotes;
 }
 
 const authors = async () => parseAuthors(await Bun.file(join(ROOT, "data/authors.tsv")).text());
@@ -646,6 +679,16 @@ function stringFlag(rest: string[], name: string): string | undefined {
   return i >= 0 && rest[i + 1] ? rest[i + 1] : undefined;
 }
 
+function flagValues(rest: string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] !== `--${name}`) continue;
+    const next = rest[i + 1];
+    out.push(next && !next.startsWith("--") ? next : "");
+  }
+  return out;
+}
+
 async function gumText(args: string[]): Promise<string | null> {
   if (!Bun.which("gum")) return null;
   const proc = Bun.spawn(["gum", ...args], { stdin: "inherit", stdout: "pipe", stderr: "inherit" });
@@ -702,36 +745,152 @@ async function pickInterval(current: number): Promise<number | undefined> {
   return n;
 }
 
-function printSettings(settings: Settings, names: Map<string, { name: string }>): void {
-  console.log(`→ ${describeSettings(settings, names)}`);
+function quoteLabel(quote: BundledQuote): string {
+  const text = quote.text.length > 48 ? `${quote.text.slice(0, 47)}…` : quote.text;
+  return `${quote.id}  ${quote.citation}  ${text}`;
+}
+
+async function pickQuotes(name: string, choices: BundledQuote[], selected: string[] | null): Promise<string[] | undefined> {
+  const byLabel = new Map(choices.map((quote) => [quoteLabel(quote), quote.id]));
+  const args = [
+    "choose",
+    "--no-limit",
+    "--limit",
+    String(choices.length + 1),
+    "--header",
+    `Quotes from ${name}  (x or tab to toggle, enter to confirm)`,
+  ];
+  const chosen = selected ?? choices.map((quote) => quote.id);
+  if (chosen.length === choices.length) args.push("--selected", "*");
+  else for (const quote of choices) if (chosen.includes(quote.id)) args.push("--selected", quoteLabel(quote));
+  args.push(...byLabel.keys());
+  const out = await gumText(args);
+  if (out == null) return undefined;
+  if (!out) return [];
+  return out.split("\n").flatMap((line) => {
+    const id = byLabel.get(line.trim());
+    return id ? [id] : [];
+  });
+}
+
+const QUOTE_HEADER = "# author-slug <TAB> citation <TAB> text\n";
+
+async function appendQuotes(lines: string[]): Promise<number> {
+  const parsed: Quote[] = [];
+  for (const line of lines) {
+    let rows: Quote[];
+    try {
+      rows = parseQuotes(line.endsWith("\n") ? line : `${line}\n`);
+    } catch (error) {
+      console.error(`omastoic: ${(error as Error).message}`);
+      return 1;
+    }
+    if (rows.length !== 1) {
+      console.error("omastoic: --add expects one author, citation and text, separated by tabs");
+      return 1;
+    }
+    parsed.push(rows[0]);
+  }
+  const path = join(USER_CONFIG, "quotes.tsv");
+  const existing = await Bun.file(path).text().catch(() => "");
+  let have: Quote[] = [];
+  try {
+    have = existing ? parseQuotes(existing) : [];
+  } catch (error) {
+    console.error(`omastoic: ${(error as Error).message}`);
+    return 1;
+  }
+  const key = (quote: Quote) => `${quote.author}\t${quote.citation}\t${quote.text}`;
+  const seen = new Set(have.map(key));
+  const rows: string[] = [];
+  for (const quote of parsed) {
+    const row = key(quote);
+    if (seen.has(row)) {
+      console.error(`omastoic: that quote is already in ${path}`);
+      return 1;
+    }
+    seen.add(row);
+    rows.push(`${row}\n`);
+  }
+  const body = existing === "" ? QUOTE_HEADER : existing.endsWith("\n") ? existing : `${existing}\n`;
+  const next = `${body}${rows.join("")}`;
+  if (Buffer.byteLength(next) > 1024 * 1024) {
+    console.error("omastoic: custom quote file exceeds 1 MiB");
+    return 1;
+  }
+  mkdirSync(USER_CONFIG, { recursive: true });
+  atomicWrite(path, next);
+  console.log(`→ added ${rows.length} ${rows.length === 1 ? "quote" : "quotes"} to ${path}`);
+  return 0;
+}
+
+function formatQuoteList(bundled: BundledQuote[], custom: Quote[], settings: Settings): string {
+  const lines = ["bundled:"];
+  for (const quote of bundled) {
+    const authorOn = !settings.authors?.length || settings.authors.includes(quote.author);
+    const ids = settings.quotes?.[quote.author];
+    const kept = authorOn && (ids == null || ids.includes(quote.id));
+    const text = quote.text.length > 60 ? `${quote.text.slice(0, 59)}…` : quote.text;
+    lines.push(`${kept ? "*" : " "} ${quote.id}  ${quote.author}  ${quote.citation}  ${text}`);
+  }
+  lines.push("custom:");
+  if (!custom.length) lines.push("  (none)");
+  for (const quote of custom) lines.push(`  ${quote.author}  ${quote.citation}  ${quote.text}`);
+  return lines.join("\n");
+}
+
+function printSettings(settings: Settings, names: Map<string, { name: string }>, catalog: QuoteChoice[]): void {
+  console.log(`→ ${describeSettings(settings, names, catalog)}`);
 }
 
 async function configure(rest: string[]): Promise<number> {
   const roster = await authors();
   const slugs = [...roster.keys()];
+  const bundled = await bundledBook();
+  const catalog = choicesOf(bundled);
   const current = await config();
   const authorsFlag = stringFlag(rest, "authors");
   const intervalFlag = stringFlag(rest, "interval");
-  const interactive = authorsFlag == null && intervalFlag == null;
+  const quoteFlags = flagValues(rest, "quotes");
+  const addFlags = flagValues(rest, "add");
+  const list = rest.includes("--list");
+  const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && !list;
 
   if (interactive && !process.stdin.isTTY) {
-    printSettings(current, roster);
+    printSettings(current, roster, catalog);
     console.log(`  omastoic config --authors marcus,seneca --interval 15`);
-    console.log(`  omastoic config --authors all`);
+    console.log(`  omastoic config --quotes marcus=q01,q02`);
+    console.log(`  omastoic config --quotes marcus=all`);
+    console.log(`  omastoic config --quotes all`);
+    console.log(`  omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'`);
+    console.log(`  omastoic config --list`);
     return 0;
   }
 
   let next: Settings = { ...current };
+  let quoteLines: string[] | null = null;
 
   if (interactive) {
     if (!Bun.which("gum")) {
-      console.error("omastoic: gum is missing — set authors and seconds from the command line:");
-      console.error("          omastoic config --authors marcus,seneca --interval 15");
+      console.error("omastoic: gum is missing — set authors, quotes and seconds from the command line:");
+      console.error("          omastoic config --authors marcus --quotes marcus=q01,q02 --interval 15");
+      console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
+      console.error("          omastoic config --list");
       return 1;
     }
     const picked = await pickAuthors(roster, current.authors ?? []);
     if (picked == null) return 0;
     next.authors = picked;
+    const editing = picked.length ? picked : slugs;
+    next.quotes = { ...(current.quotes ?? {}) };
+    for (const slug of editing) {
+      const choices = bundled.filter((quote) => quote.author === slug);
+      if (!choices.length) continue;
+      const selected = current.quotes && Object.hasOwn(current.quotes, slug) ? current.quotes[slug] : null;
+      const ids = await pickQuotes(roster.get(slug)?.name ?? slug, choices, selected);
+      if (ids == null) return 0;
+      next.quotes[slug] = ids;
+    }
     const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL);
     if (seconds == null) return 0;
     next.interval = seconds;
@@ -752,11 +911,36 @@ async function configure(rest: string[]): Promise<number> {
       }
       next.interval = parsed;
     }
+    if (quoteFlags.length) {
+      const applied = applyQuoteFlags(next.quotes, quoteFlags, slugs, catalog);
+      if (!applied.ok) {
+        console.error(`omastoic: ${applied.error}`);
+        return 1;
+      }
+      next.quotes = applied.quotes;
+    }
+    if (addFlags.length) {
+      if (addFlags.some((line) => !line)) {
+        console.error("omastoic: --add expects one author, citation and text, separated by tabs");
+        console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
+        return 1;
+      }
+      quoteLines = addFlags;
+    }
   }
 
-  await saveSettings(next, slugs);
-  await restartDaemon();
-  printSettings(await config(), roster);
+  if (quoteLines) {
+    const code = await appendQuotes(quoteLines);
+    if (code !== 0) return code;
+  }
+  const settingsTouched = interactive || authorsFlag != null || intervalFlag != null || quoteFlags.length > 0;
+  if (settingsTouched) await saveSettings(next, slugs, catalog);
+  if (settingsTouched || quoteLines) await restartDaemon();
+  const saved = await config();
+  printSettings(saved, roster, catalog);
+  const custom = await customQuotes();
+  warnIgnoredRotation(bundled, custom, saved);
+  if (list) console.log(formatQuoteList(bundled, custom, saved));
   return 0;
 }
 
@@ -779,7 +963,7 @@ async function status(): Promise<number> {
 
   console.log(`
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
-settings:         ${describeSettings(await config(), names)}
+settings:         ${describeSettings(await config(), names, choicesOf(await bundledBook()))}
 grid:             ${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)
 canvas file:      ${BRANDING}
 rotation service: ${unit.stdout.toString().trim() || "not installed"}`);
@@ -864,7 +1048,7 @@ async function main(): Promise<number> {
 
   omastoic toggle      hand the screensaver to the Stoics, or give it back
   omastoic preview     write a new canvas and start the screensaver now
-  omastoic config      choose which Stoics appear, and seconds between quotes
+  omastoic config      choose Stoics, which of their quotes, and seconds between quotes
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 
