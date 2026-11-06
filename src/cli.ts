@@ -77,11 +77,11 @@ async function bundledBook(): Promise<BundledQuote[]> {
 
 const choicesOf = (quotes: BundledQuote[]): QuoteChoice[] => quotes.map(({ id, author }) => ({ id, author }));
 
-async function indexedCustom(): Promise<{ quotes: BundledQuote[]; readable: boolean }> {
+async function indexedCustom(): Promise<{ quotes: BundledQuote[]; readable: boolean; error?: string }> {
   try {
     return { quotes: indexCustom(await customQuotes()), readable: true };
-  } catch {
-    return { quotes: [], readable: false };
+  } catch (error) {
+    return { quotes: [], readable: false, error: (error as Error).message };
   }
 }
 
@@ -1000,6 +1000,11 @@ async function configure(rest: string[]): Promise<number> {
       if (ids == null) return 0;
       const picked = ids.filter((id) => id !== "c00");
       if (choices.some((quote) => quote.id.startsWith("c")) && !picked.some((id) => id.startsWith("c"))) picked.push("c00");
+      if (!customBook.readable) {
+        for (const id of current.quotes?.[slug] ?? []) {
+          if (id.startsWith("c") && !picked.includes(id)) picked.push(id);
+        }
+      }
       next.quotes[slug] = picked;
     }
     const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL);
@@ -1087,7 +1092,10 @@ async function configure(rest: string[]): Promise<number> {
   printSettings(saved, roster, catalog);
   const custom = quoteLines && quoteFailure == null ? indexCustom(await customQuotes()) : customBook.quotes;
   warnIgnoredRotation(bundled, custom, saved);
-  if (list) console.log(formatQuoteList(bundled, custom, saved));
+  if (list) {
+    if (customBook.error) console.error(`omastoic: ${customBook.error}`);
+    console.log(formatQuoteList(bundled, custom, saved));
+  }
   return 0;
 }
 

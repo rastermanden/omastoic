@@ -657,5 +657,77 @@ test("a missing or unreadable custom id keeps the other allow-list entries", asy
       interval: 15,
       quotes: { marcus: ["q01", "c01"], seneca: ["q20"] },
     });
+
+    const rebuilt = await s.cli(["config", "--quotes", "marcus=q02"]);
+    expect(rebuilt.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      interval: 15,
+      quotes: { marcus: ["q02", "c01"], seneca: ["q20"] },
+    });
+    const listedAgain = await s.cli(["config", "--list"]);
+    expect(listedAgain.code).toBe(0);
+    expect(listedAgain.stderr).toContain("invalid quote author slug");
+    expect(listedAgain.stdout).toContain("* q02  marcus");
+    expect(listedAgain.stdout).toContain("custom:\n  (none)");
+    expect(JSON.parse(readFileSync(settingsPath, "utf8")).quotes).toEqual({ marcus: ["q02", "c01"], seneca: ["q20"] });
+  } finally { s.cleanup(); }
+});
+
+test("a cleared custom line stays out of rotation when the Stoic pool is empty", async () => {
+  const s = sandbox();
+  const line = "Cleared marcus line stays off.";
+  try {
+    s.put(join(s.config, "omastoic/quotes.tsv"), `marcus\tMine\t${line}\n`);
+    s.put(join(s.config, "omastoic/config.json"), JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["c00"] } }));
+    const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).not.toContain(line);
+    expect(shown.stderr).toContain("config authors matched no quotes; using the whole book");
+
+    const stoics = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"];
+    s.put(join(s.config, "omastoic/config.json"), JSON.stringify({
+      quotes: Object.fromEntries(stoics.map((slug) => [slug, slug === "marcus" ? ["c00"] : []])),
+    }));
+    const empty = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+    expect(empty.code).toBe(0);
+    expect(empty.stdout).not.toContain(line);
+    expect(empty.stderr).toContain("config quotes matched no quotes; using the whole book");
+  } finally { s.cleanup(); }
+});
+
+test("confirming config keeps stored custom ids when quotes.tsv cannot be parsed", async () => {
+  const s = sandbox();
+  const settingsPath = join(s.config, "omastoic/config.json");
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  try {
+    s.put(quotesPath, "Marcus Aurelius\tDesk\tLine\n");
+    s.put(settingsPath, JSON.stringify({ quotes: { marcus: ["c00"], seneca: ["q19"] } }));
+    s.stub("gum", [
+      "case \"$1\" in",
+      "  choose)",
+      "    case \"$*\" in",
+      "      *Stoics*) echo 'Marcus Aurelius' ;;",
+      "      *)",
+      "        prev=",
+      "        for arg in \"$@\"; do",
+      "          if [[ \"$prev\" == --selected ]]; then printf '%s\\n' \"$arg\"; fi",
+      "          prev=\"$arg\"",
+      "        done",
+      "        ;;",
+      "    esac",
+      "    ;;",
+      "  input) echo 30 ;;",
+      "  confirm) exit 1 ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const configured = await pty(s, ["config"]);
+    expect(configured.code).toBe(0);
+    expect(readFileSync(quotesPath, "utf8")).toBe("Marcus Aurelius\tDesk\tLine\n");
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      authors: ["marcus"],
+      interval: 30,
+      quotes: { marcus: ["c00"], seneca: ["q19"] },
+    });
   } finally { s.cleanup(); }
 });

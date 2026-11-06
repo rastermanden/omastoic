@@ -172,4 +172,36 @@ test("a missing custom id drops only that id", () => {
     "second",
     "third",
   ]);
+  expect(applyQuoteFlags({ marcus: ["q01", "c01", "c00"] }, ["marcus=q02"], roster, book, false)).toEqual({
+    ok: true,
+    quotes: { marcus: ["q02", "c01", "c00"] },
+  });
+  expect(applyQuoteFlags({ marcus: ["q01", "c00"], seneca: ["q03"] }, ["marcus=none"], roster, book, false)).toEqual({
+    ok: true,
+    quotes: { marcus: ["c00"], seneca: ["q03"] },
+  });
+});
+
+test("cleared custom lines stay out when rotation falls back", () => {
+  const bundled = indexBundled([
+    { author: "marcus", citation: "A", text: "first" },
+    { author: "marcus", citation: "A", text: "second" },
+    { author: "seneca", citation: "B", text: "third" },
+  ]);
+  const cleared = [{ author: "marcus", citation: "Mine", text: "cleared", id: "c01" }];
+  const authorFallback = inRotation(bundled, cleared, { authors: ["marcus"], quotes: { marcus: ["c00"] } });
+  expect(authorFallback.ignoredAuthors).toBe(true);
+  expect(authorFallback.quotes.map((quote) => quote.text)).toEqual(["first", "second", "third"]);
+  const omitted = inRotation(bundled, cleared, { authors: ["marcus"], quotes: { marcus: ["c02"] } });
+  expect(omitted.ignoredAuthors).toBe(true);
+  expect(omitted.quotes.map((quote) => quote.text)).not.toContain("cleared");
+  const empty = inRotation(bundled, cleared, { quotes: { marcus: ["c00"], seneca: ["c00"] } });
+  expect(empty.ignoredSelection).toBe(true);
+  expect(empty.quotes.map((quote) => quote.text)).toEqual(["first", "second", "third"]);
+  const implicit = inRotation(bundled, [{ author: "marcus", citation: "Mine", text: "added", id: "c01" }], {
+    authors: ["zeno"],
+    quotes: { marcus: ["q02"] },
+  });
+  expect(implicit.ignoredAuthors).toBe(true);
+  expect(implicit.quotes.map((quote) => quote.text)).toContain("added");
 });

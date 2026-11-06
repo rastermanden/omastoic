@@ -151,7 +151,13 @@ export function applyQuoteFlags(
     const known = catalog.filter((row) => row.author === parsed.author);
     const unknown = parsed.ids.find((id) => !known.some((row) => row.id === id));
     if (unknown) return { ok: false, error: `unknown quote ${unknown} for ${parsed.author} — omastoic config --list` };
-    quotes = { ...(quotes ?? {}), [parsed.author]: known.filter((row) => parsed.ids.includes(row.id)).map((row) => row.id) };
+    const nextIds = known.filter((row) => parsed.ids.includes(row.id)).map((row) => row.id);
+    if (!dropUnknownCustom) {
+      for (const id of quotes?.[parsed.author] ?? []) {
+        if (id.startsWith("c") && !nextIds.includes(id)) nextIds.push(id);
+      }
+    }
+    quotes = { ...(quotes ?? {}), [parsed.author]: nextIds };
   }
   return { ok: true, quotes: quoteAllowList(quotes ?? {}, roster, catalog, dropUnknownCustom) ?? undefined };
 }
@@ -189,25 +195,26 @@ export function quoteKept(id: string, ids: string[] | undefined): boolean {
 /**
  * Bundled lines kept by a per-author allow-list, plus custom lines from
  * `quoteKept`. An allow-list that matches nothing is ignored and the author
- * list is applied to the full book. An author list that matches nothing falls
- * back to every bundled and custom line.
+ * list is applied to the bundled book. An author list that matches nothing
+ * falls back to that same bundled book. Explicitly cleared custom lines stay out.
  */
 export function inRotation(
   bundled: BundledQuote[],
   custom: Array<Quote & { id?: string }>,
   settings: Settings,
 ): { quotes: Quote[]; ignoredSelection: boolean; ignoredAuthors: boolean } {
+  const keptCustom = custom.filter((quote) => !quote.id || quoteKept(quote.id, settings.quotes?.[quote.author]));
   const picked = [
     ...bundled.filter((quote) => quoteKept(quote.id, settings.quotes?.[quote.author])),
-    ...custom.filter((quote) => !quote.id || quoteKept(quote.id, settings.quotes?.[quote.author])),
+    ...keptCustom,
   ];
   const ignoredSelection = picked.length === 0 && bundled.length + custom.length > 0;
-  const pool = ignoredSelection ? [...bundled, ...custom] : picked;
+  const pool = ignoredSelection ? [...bundled, ...keptCustom] : picked;
   if (!settings.authors?.length) return { quotes: pool, ignoredSelection, ignoredAuthors: false };
   const wanted = new Set(settings.authors);
   const filtered = pool.filter((quote) => wanted.has(quote.author));
   if (filtered.length) return { quotes: filtered, ignoredSelection, ignoredAuthors: false };
-  return { quotes: [...bundled, ...custom], ignoredSelection, ignoredAuthors: true };
+  return { quotes: [...bundled, ...keptCustom], ignoredSelection, ignoredAuthors: true };
 }
 
 export function describeSettings(settings: Settings, names: Map<string, { name: string }>, catalog: QuoteChoice[] = []): string {
