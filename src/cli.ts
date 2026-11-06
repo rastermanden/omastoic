@@ -689,13 +689,17 @@ function flagValues(rest: string[], name: string): string[] {
   return out;
 }
 
-async function gumText(args: string[]): Promise<string | null> {
+async function gumRun(args: string[]): Promise<{ out: string; code: number } | null> {
   if (!Bun.which("gum")) return null;
   const proc = Bun.spawn(["gum", ...args], { stdin: "inherit", stdout: "pipe", stderr: "inherit" });
   const out = (await new Response(proc.stdout).text()).trim();
-  const code = await proc.exited;
-  if (code !== 0) return null;
-  return out;
+  return { out, code: await proc.exited };
+}
+
+async function gumText(args: string[]): Promise<string | null> {
+  const result = await gumRun(args);
+  if (result == null || result.code !== 0) return null;
+  return result.out;
 }
 
 async function pickAuthors(roster: Map<string, { name: string }>, selected: string[]): Promise<string[] | undefined> {
@@ -774,6 +778,76 @@ async function pickQuotes(name: string, choices: BundledQuote[], selected: strin
 }
 
 const QUOTE_HEADER = "# author-slug <TAB> citation <TAB> text\n";
+
+type PromptedQuote = { kind: "quote"; quote: Quote } | { kind: "cancel" } | { kind: "invalid" };
+
+/** Collapse tabs and newlines so a gum answer stays one quotes.tsv row. */
+function flatField(value: string): string {
+  return value.replace(/[\t\r\n]+/g, " ").replace(/ {2,}/g, " ").trim();
+}
+
+function quoteRow(quote: Quote): string {
+  return `${quote.author}\t${quote.citation}\t${quote.text}`;
+}
+
+function addUsage(): void {
+  console.error("omastoic: --add expects one author, citation and text, separated by tabs");
+  console.error("          omastoic config --add");
+  console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
+}
+
+async function promptCustomQuote(): Promise<PromptedQuote> {
+  const author = await gumText([
+    "input",
+    "--header",
+    "Author slug",
+    "--value",
+    "marcus",
+    "--char-limit",
+    "64",
+  ]);
+  if (author == null) return { kind: "cancel" };
+  const citation = await gumText([
+    "input",
+    "--header",
+    "Citation",
+    "--value",
+    "Meditations IX.1",
+    "--char-limit",
+    "256",
+  ]);
+  if (citation == null) return { kind: "cancel" };
+  const text = await gumText([
+    "write",
+    "--header",
+    "Quote text",
+    "--value",
+    "Your line.",
+    "--char-limit",
+    "4096",
+    "--height",
+    "6",
+  ]);
+  if (text == null) return { kind: "cancel" };
+  try {
+    const rows = parseQuotes(`${flatField(author)}\t${flatField(citation)}\t${flatField(text)}\n`);
+    if (rows.length !== 1) {
+      console.error("omastoic: --add expects one author, citation and text, separated by tabs");
+      return { kind: "invalid" };
+    }
+    return { kind: "quote", quote: rows[0] };
+  } catch (error) {
+    console.error(`omastoic: ${(error as Error).message}`);
+    return { kind: "invalid" };
+  }
+}
+
+async function offerCustomQuote(): Promise<PromptedQuote | { kind: "skip" } | { kind: "abort" }> {
+  const answer = await gumRun(["confirm", "Add a custom quote?"]);
+  if (answer == null || (answer.code !== 0 && answer.code !== 1)) return { kind: "abort" };
+  if (answer.code === 1) return { kind: "skip" };
+  return promptCustomQuote();
+}
 
 async function appendQuotes(lines: string[]): Promise<number> {
   const parsed: Quote[] = [];
@@ -862,6 +936,7 @@ async function configure(rest: string[]): Promise<number> {
     console.log(`  omastoic config --quotes marcus=q01,q02`);
     console.log(`  omastoic config --quotes marcus=all`);
     console.log(`  omastoic config --quotes all`);
+    console.log(`  omastoic config --add`);
     console.log(`  omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'`);
     console.log(`  omastoic config --list`);
     return 0;
@@ -869,6 +944,7 @@ async function configure(rest: string[]): Promise<number> {
 
   let next: Settings = { ...current };
   let quoteLines: string[] | null = null;
+  let quoteFailure: number | null = null;
 
   if (interactive) {
     if (!Bun.which("gum")) {
@@ -894,6 +970,10 @@ async function configure(rest: string[]): Promise<number> {
     const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL);
     if (seconds == null) return 0;
     next.interval = seconds;
+    const offered = await offerCustomQuote();
+    if (offered.kind === "abort") return 0;
+    if (offered.kind === "invalid") quoteFailure = 1;
+    else if (offered.kind === "quote") quoteLines = [quoteRow(offered.quote)];
   } else {
     if (authorsFlag != null) {
       const parsed = parseAuthorList(authorsFlag, slugs);
@@ -921,20 +1001,38 @@ async function configure(rest: string[]): Promise<number> {
     }
     if (addFlags.length) {
       if (addFlags.some((line) => !line)) {
-        console.error("omastoic: --add expects one author, citation and text, separated by tabs");
-        console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
-        return 1;
+        if (addFlags.length !== 1 || !process.stdin.isTTY) {
+          addUsage();
+          return 1;
+        }
+        if (!Bun.which("gum")) {
+          console.error("omastoic: gum is missing — pass one tab-separated line:");
+          console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
+          return 1;
+        }
+        const prompted = await promptCustomQuote();
+        if (prompted.kind === "invalid") quoteFailure = 1;
+        else if (prompted.kind === "quote") quoteLines = [quoteRow(prompted.quote)];
+      } else {
+        quoteLines = addFlags;
       }
-      quoteLines = addFlags;
     }
   }
 
-  if (quoteLines) {
-    const code = await appendQuotes(quoteLines);
-    if (code !== 0) return code;
-  }
   const settingsTouched = interactive || authorsFlag != null || intervalFlag != null || quoteFlags.length > 0;
   if (settingsTouched) await saveSettings(next, slugs, catalog);
+  if (quoteLines) {
+    const code = await appendQuotes(quoteLines);
+    if (code !== 0) quoteFailure = code;
+  }
+  if (quoteFailure != null) {
+    if (settingsTouched) {
+      await restartDaemon();
+      printSettings(await config(), roster, catalog);
+    }
+    return quoteFailure;
+  }
+  if (!settingsTouched && !quoteLines && !list) return 0;
   if (settingsTouched || quoteLines) await restartDaemon();
   const saved = await config();
   printSettings(saved, roster, catalog);
@@ -1048,7 +1146,7 @@ async function main(): Promise<number> {
 
   omastoic toggle      hand the screensaver to the Stoics, or give it back
   omastoic preview     write a new canvas and start the screensaver now
-  omastoic config      choose Stoics, which of their quotes, and seconds between quotes
+  omastoic config      choose Stoics, their quotes, and seconds, or add a quote with gum
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 

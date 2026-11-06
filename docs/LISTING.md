@@ -38,7 +38,7 @@ some other way and the Stoics stand aside.
 - Rotates only while the screensaver is actually on screen.
 - **Appearance → Branding → Screensaver → Stoics** is the single on/off row.
 - 60 seconds per canvas by default, configurable; the host reads changes at effect boundaries.
-- Choose which bundled quotes from each Stoic stay in rotation, and add your own.
+- Choose which bundled quotes from each Stoic stay in rotation, and add your own. Quotes and settings stay in `~/.config/omastoic/` across plugin updates.
 - Stands aside when `omarchy branding screensaver` writes the slot.
 - Your quotes and settings survive uninstall; `--purge` drops them.
 
