@@ -122,20 +122,18 @@ function warnIgnoredRotation(bundled: BundledQuote[], custom: Quote[], settings:
   const rotation = inRotation(bundled, custom, settings);
   if (rotation.ignoredSelection) {
     const wanted = new Set(settings.authors ?? []);
-    const selected = bundled.filter((quote) => wanted.has(quote.author));
-    const onlySelected =
+    const book = [...bundled, ...custom];
+    const same = (quote: Quote, other: Quote | undefined) =>
+      !!other && quote.author === other.author && quote.citation === other.citation && quote.text === other.text;
+    const wholeBook =
+      rotation.quotes.length === book.length && rotation.quotes.every((quote, index) => same(quote, book[index]));
+    const selectedStoics =
       wanted.size > 0 &&
-      selected.length > 0 &&
-      selected.length < bundled.length &&
-      rotation.quotes.length === selected.length &&
-      rotation.quotes.every(
-        (quote, index) =>
-          quote.author === selected[index]?.author &&
-          quote.citation === selected[index]?.citation &&
-          quote.text === selected[index]?.text,
-      );
+      rotation.quotes.length > 0 &&
+      !wholeBook &&
+      rotation.quotes.every((quote) => wanted.has(quote.author));
     console.error(
-      onlySelected
+      selectedStoics
         ? "omastoic: quote selection was ignored; using the selected Stoics' lines"
         : "omastoic: config quotes matched no quotes; using the whole book",
     );
@@ -755,9 +753,10 @@ async function pickInterval(current: number): Promise<number | undefined> {
 }
 
 async function pickQuotes(name: string, rows: { id: string; citation: string; text: string; on: boolean }[]): Promise<string[] | undefined> {
-  const labeled = rows.map((row) => ({ label: checkboxLabel(row), id: row.id, on: row.on }));
+  const columns = process.stdout.columns || 80;
+  const labeled = rows.map((row) => ({ label: checkboxLabel(row, columns), id: row.id, on: row.on }));
   const byLabel = new Map(labeled.map((row) => [row.label, row.id]));
-  const out = await gumText(quoteCheckboxArgs(name, labeled.map((row) => ({ label: row.label, on: row.on }))));
+  const out = await gumText(quoteCheckboxArgs(name, labeled.map((row) => ({ label: row.label, on: row.on })), { rows: process.stdout.rows || 24 }));
   if (out == null) return undefined;
   return idsFromCheckboxOutput(out, byLabel);
 }
