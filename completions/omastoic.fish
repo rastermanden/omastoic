@@ -2,7 +2,7 @@
 complete -c omastoic -f
 complete -c omastoic -n "__fish_use_subcommand" -a toggle -d "Hand the screensaver to the Stoics, or give it back"
 complete -c omastoic -n "__fish_use_subcommand" -a preview -d "Write a new canvas and start the screensaver now"
-complete -c omastoic -n "__fish_use_subcommand" -a config -d "Choose Stoics, which of their quotes, and seconds between quotes"
+complete -c omastoic -n "__fish_use_subcommand" -a config -d "Choose Stoics, their quotes, and seconds, or add a quote with gum"
 complete -c omastoic -n "__fish_use_subcommand" -a status -d "Who has the screensaver, and what is in the quote book"
 complete -c omastoic -n "__fish_use_subcommand" -a uninstall -d "Take the service, menu row and plugin back out"
 complete -c omastoic -n "__fish_use_subcommand" -a help -d "Show help"
