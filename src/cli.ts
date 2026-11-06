@@ -755,9 +755,10 @@ async function pickInterval(current: number): Promise<number | undefined> {
 }
 
 async function pickQuotes(name: string, rows: { id: string; citation: string; text: string; on: boolean }[]): Promise<string[] | undefined> {
-  const labeled = rows.map((row) => ({ label: checkboxLabel(row), id: row.id, on: row.on }));
+  const columns = process.stdout.columns || 80;
+  const labeled = rows.map((row) => ({ label: checkboxLabel(row, columns), id: row.id, on: row.on }));
   const byLabel = new Map(labeled.map((row) => [row.label, row.id]));
-  const out = await gumText(quoteCheckboxArgs(name, labeled.map((row) => ({ label: row.label, on: row.on }))));
+  const out = await gumText(quoteCheckboxArgs(name, labeled.map((row) => ({ label: row.label, on: row.on })), { rows: process.stdout.rows || 24 }));
   if (out == null) return undefined;
   return idsFromCheckboxOutput(out, byLabel);
 }

@@ -9,10 +9,20 @@ const roster = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippu
 
 test("a checkbox label keeps a long quote whole", () => {
   const text = "A sentence long enough that a forty-eight character cut would drop the ending of the line.";
-  const label = checkboxLabel({ id: "q99", citation: "Meditations XII.1", text });
+  const quote = { id: "q99", citation: "Meditations XII.1", text };
+  const label = checkboxLabel(quote);
   expect(label).toBe(`q99  Meditations XII.1  ${text}`);
   expect(label.endsWith("…")).toBe(false);
   expect(label).toContain(text);
+  const wrapped = checkboxLabel(quote, 48);
+  expect(wrapped.includes("…")).toBe(false);
+  expect(wrapped.split("\n").length).toBeGreaterThan(1);
+  const pad = " ".repeat(Bun.stringWidth("q99  Meditations XII.1  "));
+  const joined = wrapped.split("\n").map((line, index) => index === 0 ? line.slice("q99  Meditations XII.1  ".length) : line.slice(pad.length)).join(" ");
+  expect(joined).toBe(text);
+  expect(wrapped.split("\n").every((line) => Bun.stringWidth(line) <= 48)).toBe(true);
+  const byLabel = new Map([[wrapped, "q99"]]);
+  expect(idsFromCheckboxOutput(`${wrapped}\x1e`, byLabel)).toEqual(["q99"]);
 });
 
 test("quote checkboxes are grouped by Stoic and cover bundled and added lines", () => {
@@ -78,9 +88,10 @@ test("the config checkbox list turns bundled and added quotes on and off", async
       "python3",
       "-c",
       [
-        "import os, pty, select, sys",
+        "import fcntl, os, pty, select, struct, sys, termios",
         "pid, fd = pty.fork()",
         "if pid == 0:",
+        "    fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 200, 0, 0))",
         "    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
         "buf = b''",
         "while True:",
