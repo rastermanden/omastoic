@@ -130,3 +130,46 @@ test("rotation keeps custom lines and falls back when a filter matches nothing",
     ignoredAuthors: false,
   });
 });
+
+test("a missing custom id drops only that id", () => {
+  const book = [
+    { id: "q01", author: "marcus" },
+    { id: "q02", author: "marcus" },
+    { id: "c02", author: "marcus" },
+    { id: "q03", author: "seneca" },
+    { id: "q04", author: "seneca" },
+  ];
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "c01"], seneca: ["q03"] } }, roster, book)).toEqual({
+    quotes: { marcus: ["q01", "c00"], seneca: ["q03"] },
+  });
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "c01", "c02"], seneca: ["q03"] } }, roster, book)).toEqual({
+    quotes: { marcus: ["q01", "c02"], seneca: ["q03"] },
+  });
+  expect(normalizeSettings({ interval: 12, quotes: { marcus: ["q99", "c01"] } }, roster, book)).toEqual({ interval: 12 });
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "c01"], seneca: ["q03"] } }, roster, book, false)).toEqual({
+    quotes: { marcus: ["q01", "c01"], seneca: ["q03"] },
+  });
+  expect(compactSettings({ interval: 30, quotes: { marcus: ["q01", "c01"], seneca: ["q03"] } }, roster, book, false)).toEqual({
+    interval: 30,
+    quotes: { marcus: ["q01", "c01"], seneca: ["q03"] },
+  });
+  expect(applyQuoteFlags({ marcus: ["q01", "c01"], seneca: ["q03"] }, ["seneca=q04"], roster, book, false)).toEqual({
+    ok: true,
+    quotes: { marcus: ["q01", "c01"], seneca: ["q04"] },
+  });
+  const bundled = indexBundled([
+    { author: "marcus", citation: "A", text: "first" },
+    { author: "marcus", citation: "A", text: "second" },
+    { author: "seneca", citation: "B", text: "third" },
+  ]);
+  const settings = normalizeSettings({ quotes: { marcus: ["q02", "c01"] } }, roster, [
+    { id: "q01", author: "marcus" },
+    { id: "q02", author: "marcus" },
+    { id: "c02", author: "marcus" },
+    { id: "q03", author: "seneca" },
+  ]);
+  expect(inRotation(bundled, [{ ...bundled[0], id: "c02", citation: "Old", text: "stays off" }], settings).quotes.map((quote) => quote.text)).toEqual([
+    "second",
+    "third",
+  ]);
+});

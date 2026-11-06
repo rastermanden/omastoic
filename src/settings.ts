@@ -14,7 +14,12 @@ export const DEFAULT_INTERVAL = 60;
  * A per-author allow-list. `null` means the field is malformed and must be
  * ignored. A Stoic whose list is the whole bundled set is omitted.
  */
-function quoteAllowList(raw: unknown, roster: string[], catalog: QuoteChoice[]): Record<string, string[]> | undefined | null {
+function quoteAllowList(
+  raw: unknown,
+  roster: string[],
+  catalog: QuoteChoice[],
+  dropUnknownCustom = true,
+): Record<string, string[]> | undefined | null {
   if (raw == null) return undefined;
   if (typeof raw !== "object" || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
@@ -22,7 +27,7 @@ function quoteAllowList(raw: unknown, roster: string[], catalog: QuoteChoice[]):
     if (!roster.includes(author) || !Array.isArray(ids)) return null;
     if (!ids.every((id) => {
       const canonical = typeof id === "string" ? canonicalQuoteId(id) : null;
-      return !!canonical && (catalog.length === 0 || canonical === "c00" || catalog.some((row) => row.author === author && row.id === canonical));
+      return !!canonical && (catalog.length === 0 || canonical.startsWith("c") || catalog.some((row) => row.author === author && row.id === canonical));
     })) return null;
   }
   if (!catalog.length) {
@@ -36,18 +41,29 @@ function quoteAllowList(raw: unknown, roster: string[], catalog: QuoteChoice[]):
   const quotes: Record<string, string[]> = {};
   for (const author of roster) {
     if (!Object.hasOwn(record, author)) continue;
-    const wanted = new Set((record[author] as string[]).map((id) => canonicalQuoteId(id)!));
+    const seen: string[] = [];
+    for (const id of record[author] as string[]) {
+      const canonical = canonicalQuoteId(id)!;
+      if (!seen.includes(canonical)) seen.push(canonical);
+    }
     const known = catalog.filter((row) => row.author === author).map((row) => row.id);
-    const ordered = known.filter((id) => wanted.has(id));
-    // c00 records that custom lines were unchecked. A bundled-only list has no c-id and still keeps them.
-    if (wanted.has("c00")) quotes[author] = [...ordered, "c00"];
-    else if (ordered.length !== known.length) quotes[author] = ordered;
+    const wanted = seen.filter((id) => !id.startsWith("c") || id === "c00" || !dropUnknownCustom || known.includes(id));
+    if (seen.some((id) => id.startsWith("c")) && !wanted.some((id) => id.startsWith("c"))) wanted.push("c00");
+    const ordered = known.filter((id) => wanted.includes(id));
+    const extra = wanted.filter((id) => id.startsWith("c") && id !== "c00" && !known.includes(id));
+    if (wanted.includes("c00")) quotes[author] = [...ordered, ...extra, "c00"];
+    else if (extra.length || ordered.length !== known.length) quotes[author] = [...ordered, ...extra];
   }
   return Object.keys(quotes).length ? quotes : undefined;
 }
 
 /** Treat hand-edited JSON as untrusted input, just like CLI arguments. */
-export function normalizeSettings(raw: unknown, roster: string[], catalog: QuoteChoice[] = []): Settings {
+export function normalizeSettings(
+  raw: unknown,
+  roster: string[],
+  catalog: QuoteChoice[] = [],
+  dropUnknownCustom = true,
+): Settings {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const value = raw as Record<string, unknown>;
   const result: Settings = {};
@@ -56,7 +72,7 @@ export function normalizeSettings(raw: unknown, roster: string[], catalog: Quote
     result.authors = [...new Set(value.authors)];
   }
   if (Object.hasOwn(value, "quotes")) {
-    const quotes = quoteAllowList(value.quotes, roster, catalog);
+    const quotes = quoteAllowList(value.quotes, roster, catalog, dropUnknownCustom);
     if (quotes) result.quotes = quotes;
   }
   return result;
@@ -114,6 +130,7 @@ export function applyQuoteFlags(
   flags: string[],
   roster: string[],
   catalog: QuoteChoice[],
+  dropUnknownCustom = true,
 ): { ok: true; quotes?: Record<string, string[]> } | { ok: false; error: string } {
   let quotes = current ? Object.fromEntries(Object.entries(current).map(([author, ids]) => [author, [...ids]])) : undefined;
   for (const flag of flags) {
@@ -136,11 +153,16 @@ export function applyQuoteFlags(
     if (unknown) return { ok: false, error: `unknown quote ${unknown} for ${parsed.author} — omastoic config --list` };
     quotes = { ...(quotes ?? {}), [parsed.author]: known.filter((row) => parsed.ids.includes(row.id)).map((row) => row.id) };
   }
-  return { ok: true, quotes: quoteAllowList(quotes ?? {}, roster, catalog) ?? undefined };
+  return { ok: true, quotes: quoteAllowList(quotes ?? {}, roster, catalog, dropUnknownCustom) ?? undefined };
 }
 
 /** Drop authors when the list is empty or the full roster — that is the default. */
-export function compactSettings(settings: Settings, roster: string[], catalog: QuoteChoice[] = []): Settings {
+export function compactSettings(
+  settings: Settings,
+  roster: string[],
+  catalog: QuoteChoice[] = [],
+  dropUnknownCustom = true,
+): Settings {
   const out: Settings = {};
   if (settings.interval != null) out.interval = settings.interval;
   const authors = settings.authors;
@@ -148,7 +170,7 @@ export function compactSettings(settings: Settings, roster: string[], catalog: Q
     out.authors = authors;
   }
   if (settings.quotes) {
-    const quotes = quoteAllowList(settings.quotes, roster, catalog);
+    const quotes = quoteAllowList(settings.quotes, roster, catalog, dropUnknownCustom);
     if (quotes) out.quotes = quotes;
   }
   return out;

@@ -77,11 +77,11 @@ async function bundledBook(): Promise<BundledQuote[]> {
 
 const choicesOf = (quotes: BundledQuote[]): QuoteChoice[] => quotes.map(({ id, author }) => ({ id, author }));
 
-async function indexedCustom(): Promise<BundledQuote[]> {
+async function indexedCustom(): Promise<{ quotes: BundledQuote[]; readable: boolean }> {
   try {
-    return indexCustom(await customQuotes());
+    return { quotes: indexCustom(await customQuotes()), readable: true };
   } catch {
-    return [];
+    return { quotes: [], readable: false };
   }
 }
 
@@ -89,19 +89,25 @@ async function config(): Promise<Settings> {
   const file = Bun.file(SETTINGS_FILE);
   if (!(await file.exists())) return {};
   const roster = [...(await authors()).keys()];
-  const catalog = [...choicesOf(await bundledBook()), ...choicesOf(await indexedCustom())];
+  const custom = await indexedCustom();
+  const catalog = [...choicesOf(await bundledBook()), ...choicesOf(custom.quotes)];
   try {
     if (file.size > 65536) throw new Error("config exceeds 64 KiB");
-    return normalizeSettings(await file.json(), roster, catalog);
+    return normalizeSettings(await file.json(), roster, catalog, custom.readable);
   } catch {
     console.error(`omastoic: ignoring unreadable ${SETTINGS_FILE}`);
     return {};
   }
 }
 
-async function saveSettings(settings: Settings, roster: string[], catalog: QuoteChoice[]): Promise<void> {
+async function saveSettings(
+  settings: Settings,
+  roster: string[],
+  catalog: QuoteChoice[],
+  dropUnknownCustom = true,
+): Promise<void> {
   mkdirSync(USER_CONFIG, { recursive: true });
-  const next = compactSettings(settings, roster, catalog);
+  const next = compactSettings(settings, roster, catalog, dropUnknownCustom);
   atomicWrite(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
 }
 
@@ -929,7 +935,7 @@ function rememberAddedQuote(settings: Settings, custom: BundledQuote[], added: Q
   const mine = custom.filter((quote) => quote.author === added.author);
   const addedRow = mine.find((quote) => quote.citation === added.citation && quote.text === added.text);
   if (!addedRow) return settings;
-  const explicit = list.some((id) => id.startsWith("c") && id !== "c00");
+  const explicit = list.some((id) => id.startsWith("c"));
   const ids = list.filter((id) => id !== "c00");
   for (const id of explicit ? [addedRow.id] : mine.map((quote) => quote.id)) {
     if (!ids.includes(id)) ids.push(id);
@@ -946,7 +952,7 @@ async function configure(rest: string[]): Promise<number> {
   const slugs = [...roster.keys()];
   const bundled = await bundledBook();
   const customBook = await indexedCustom();
-  let catalog = [...choicesOf(bundled), ...choicesOf(customBook)];
+  let catalog = [...choicesOf(bundled), ...choicesOf(customBook.quotes)];
   const current = await config();
   const authorsFlag = stringFlag(rest, "authors");
   const intervalFlag = stringFlag(rest, "interval");
@@ -985,7 +991,7 @@ async function configure(rest: string[]): Promise<number> {
     const editing = picked.length ? picked : slugs;
     next.quotes = { ...(current.quotes ?? {}) };
     for (const slug of editing) {
-      const choices = [...bundled.filter((quote) => quote.author === slug), ...customBook.filter((quote) => quote.author === slug)];
+      const choices = [...bundled.filter((quote) => quote.author === slug), ...customBook.quotes.filter((quote) => quote.author === slug)];
       if (!choices.length) continue;
       const selected = current.quotes && Object.hasOwn(current.quotes, slug)
         ? choices.filter((quote) => quoteKept(quote.id, current.quotes?.[slug])).map((quote) => quote.id)
@@ -1021,7 +1027,7 @@ async function configure(rest: string[]): Promise<number> {
       next.interval = parsed;
     }
     if (quoteFlags.length) {
-      const applied = applyQuoteFlags(next.quotes, quoteFlags, slugs, catalog);
+      const applied = applyQuoteFlags(next.quotes, quoteFlags, slugs, catalog, customBook.readable);
       if (!applied.ok) {
         console.error(`omastoic: ${applied.error}`);
         return 1;
@@ -1067,7 +1073,7 @@ async function configure(rest: string[]): Promise<number> {
       }
     }
   }
-  if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog);
+  if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog, customBook.readable);
   if (quoteFailure != null) {
     if (settingsTouched) {
       await restartDaemon();
@@ -1079,7 +1085,7 @@ async function configure(rest: string[]): Promise<number> {
   if (settingsTouched || quoteLines) await restartDaemon();
   const saved = await config();
   printSettings(saved, roster, catalog);
-  const custom = indexCustom(await customQuotes());
+  const custom = quoteLines && quoteFailure == null ? indexCustom(await customQuotes()) : customBook.quotes;
   warnIgnoredRotation(bundled, custom, saved);
   if (list) console.log(formatQuoteList(bundled, custom, saved));
   return 0;
@@ -1104,7 +1110,7 @@ async function status(): Promise<number> {
 
   console.log(`
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
-settings:         ${describeSettings(await config(), names, [...choicesOf(await bundledBook()), ...choicesOf(await indexedCustom())])}
+settings:         ${describeSettings(await config(), names, [...choicesOf(await bundledBook()), ...choicesOf((await indexedCustom()).quotes)])}
 grid:             ${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)
 canvas file:      ${BRANDING}
 rotation service: ${unit.stdout.toString().trim() || "not installed"}`);

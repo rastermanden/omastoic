@@ -521,3 +521,141 @@ test("a plugin update leaves added quotes and settings in the user config", asyn
     expect(existsSync(settingsPath)).toBe(false);
   } finally { s.cleanup(); }
 }, 20000);
+
+test("adding a quote leaves cleared custom lines unchecked", async () => {
+  const s = sandbox();
+  const settingsPath = join(s.config, "omastoic/config.json");
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  const cleared = "marcus\tOne\tCleared alpha line stays off.\nmarcus\tTwo\tCleared beta line stays off.\n";
+  try {
+    s.put(quotesPath, cleared);
+    s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01", "c00"] } }));
+    const added = await s.cli(["config", "--add", "marcus\tThree\tFresh gamma line joins rotation."]);
+    expect(added.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      authors: ["marcus"],
+      quotes: { marcus: ["q01", "c03"] },
+    });
+    const listed = await s.cli(["config", "--list"]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain("* q01  marcus");
+    expect(listed.stdout).toContain("* c03  marcus  Three  Fresh gamma line joins rotation.");
+    expect(listed.stdout).toContain("  c01  marcus  One  Cleared alpha line stays off.");
+    expect(listed.stdout).toContain("  c02  marcus  Two  Cleared beta line stays off.");
+    expect(listed.stdout).not.toContain("* c01");
+    expect(listed.stdout).not.toContain("* c02");
+    const seen = new Set<string>();
+    for (let i = 0; i < 4; i++) {
+      const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+      expect(shown.code).toBe(0);
+      expect(shown.stdout).not.toContain("Cleared alpha line stays off.");
+      expect(shown.stdout).not.toContain("Cleared beta line stays off.");
+      if (shown.stdout.includes("Fresh gamma line joins rotation.")) seen.add("new");
+      if (shown.stdout.includes("every act of thy life")) seen.add("q01");
+    }
+    expect([...seen].sort()).toEqual(["new", "q01"]);
+
+    s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01", "c01"] } }));
+    s.put(quotesPath, cleared);
+    const explicit = await s.cli(["config", "--add", "marcus\tThree\tFresh gamma line joins rotation."]);
+    expect(explicit.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8")).quotes.marcus).toEqual(["q01", "c01", "c03"]);
+    const omitted = await s.cli(["config", "--list"]);
+    expect(omitted.stdout).toContain("* c01  marcus");
+    expect(omitted.stdout).toContain("* c03  marcus");
+    expect(omitted.stdout).not.toContain("* c02");
+
+    s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01"] } }));
+    s.put(quotesPath, "marcus\tOne\tCleared alpha line stays off.\n");
+    const bundledOnly = await s.cli(["config", "--add", "marcus\tTwo\tFresh gamma line joins rotation."]);
+    expect(bundledOnly.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8")).quotes.marcus).toEqual(["q01", "c01", "c02"]);
+  } finally { s.cleanup(); }
+});
+
+test("the quote wizard keeps a cleared custom selection when a line is added", async () => {
+  const s = sandbox();
+  const settingsPath = join(s.config, "omastoic/config.json");
+  try {
+    s.put(join(s.config, "omastoic/quotes.tsv"), "marcus\tOne\tCleared alpha line stays off.\nmarcus\tTwo\tCleared beta line stays off.\n");
+    s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01", "c00"] } }));
+    s.stub("gum", [
+      "case \"$1\" in",
+      "  choose)",
+      "    case \"$*\" in",
+      "      *Stoics*) echo 'Marcus Aurelius' ;;",
+      "      *)",
+      "        prev=",
+      "        for arg in \"$@\"; do",
+      "          if [[ \"$prev\" == --selected ]]; then printf '%s\\n' \"$arg\"; fi",
+      "          prev=\"$arg\"",
+      "        done",
+      "        ;;",
+      "    esac",
+      "    ;;",
+      "  input)",
+      "    case \"$*\" in",
+      "      *Seconds*) echo 30 ;;",
+      "      *Author*) echo marcus ;;",
+      "      *Citation*) echo 'Three' ;;",
+      "      *) echo \"unexpected input: $*\" >&2; exit 1 ;;",
+      "    esac",
+      "    ;;",
+      "  write) echo 'Fresh gamma line joins rotation.' ;;",
+      "  confirm) exit 0 ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const configured = await pty(s, ["config"]);
+    expect(configured.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      authors: ["marcus"],
+      interval: 30,
+      quotes: { marcus: ["q01", "c03"] },
+    });
+    const listed = await s.cli(["config", "--list"]);
+    expect(listed.stdout).toContain("* c03  marcus  Three  Fresh gamma line joins rotation.");
+    expect(listed.stdout).not.toContain("* c01");
+    expect(listed.stdout).not.toContain("* c02");
+  } finally { s.cleanup(); }
+});
+
+test("a missing or unreadable custom id keeps the other allow-list entries", async () => {
+  const s = sandbox();
+  const settingsPath = join(s.config, "omastoic/config.json");
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  try {
+    s.put(quotesPath, "marcus\tKept\tThis cleared line stays off.\n");
+    s.put(settingsPath, JSON.stringify({
+      authors: ["marcus"],
+      quotes: { marcus: ["q01", "c02"], seneca: ["q19"] },
+    }));
+    const dropped = await s.cli(["config", "--interval", "30"]);
+    expect(dropped.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      authors: ["marcus"],
+      interval: 30,
+      quotes: { marcus: ["q01", "c00"], seneca: ["q19"] },
+    });
+    const listed = await s.cli(["config", "--list"]);
+    expect(listed.stdout).toContain("* q01  marcus");
+    expect(listed.stdout).toContain("  c01  marcus  Kept  This cleared line stays off.");
+    expect(listed.stdout).not.toContain("* c01");
+    const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toContain("every act of thy life");
+    expect(shown.stdout).not.toContain("This cleared line stays off.");
+
+    s.put(quotesPath, "Marcus Aurelius\tDesk\tLine\n");
+    s.put(settingsPath, JSON.stringify({
+      quotes: { marcus: ["q01", "c01"], seneca: ["q19"] },
+    }));
+    const unreadable = await s.cli(["config", "--interval", "15", "--quotes", "seneca=q20"]);
+    expect(unreadable.code).toBe(0);
+    expect(readFileSync(quotesPath, "utf8")).toBe("Marcus Aurelius\tDesk\tLine\n");
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      interval: 15,
+      quotes: { marcus: ["q01", "c01"], seneca: ["q20"] },
+    });
+  } finally { s.cleanup(); }
+});
