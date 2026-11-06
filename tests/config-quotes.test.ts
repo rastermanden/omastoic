@@ -1,7 +1,42 @@
 import { test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { root, sandbox } from "./sandbox.ts";
+
+const ptyScript = [
+  "import os, pty, select, sys",
+  "pid, fd = pty.fork()",
+  "if pid == 0:",
+  "    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
+  "buf = b''",
+  "while True:",
+  "    ready, _, _ = select.select([fd], [], [], 3)",
+  "    if not ready:",
+  "        os.kill(pid, 15)",
+  "        sys.stderr.write('timed out waiting for config')",
+  "        raise SystemExit(1)",
+  "    try:",
+  "        chunk = os.read(fd, 4096)",
+  "    except OSError:",
+  "        break",
+  "    if not chunk:",
+  "        break",
+  "    buf += chunk",
+  "_, status = os.waitpid(pid, 0)",
+  "sys.stdout.buffer.write(buf)",
+  "raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)",
+].join("\n");
+
+function pty(s: ReturnType<typeof sandbox>, args: string[], extra: Record<string, string> = {}) {
+  return s.exec(["/usr/bin/python3", "-c", ptyScript, process.execPath, join(root, "src/cli.ts"), ...args], extra);
+}
+
+const gitEnv = {
+  GIT_AUTHOR_NAME: "omastoic",
+  GIT_AUTHOR_EMAIL: "omastoic@example.com",
+  GIT_COMMITTER_NAME: "omastoic",
+  GIT_COMMITTER_EMAIL: "omastoic@example.com",
+};
 
 test("config selects bundled quotes, lists them, and still adds custom lines", async () => {
   const s = sandbox();
@@ -132,47 +167,177 @@ test("quote flags keep canonical ids and reject extra spellings", async () => {
   } finally { s.cleanup(); }
 });
 
-test("config --add without a value is a usage error", async () => {
+test("config --add without a value is a usage error when it cannot prompt", async () => {
   const s = sandbox();
   try {
     const missing = await s.cli(["config", "--add"]);
     expect(missing.code).toBe(1);
     expect(missing.stderr).toContain("--add expects one author, citation and text");
+    expect(missing.stderr).toContain("omastoic config --add");
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
 
-    const terminal = await s.exec([
-      "python3",
-      "-c",
-      [
-        "import os, pty, select, sys",
-        "pid, fd = pty.fork()",
-        "if pid == 0:",
-        "    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
-        "buf = b''",
-        "while True:",
-        "    ready, _, _ = select.select([fd], [], [], 3)",
-        "    if not ready:",
-        "        os.kill(pid, 15)",
-        "        sys.stderr.write('timed out waiting for --add')",
-        "        raise SystemExit(1)",
-        "    try:",
-        "        chunk = os.read(fd, 4096)",
-        "    except OSError:",
-        "        break",
-        "    if not chunk:",
-        "        break",
-        "    buf += chunk",
-        "_, status = os.waitpid(pid, 0)",
-        "sys.stdout.buffer.write(buf)",
-        "raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)",
-      ].join("\n"),
-      process.execPath,
-      join(root, "src/cli.ts"),
-      "config",
-      "--add",
-    ]);
+    symlinkSync("/usr/bin/flock", join(s.bin, "flock"));
+    symlinkSync("/bin/sh", join(s.bin, "sh"));
+    const terminal = await pty(s, ["config", "--add"], { PATH: s.bin });
     expect(terminal.code).toBe(1);
-    expect(terminal.stdout + terminal.stderr).toContain("--add expects one author, citation and text");
-    expect(terminal.stdout + terminal.stderr).not.toContain("gum is missing");
+    expect(terminal.stdout + terminal.stderr).toContain("gum is missing");
+    expect(terminal.stdout + terminal.stderr).toContain("marcus");
     expect(terminal.stdout + terminal.stderr).not.toContain("Author slug");
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
   } finally { s.cleanup(); }
 });
+
+test("config --add prompts for author, citation and text", async () => {
+  const s = sandbox();
+  try {
+    s.stub("gum", [
+      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
+      "case \"$1\" in",
+      "  input)",
+      "    case \"$*\" in",
+      "      *Author*) echo marcus ;;",
+      "      *Citation*) printf '%s\\n' $'Desk note\\nwith a tab\\there' ;;",
+      "      *) echo \"unexpected input: $*\" >&2; exit 1 ;;",
+      "    esac",
+      "    ;;",
+      "  write)",
+      "    printf '%s\\n' 'A custom sentence' 'for the saver.'",
+      "    ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const added = await pty(s, ["config", "--add"]);
+    expect(added.code).toBe(0);
+    const saved = readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8");
+    expect(saved).toBe("# author-slug <TAB> citation <TAB> text\nmarcus\tDesk note with a tab here\tA custom sentence for the saver.\n");
+    expect(saved).not.toContain("\t\t");
+    expect(readFileSync(join(s.home, "gum.log"), "utf8")).toContain("Author slug");
+    const again = await pty(s, ["config", "--add"]);
+    expect(again.code).toBe(1);
+    expect(again.stdout + again.stderr).toContain("already in");
+  } finally { s.cleanup(); }
+});
+
+test("cancelling the add prompt writes nothing, and a bad slug is rejected", async () => {
+  const s = sandbox();
+  try {
+    s.stub("gum", [
+      "case \"$1\" in",
+      "  input) exit 1 ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const cancelled = await pty(s, ["config", "--add"]);
+    expect(cancelled.code).toBe(0);
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+
+    s.stub("gum", [
+      "case \"$1\" in",
+      "  input)",
+      "    case \"$*\" in",
+      "      *Author*) echo 'Marcus Aurelius' ;;",
+      "      *) echo 'Desk note' ;;",
+      "    esac",
+      "    ;;",
+      "  write) echo 'A custom sentence for the saver.' ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const rejected = await pty(s, ["config", "--add"]);
+    expect(rejected.code).toBe(1);
+    expect(rejected.stdout + rejected.stderr).toContain("invalid quote author slug");
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+  } finally { s.cleanup(); }
+});
+
+test("omastoic config offers a gum quote after the Stoic prompts", async () => {
+  const s = sandbox();
+  try {
+    s.stub("gum", [
+      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
+      "case \"$1\" in",
+      "  choose)",
+      "    case \"$*\" in",
+      "      *Stoics*) echo 'Marcus Aurelius' ;;",
+      "    esac",
+      "    ;;",
+      "  input)",
+      "    case \"$*\" in",
+      "      *Seconds*) echo 30 ;;",
+      "      *Author*) echo marcus ;;",
+      "      *Citation*) echo 'Desk note' ;;",
+      "      *) echo \"unexpected input: $*\" >&2; exit 1 ;;",
+      "    esac",
+      "    ;;",
+      "  write) echo 'A custom sentence for the saver.' ;;",
+      "  confirm) exit 0 ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const configured = await pty(s, ["config"]);
+    expect(configured.code).toBe(0);
+    expect(readFileSync(join(s.home, "gum.log"), "utf8")).toContain("Add a custom quote?");
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({
+      authors: ["marcus"],
+      interval: 30,
+      quotes: { marcus: [] },
+    });
+    expect(readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8")).toContain("marcus\tDesk note\tA custom sentence for the saver.\n");
+  } finally { s.cleanup(); }
+});
+
+test("a plugin update leaves added quotes and settings in the user config", async () => {
+  const s = sandbox();
+  const origin = join(s.home, "origin");
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  const settingsPath = join(s.config, "omastoic/config.json");
+  const pluginCli = (args: string[]) => s.exec([process.execPath, join(s.plugin, "src/cli.ts"), ...args]);
+  const git = (args: string[]) => s.exec(["git", ...args], gitEnv);
+  try {
+    rmSync(origin, { recursive: true, force: true });
+    mkdirSync(origin, { recursive: true });
+    for (const path of ["src", "data", "art", "bin", "scripts", "completions", "manifest.json"]) {
+      cpSync(join(root, path), join(origin, path), { recursive: true });
+    }
+    expect((await git(["init", "-b", "main", origin])).code).toBe(0);
+    expect((await git(["-C", origin, "add", "."])).code).toBe(0);
+    expect((await git(["-C", origin, "commit", "-m", "base"])).code).toBe(0);
+    rmSync(s.plugin, { recursive: true, force: true });
+    expect((await git(["clone", origin, s.plugin])).code).toBe(0);
+
+    expect((await pluginCli(["setup", "--quiet"])).code).toBe(0);
+    const added = await pluginCli(["config", "--add", "marcus\tDesk note\tA custom sentence for the saver.", "--interval", "45"]);
+    expect(added.code).toBe(0);
+    const quotesBefore = readFileSync(quotesPath, "utf8");
+    const settingsBefore = readFileSync(settingsPath, "utf8");
+    expect(quotesBefore).toContain("marcus\tDesk note\tA custom sentence for the saver.\n");
+    expect(existsSync(join(s.plugin, "quotes.tsv"))).toBe(false);
+    expect(existsSync(join(s.plugin, "config.json"))).toBe(false);
+    expect(readFileSync(join(s.plugin, "data/quotes.tsv"), "utf8")).not.toContain("Desk note");
+
+    const bundled = join(origin, "data/quotes.tsv");
+    writeFileSync(bundled, `${readFileSync(bundled, "utf8")}# plugin update\n`);
+    expect((await git(["-C", origin, "add", "data/quotes.tsv"])).code).toBe(0);
+    expect((await git(["-C", origin, "commit", "-m", "update"])).code).toBe(0);
+    expect((await git(["-C", s.plugin, "fetch", "origin"])).code).toBe(0);
+    expect((await git(["-C", s.plugin, "merge", "--ff-only", "FETCH_HEAD"])).code).toBe(0);
+    expect(readFileSync(join(s.plugin, "data/quotes.tsv"), "utf8")).toContain("# plugin update");
+
+    expect((await pluginCli(["setup", "--quiet"])).code).toBe(0);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+    expect(readFileSync(settingsPath, "utf8")).toBe(settingsBefore);
+    expect(readFileSync(join(s.plugin, "data/quotes.tsv"), "utf8")).not.toContain("Desk note");
+    const listed = await pluginCli(["config", "--list"]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain("A custom sentence for the saver.");
+    expect(listed.stdout).toContain("every 45s");
+
+    expect((await pluginCli(["uninstall"])).code).toBe(0);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+    expect(readFileSync(settingsPath, "utf8")).toBe(settingsBefore);
+    // Removal deletes the plugin tree. Purge still runs from any checkout and drops user data.
+    expect((await s.cli(["uninstall", "--purge"])).code).toBe(0);
+    expect(existsSync(quotesPath)).toBe(false);
+    expect(existsSync(settingsPath)).toBe(false);
+  } finally { s.cleanup(); }
+}, 20000);
