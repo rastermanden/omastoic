@@ -113,8 +113,8 @@ them). A missing Stoic means every bundled line of theirs. `[]`
 means none of their bundled lines. Listing every id for a Stoic is stored as
 the default and the key is omitted. `omastoic config --quotes marcus=q01,q02`
 writes that list; `--quotes marcus=all` and `--quotes all` clear restrictions.
-With gum, `omastoic config` asks once per selected Stoic, all lines selected
-until you change them.
+With gum, `omastoic config` asks once per selected Stoic. Each quote is a
+checkbox, bundled lines and lines you added, all checked until you change them.
 
 ```json
 {
@@ -125,7 +125,10 @@ until you change them.
 
 Your own `quotes.tsv` in that directory adds entries to the bundled book, and
 those lines stay in rotation even when that Stoic's bundled ids are limited.
-Append them with `omastoic config --add` or by editing the file:
+`omastoic config` shows each bundled and added line as a checkbox, grouped by
+Stoic. Clearing a box turns that line off. Added lines you turn off are stored
+as `addedOff` ids (`a01`, `a02`, … in `quotes.tsv` order); a new line stays on
+until you clear it. Append lines with `omastoic config --add` or by editing the file:
 **author slug, citation, text**, separated by tabs. Slugs contain letters,
 digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
 citations to 256 characters and quote text to 4096; terminal control escapes

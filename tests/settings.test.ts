@@ -105,6 +105,34 @@ test("describeSettings counts bundled lines still in rotation", () => {
   expect(describeSettings({ authors: ["seneca"], quotes: { marcus: ["q02"] } }, names, catalog)).toBe("seneca · every 60s");
 });
 
+test("an added line stays out of rotation only when its checkbox is off", () => {
+  const bundled = indexBundled([
+    { author: "marcus", citation: "A", text: "first" },
+    { author: "marcus", citation: "A", text: "second" },
+  ]);
+  const custom: Quote[] = [
+    { author: "marcus", citation: "Mine", text: "added" },
+    { author: "plato", citation: "Note", text: "outsider" },
+  ];
+  const addedCatalog = [
+    { id: "a01", author: "marcus" },
+    { id: "a02", author: "plato" },
+  ];
+  expect(normalizeSettings({
+    quotes: { marcus: ["q02"] },
+    addedOff: { marcus: ["a01"], plato: ["nope"] },
+  }, roster, catalog, addedCatalog)).toEqual({ quotes: { marcus: ["q02"] } });
+  expect(normalizeSettings({
+    quotes: { marcus: ["q02"] },
+    addedOff: { marcus: ["A01"], plato: ["a02"] },
+  }, roster, catalog, addedCatalog)).toEqual({
+    quotes: { marcus: ["q02"] },
+    addedOff: { marcus: ["a01"], plato: ["a02"] },
+  });
+  expect(compactSettings({ addedOff: { marcus: [] } }, roster, catalog, addedCatalog)).toEqual({});
+  expect(inRotation(bundled, custom, { quotes: { marcus: ["q02"] }, addedOff: { marcus: ["a01"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "outsider"]);
+});
+
 test("rotation keeps custom lines and falls back when a filter matches nothing", () => {
   const bundled = indexBundled([
     { author: "marcus", citation: "A", text: "first" },

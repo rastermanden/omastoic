@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   takes a per-author `quotes` id list (`q01`, …); `omastoic config --quotes`,
   the gum picker, and `omastoic config --list` edit and show it. Omitting a
   Stoic keeps every bundled line of theirs.
+- `omastoic config` checkboxes, grouped by Stoic, turn bundled and added lines
+  on or off. Added lines left unchecked are stored in `addedOff` (`a01`, …).
+  A new line stays on until its box is cleared. `--quotes` still edits bundled
+  ids only.
 - `omastoic config --add` appends a tab-separated line to
   `~/.config/omastoic/quotes.tsv`. Custom lines stay in rotation alongside any
   bundled selection.
