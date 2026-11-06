@@ -842,9 +842,9 @@ async function promptCustomQuote(): Promise<PromptedQuote> {
   }
 }
 
-async function offerCustomQuote(): Promise<PromptedQuote | { kind: "skip" }> {
+async function offerCustomQuote(): Promise<PromptedQuote | { kind: "skip" } | { kind: "abort" }> {
   const answer = await gumRun(["confirm", "Add a custom quote?"]);
-  if (answer == null || (answer.code !== 0 && answer.code !== 1)) return { kind: "cancel" };
+  if (answer == null || (answer.code !== 0 && answer.code !== 1)) return { kind: "abort" };
   if (answer.code === 1) return { kind: "skip" };
   return promptCustomQuote();
 }
@@ -944,6 +944,7 @@ async function configure(rest: string[]): Promise<number> {
 
   let next: Settings = { ...current };
   let quoteLines: string[] | null = null;
+  let quoteFailure: number | null = null;
 
   if (interactive) {
     if (!Bun.which("gum")) {
@@ -970,9 +971,9 @@ async function configure(rest: string[]): Promise<number> {
     if (seconds == null) return 0;
     next.interval = seconds;
     const offered = await offerCustomQuote();
-    if (offered.kind === "cancel") return 0;
-    if (offered.kind === "invalid") return 1;
-    if (offered.kind === "quote") quoteLines = [quoteRow(offered.quote)];
+    if (offered.kind === "abort") return 0;
+    if (offered.kind === "invalid") quoteFailure = 1;
+    else if (offered.kind === "quote") quoteLines = [quoteRow(offered.quote)];
   } else {
     if (authorsFlag != null) {
       const parsed = parseAuthorList(authorsFlag, slugs);
@@ -1010,21 +1011,28 @@ async function configure(rest: string[]): Promise<number> {
           return 1;
         }
         const prompted = await promptCustomQuote();
-        if (prompted.kind === "cancel") return 0;
-        if (prompted.kind === "invalid") return 1;
-        quoteLines = [quoteRow(prompted.quote)];
+        if (prompted.kind === "invalid") quoteFailure = 1;
+        else if (prompted.kind === "quote") quoteLines = [quoteRow(prompted.quote)];
       } else {
         quoteLines = addFlags;
       }
     }
   }
 
-  if (quoteLines) {
-    const code = await appendQuotes(quoteLines);
-    if (code !== 0) return code;
-  }
   const settingsTouched = interactive || authorsFlag != null || intervalFlag != null || quoteFlags.length > 0;
   if (settingsTouched) await saveSettings(next, slugs, catalog);
+  if (quoteLines) {
+    const code = await appendQuotes(quoteLines);
+    if (code !== 0) quoteFailure = code;
+  }
+  if (quoteFailure != null) {
+    if (settingsTouched) {
+      await restartDaemon();
+      printSettings(await config(), roster, catalog);
+    }
+    return quoteFailure;
+  }
+  if (!settingsTouched && !quoteLines && !list) return 0;
   if (settingsTouched || quoteLines) await restartDaemon();
   const saved = await config();
   printSettings(saved, roster, catalog);

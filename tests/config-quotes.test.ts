@@ -286,6 +286,106 @@ test("omastoic config offers a gum quote after the Stoic prompts", async () => {
   } finally { s.cleanup(); }
 });
 
+test("accepted settings survive a cancelled or invalid optional quote", async () => {
+  const s = sandbox();
+  const settingsPath = join(s.config, "omastoic/config.json");
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  const wizard = (confirm: string, author: string) => [
+    "case \"$1\" in",
+    "  choose)",
+    "    case \"$*\" in",
+    "      *Stoics*) echo 'Marcus Aurelius' ;;",
+    "    esac",
+    "    ;;",
+    "  input)",
+    "    case \"$*\" in",
+    "      *Seconds*) echo 30 ;;",
+    author,
+    "    esac",
+    "    ;;",
+    `  confirm) ${confirm} ;;`,
+    "  write) echo 'A custom sentence for the saver.' ;;",
+    "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+    "esac",
+  ].join("\n");
+  try {
+    s.stub("gum", wizard("exit 0", "      *) exit 1 ;;"));
+    const escaped = await pty(s, ["config"]);
+    expect(escaped.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      authors: ["marcus"],
+      interval: 30,
+      quotes: { marcus: [] },
+    });
+    expect(existsSync(quotesPath)).toBe(false);
+
+    rmSync(settingsPath);
+    s.stub("gum", wizard("exit 0", "      *Author*) echo 'Marcus Aurelius' ;;\n      *) echo 'Desk note' ;;"));
+    const rejected = await pty(s, ["config"]);
+    expect(rejected.code).toBe(1);
+    expect(rejected.stdout + rejected.stderr).toContain("invalid quote author slug");
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      authors: ["marcus"],
+      interval: 30,
+      quotes: { marcus: [] },
+    });
+    expect(existsSync(quotesPath)).toBe(false);
+
+    rmSync(settingsPath);
+    s.stub("gum", wizard("exit 130", "      *) echo 'should not ask' >&2; exit 1 ;;"));
+    const aborted = await pty(s, ["config"]);
+    expect(aborted.code).toBe(0);
+    expect(existsSync(settingsPath)).toBe(false);
+    expect(existsSync(quotesPath)).toBe(false);
+
+    s.stub("gum", [
+      "case \"$1\" in",
+      "  input) exit 1 ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const flagged = await pty(s, ["config", "--authors", "seneca", "--interval", "30", "--add"]);
+    expect(flagged.code).toBe(0);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ authors: ["seneca"], interval: 30 });
+    expect(existsSync(quotesPath)).toBe(false);
+
+    s.stub("gum", [
+      "case \"$1\" in",
+      "  input)",
+      "    case \"$*\" in",
+      "      *Author*) echo 'Marcus Aurelius' ;;",
+      "      *) echo 'Desk note' ;;",
+      "    esac",
+      "    ;;",
+      "  write) echo 'A custom sentence for the saver.' ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const flaggedBad = await pty(s, ["config", "--interval", "45", "--add"]);
+    expect(flaggedBad.code).toBe(1);
+    expect(flaggedBad.stdout + flaggedBad.stderr).toContain("invalid quote author slug");
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ authors: ["seneca"], interval: 45 });
+    expect(existsSync(quotesPath)).toBe(false);
+
+    const added = await s.cli(["config", "--add", "marcus\tDesk note\tA custom sentence for the saver."]);
+    expect(added.code).toBe(0);
+    const before = readFileSync(quotesPath, "utf8");
+    const duplicate = await s.cli(["config", "--interval", "12", "--add", "marcus\tDesk note\tA custom sentence for the saver."]);
+    expect(duplicate.code).toBe(1);
+    expect(duplicate.stderr).toContain("already in");
+    expect(readFileSync(quotesPath, "utf8")).toBe(before);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ authors: ["seneca"], interval: 12 });
+
+    const broken = "Marcus Aurelius\tDesk\tLine\n";
+    s.put(quotesPath, broken);
+    const unreadable = await s.cli(["config", "--interval", "15", "--add", "marcus\tMeditations IX.1\tYour line."]);
+    expect(unreadable.code).toBe(1);
+    expect(unreadable.stderr).toContain("invalid quote author slug");
+    expect(readFileSync(quotesPath, "utf8")).toBe(broken);
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ authors: ["seneca"], interval: 15 });
+  } finally { s.cleanup(); }
+});
+
 test("a plugin update leaves added quotes and settings in the user config", async () => {
   const s = sandbox();
   const origin = join(s.home, "origin");
