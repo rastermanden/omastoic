@@ -20,7 +20,7 @@ repository, and release posts.
 Omastoic puts the Stoics on the Omarchy screensaver. When the screen goes
 idle, Marcus Aurelius looks back at you; a minute later it is Seneca, or
 Epictetus, or the man who founded the school on an Athenian porch. Six
-braille portraits, and 64 entries from public-domain US translations, every one
+braille portraits, and 79 entries from public-domain US translations, every one
 cited by book and section. This release supports the terminal/ttfx screensaver,
 audited on Omarchy 4.5.0rc3 and regression-tested with the 4.5.0 host parser
 and branding CLI, not the newer native renderer.
@@ -34,7 +34,7 @@ some other way and the Stoics stand aside.
 
 ## Feature bullets
 
-- Six braille portraits and 64 cited quotes (Marcus, Seneca, Epictetus, Zeno, Cleanthes, Chrysippus).
+- Six braille portraits and 79 cited quotes (Marcus, Seneca, Epictetus, Zeno, Cleanthes, Chrysippus).
 - Rotates only while the screensaver is actually on screen.
 - **Appearance → Branding → Screensaver → Stoics** is the single on/off row.
 - 60 seconds per canvas by default, configurable; the host reads changes at effect boundaries.

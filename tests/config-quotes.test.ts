@@ -13,7 +13,7 @@ test("config selects bundled quotes, lists them, and still adds custom lines", a
 
     const limited = await s.cli(["config", "--authors", "marcus", "--quotes", "marcus=q01"]);
     expect(limited.code).toBe(0);
-    expect(limited.stdout).toContain("1 of 18 quotes");
+    expect(limited.stdout).toContain("1 of 25 quotes");
     const saved = JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"));
     expect(saved).toEqual({ authors: ["marcus"], quotes: { marcus: ["q01"] } });
 
@@ -56,7 +56,7 @@ test("config selects bundled quotes, lists them, and still adds custom lines", a
     expect(cleared.code).toBe(0);
     expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({});
     const book = await s.cli(["status"]);
-    expect(book.stdout).toContain("65 quotes:");
+    expect(book.stdout).toContain("80 quotes:");
   } finally { s.cleanup(); }
 });
 
@@ -66,7 +66,7 @@ test("a bad quote field is ignored and an empty bundled list can fall back", asy
     s.put(join(s.config, "omastoic/config.json"), JSON.stringify({ interval: 12, quotes: { marcus: ["nope"] } }));
     const kept = await s.cli(["status"]);
     expect(kept.code).toBe(0);
-    expect(kept.stdout).toContain("64 quotes:");
+    expect(kept.stdout).toContain("79 quotes:");
     expect(kept.stdout).toContain("every 12s");
     expect(kept.stderr).not.toContain("ignoring unreadable");
 
@@ -76,8 +76,8 @@ test("a bad quote field is ignored and an empty bundled list can fall back", asy
     const fellBack = await s.cli(["status"]);
     expect(fellBack.code).toBe(0);
     expect(fellBack.stderr).toContain("config quotes matched no quotes");
-    expect(fellBack.stdout).toContain("64 quotes:");
-    expect(fellBack.stdout).toContain("0 of 64 quotes");
+    expect(fellBack.stdout).toContain("79 quotes:");
+    expect(fellBack.stdout).toContain("0 of 79 quotes");
     const unmarked = await s.cli(["config", "--list"]);
     expect(unmarked.stdout).toContain("  q01  marcus  Meditations II.5");
     expect(unmarked.stdout).not.toContain("* q01");
@@ -90,20 +90,20 @@ test("config warns when an empty selection is ignored at rotation", async () => 
   try {
     const narrowed = await s.cli(["config", "--authors", "marcus", "--quotes", "marcus=none"]);
     expect(narrowed.code).toBe(0);
-    expect(narrowed.stdout).toContain("0 of 18 quotes");
+    expect(narrowed.stdout).toContain("0 of 25 quotes");
     expect(narrowed.stderr).toContain("config authors matched no quotes; using the whole book");
     const whole = await s.cli(["status"]);
-    expect(whole.stdout).toContain("64 quotes:");
+    expect(whole.stdout).toContain("79 quotes:");
     expect(whole.stderr).toContain("config authors matched no quotes; using the whole book");
 
     const stoics = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"];
     const selected = await s.cli(["config", "--authors", "marcus", ...stoics.flatMap((slug) => ["--quotes", `${slug}=none`])]);
     expect(selected.code).toBe(0);
-    expect(selected.stdout).toContain("0 of 18 quotes");
+    expect(selected.stdout).toContain("0 of 25 quotes");
     expect(selected.stderr).toContain("quote selection was ignored; using the selected Stoics' lines");
     expect(selected.stderr).not.toContain("using the whole book");
     const kept = await s.cli(["status"]);
-    expect(kept.stdout).toContain("18 quotes:");
+    expect(kept.stdout).toContain("25 quotes:");
     expect(kept.stdout).toContain("Marcus Aurelius");
     expect(kept.stdout).not.toContain("Seneca");
     expect(kept.stderr).toContain("quote selection was ignored; using the selected Stoics' lines");

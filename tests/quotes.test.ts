@@ -7,12 +7,12 @@ const quotes = parseQuotes(readFileSync(join(import.meta.dir, "../data/quotes.ts
 const ledger = JSON.parse(readFileSync(join(import.meta.dir, "../docs/quote-sources.json"), "utf8"));
 const words = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.join(" ") ?? "";
 
-test("all 64 entries retain reviewed citations and words from independent source passages", () => {
+test("all 79 entries retain reviewed citations and words from independent source passages", () => {
   // The oracle is the manual source review ledger, not the renderer. This
   // rejects miscitation, paraphrase or unmarked joining of separate passages.
   // It is consistency evidence, not an automated proof of ancient authorship.
-  expect(quotes).toHaveLength(64);
-  expect(ledger.quotes).toHaveLength(64);
+  expect(quotes).toHaveLength(79);
+  expect(ledger.quotes).toHaveLength(79);
   const ids = new Set<string>();
   for (const [i, source] of ledger.quotes.entries()) {
     ids.add(source.id);
@@ -23,7 +23,7 @@ test("all 64 entries retain reviewed citations and words from independent source
     expect(source.passages).toHaveLength(segments.length);
     for (const [j, segment] of segments.entries()) expect(words(source.passages[j])).toContain(segment);
   }
-  expect(ids.size).toBe(64);
+  expect(ids.size).toBe(79);
 });
 
 test("confirmed erroneous citations cannot return", () => {

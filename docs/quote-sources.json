@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "reviewed": "2026-11-04",
-  "policy": "64 stable entries, one source record per TSV row. Words checked against the linked public-domain editions. Internal omissions marked with ellipsis; capitalization, punctuation and whitespace normalized. Passages are independent source excerpts, not generated from the runtime quote text. Automated consistency tests cannot prove historical authorship.",
+  "reviewed": "2026-11-07",
+  "policy": "79 stable entries, one source record per TSV row. Words checked against the linked public-domain editions. Internal omissions marked with ellipsis; capitalization, punctuation and whitespace normalized. Passages are independent source excerpts, not generated from the runtime quote text. Automated consistency tests cannot prove historical authorship.",
   "quotes": [
     {
       "id": "q01",
@@ -711,6 +711,172 @@
         "say the like of our virtue and vice, and generally of arts or the ignorance of arts, as I have said.” And a little after, taking away all ambiguity, he says: “For no particular thing, not even the least, can be otherwise than according to common Nature and its reason.” But that common Nature and the common reason of Nature are with him Fate and Providence and Jupiter, is not unknown even to the antipodes. For these things a"
       ],
       "note": "Chrysippus quoted critically by Plutarch, Stoic Contradictions 34 (Moralia 1050A). E. Smith translation, revised W. W. Goodwin; not an independently surviving Chrysippus book."
+    },
+    {
+      "id": "q65",
+      "author": "marcus",
+      "citation": "Meditations VII.71",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "But thou, who art destined to end so soon, art thou wearied of enduring the bad, and this too when thou art one of them? It is a ridiculous thing for a man not to fly from his own badness, which is indeed possible, but to fly from other men's badness, which is impossible. Whatever the rational and political (social) faculty finds to be neither intelligent nor social, it properly judges to be inferior to itself."
+      ],
+      "note": "Excerpt; terminal punctuation, capitalization and quotation marks normalized."
+    },
+    {
+      "id": "q66",
+      "author": "marcus",
+      "citation": "Meditations VII.34",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "About fame: Look at the minds of those who seek fame, observe what they are, and what kind of things they avoid, and what kind of things they pursue. And consider that as the heaps of sand piled on one another hide the former sands, so in life the events which go before are soon covered by those which come after."
+      ],
+      "note": "Excerpt; starts at Marcus’s own “And consider” clause. Terminal punctuation and capitalization normalized."
+    },
+    {
+      "id": "q67",
+      "author": "marcus",
+      "citation": "Meditations VII.15",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "But I, unless I think that what has happened is an evil, am not injured. And it is in my power not to think so. Whatever any one does or says, I must be good, just as if the gold, or the emerald, or the purple were always saying this, Whatever any one does or says, I must be emerald and keep my colour."
+      ],
+      "note": "Excerpt; Long’s 1862 text writes “colour” and “any one”. Punctuation normalized."
+    },
+    {
+      "id": "q68",
+      "author": "marcus",
+      "citation": "Meditations VII.8",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "Be not ashamed to be helped; for it is thy business to do thy duty like a soldier in the assault on a town. How then, if being lame thou canst not mount up on the battlements alone, but with the help of another it is possible? Let not future things disturb thee, for thou wilt come to them, if it shall be necessary, having with thee the same reason which now thou usest for present things."
+      ],
+      "note": "Excerpt; terminal punctuation, capitalization and quotation marks normalized."
+    },
+    {
+      "id": "q69",
+      "author": "marcus",
+      "citation": "Meditations V.2",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "But are the acts which concern society more vile in thy eyes and less worthy of thy labour? How easy it is to repel and to wipe away every impression which is troublesome or unsuitable, and immediately to be in all tranquility."
+      ],
+      "note": "Excerpt; Long’s text spells “tranquility”. Terminal punctuation normalized."
+    },
+    {
+      "id": "q70",
+      "author": "marcus",
+      "citation": "Meditations IV.37",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "accustom thyself to consider that the nature of the Universe loves nothing so much as to change the things which are and to make new things like them. For everything that exists is in a manner the seed of that which will be. But thou art thinking only of seeds which are cast into the earth or into a womb: but this is a very vulgar notion. Thou wilt soon die, and thou art not yet simple, not free from perturbations, nor without suspicion of being hurt by external things, nor kindly disposed towards all; nor dost thou yet place wisdom only in acting justly."
+      ],
+      "note": "Excerpt; Long continues “nor dost thou yet place wisdom only in acting justly”, marked with an ellipsis."
+    },
+    {
+      "id": "q71",
+      "author": "marcus",
+      "citation": "Meditations VI.54",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.html",
+      "passages": [
+        "It is in our power to have no opinion about a thing, and not to be disturbed in our soul; for things themselves have no natural power to form our judgements. Accustom thyself to attend carefully to what is said by another, and as much as it is possible, be in the speaker's mind. That which is not good for the swarm, neither is it good for the bee."
+      ],
+      "note": "Excerpt; terminal punctuation, capitalization and quotation marks normalized."
+    },
+    {
+      "id": "q72",
+      "author": "seneca",
+      "citation": "Letters 5.5",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_5",
+      "passages": [
+        "Just as it is a sign of luxury to seek out dainties, so it is madness to avoid that which is customary and can be purchased at no great price. Philosophy calls for plain living, but not for penance; and we may perfectly well be plain and neat at the same time."
+      ],
+      "note": "Excerpt; terminal punctuation, capitalization and quotation marks normalized."
+    },
+    {
+      "id": "q73",
+      "author": "seneca",
+      "citation": "Letters 5.9",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_5",
+      "passages": [
+        "9. Beasts avoid the dangers which they see, and when they have escaped them are free from care; but we men torment ourselves over that which is to come as well as over that which is past. Many of our blessings bring bane to us; for memory recalls the tortures of fear, while foresight anticipates them. The present alone can make no man wretched."
+      ],
+      "note": "Excerpt; section 9 of the same letter as Letters 5.5. Terminal punctuation normalized."
+    },
+    {
+      "id": "q74",
+      "author": "seneca",
+      "citation": "Letters 24.19",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_24",
+      "passages": [
+        "Allow me at this point to quote a verse of yours, first suggesting that, when you wrote it, you meant it for yourself no less than for others. It is ignoble to say one thing and mean another; and how much more ignoble to write one thing and mean another! I remember one day you were handling the well-known commonplace,—that we do not suddenly fall on death, but advance towards it by slight degrees; we die every day."
+      ],
+      "note": "Seneca quotes back a commonplace Lucilius had handled; the run-on clause is capitalised as a standalone quotation. Terminal punctuation normalized."
+    },
+    {
+      "id": "q75",
+      "author": "seneca",
+      "citation": "Letters 28.1",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_28",
+      "passages": [
+        "Do you suppose that you alone have had this experience? Are you surprised, as if it were a novelty, that after such long travel and so many changes of scene you have not been able to shake off the gloom and heaviness of your mind? You need a change of soul rather than a change of climate."
+      ],
+      "note": "A Wikisource footnote marker after “climate” is omitted. Terminal punctuation normalized."
+    },
+    {
+      "id": "q76",
+      "author": "epictetus",
+      "citation": "Enchiridion 6",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "It is the act of an ill-instructed man to blame others for his own bad condition; it is the act of one who has begun to be instructed, to lay the blame on himself; and of one whose instruction is completed, neither to blame another, nor himself. VI. Be not elated at any advantage (excellence) which belongs to another."
+      ],
+      "note": "Long’s parenthetical gloss is kept, as elsewhere in the book. Terminal punctuation normalized."
+    },
+    {
+      "id": "q77",
+      "author": "epictetus",
+      "citation": "Enchiridion 14",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "He is the master of every man who has the power over the things which another person wishes or does not wish, the power to confer them on him or to take them away. Whoever then wishes to be free let him neither wish for anything nor avoid anything which depends on others: if he does not observe this rule, he must be a slave."
+      ],
+      "note": "Excerpt; terminal punctuation, capitalization and quotation marks normalized."
+    },
+    {
+      "id": "q78",
+      "author": "epictetus",
+      "citation": "Enchiridion 23",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "XXIII. If it should ever happen to you to be turned to externals in order to please some person, you must know that you have lost your purpose in life."
+      ],
+      "note": "Excerpt; terminal punctuation, capitalization and quotation marks normalized."
+    },
+    {
+      "id": "q79",
+      "author": "epictetus",
+      "citation": "Enchiridion 42",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "XLII. When any person treats you ill or speaks ill of you, remember that he does this or says this because he thinks that it is his duty. It is not possible then for him to follow that which seems right to you, but that which seems right to himself.",
+        "If you proceed then from these opinions, you will be mild in temper to him who reviles you; for say on each occasion, It seemed so to him."
+      ],
+      "note": "Two sentences of chapter XLII, the middle of the chapter omitted and marked with an ellipsis. Terminal punctuation normalized."
     }
   ]
 }
