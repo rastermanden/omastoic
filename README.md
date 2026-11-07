@@ -125,10 +125,11 @@ until you change them. It then asks whether to add one of your own quotes.
 ```
 
 Your own `quotes.tsv` in that directory adds entries to the bundled book.
-Each line is `c01`, `c02`, … in that file. `omastoic config --list` stars the
-ones in rotation, and the gum quote checkboxes include them already checked.
-A bundled-only id list still keeps every custom line, so a new quote shows up
-without typing its id. Unchecking it in the checkbox then leaves it out.
+Each quote is `c01`, `c02`, … in file order. `omastoic config --list` stars the
+ones in rotation, and the gum quote checkboxes show them checked while they
+stay in rotation. A bundled-only id list still keeps every custom line, so a
+new quote shows up without typing its id. Unchecking it in the checkbox then
+leaves it out (`c00` clears every custom line for that Stoic).
 The file lives only under `~/.config/omastoic/`, never in the plugin checkout,
 so `omarchy plugin update` cannot overwrite it or `config.json`. Uninstall
 leaves both in place; `omastoic uninstall --purge` removes them.
@@ -143,7 +144,8 @@ citations to 256 characters and quote text to 4096; terminal control escapes
 are rejected. An unknown author renders without a portrait. A quote selection
 that matches nothing is ignored. The selected Stoics' lines are used when an
 author list is set; otherwise the whole book is. An author list that still
-matches nothing uses the whole book.
+matches nothing uses the whole book. Custom lines left unchecked stay out of
+both.
 
 The shared canvas uses the smallest measured terminal/monitor grid. Portraits
 are hidden when either dimension cannot fit. Wrapping accounts for CJK,

@@ -11,5 +11,5 @@ complete -c omastoic -n "__fish_seen_subcommand_from config" -l authors -xa "@AU
 complete -c omastoic -n "__fish_seen_subcommand_from config" -l interval -d "Seconds between quotes"
 complete -c omastoic -n "__fish_seen_subcommand_from config" -l quotes -d "Bundled quotes: marcus=q01,q02, marcus=all, marcus=none, or all"
 complete -c omastoic -n "__fish_seen_subcommand_from config" -l add -d "Add a quote with gum, or one tab-separated line"
-complete -c omastoic -n "__fish_seen_subcommand_from config" -l list -d "List bundled quote ids"
+complete -c omastoic -n "__fish_seen_subcommand_from config" -l list -d "List bundled and custom quote ids"
 complete -c omastoic -n "__fish_seen_subcommand_from uninstall" -l purge -d "Also drop quotes and settings"

@@ -12,7 +12,8 @@ export const DEFAULT_INTERVAL = 60;
 
 /**
  * A per-author allow-list. `null` means the field is malformed and must be
- * ignored. A Stoic whose list is the whole bundled set is omitted.
+ * ignored. A Stoic whose list is the whole bundled set, with no custom id, is
+ * omitted.
  */
 function quoteAllowList(
   raw: unknown,
@@ -196,7 +197,8 @@ export function quoteKept(id: string, ids: string[] | undefined): boolean {
  * Bundled lines kept by a per-author allow-list, plus custom lines from
  * `quoteKept`. An allow-list that matches nothing is ignored and the author
  * list is applied to the bundled book. An author list that matches nothing
- * falls back to that same bundled book. Explicitly cleared custom lines stay out.
+ * falls back to the bundled book plus custom lines still kept. Explicitly
+ * cleared custom lines stay out of both.
  */
 export function inRotation(
   bundled: BundledQuote[],
