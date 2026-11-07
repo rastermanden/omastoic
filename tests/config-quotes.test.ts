@@ -429,7 +429,7 @@ test("a bundled allow-list still shows a custom quote in the list, checkbox, and
 
     const listed = await s.cli(["config", "--list"]);
     expect(listed.code).toBe(0);
-    expect(listed.stdout).toContain("2 of 19 quotes");
+    expect(listed.stdout).toContain("2 of 26 quotes");
     expect(listed.stdout).toContain("* c01  marcus  Desk note  A custom sentence for the saver.");
     expect(listed.stdout).toContain("* q01  marcus");
 
