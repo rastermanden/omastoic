@@ -460,9 +460,7 @@ test("a bundled allow-list still shows a custom quote in the list, checkbox, and
     const configured = await pty(s, ["config"]);
     expect(configured.code).toBe(0);
     const gum = readFileSync(join(s.home, "gum.log"), "utf8");
-    expect(gum).toContain("Desk note");
-    expect(gum).toContain("A custom sentence for the saver.");
-    expect(gum).toContain("--selected");
+    expect(gum).toContain("--selected c01  Desk note  A custom sentence for the saver.");
   } finally { s.cleanup(); }
 });
 
@@ -544,8 +542,13 @@ test("adding a quote leaves cleared custom lines unchecked", async () => {
     expect(listed.stdout).toContain("  c02  marcus  Two  Cleared beta line stays off.");
     expect(listed.stdout).not.toContain("* c01");
     expect(listed.stdout).not.toContain("* c02");
+    const pool = await s.cli(["status"]);
+    expect(pool.code).toBe(0);
+    expect(pool.stdout).toContain("2 quotes:");
+    expect(pool.stdout).toMatch(/Marcus Aurelius\s+2\s+portrait/);
+    // `show` does not record recent picks, so each canvas is an independent draw.
     const seen = new Set<string>();
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 24; i++) {
       const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
       expect(shown.code).toBe(0);
       expect(shown.stdout).not.toContain("Cleared alpha line stays off.");
