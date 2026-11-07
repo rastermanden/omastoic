@@ -1,5 +1,5 @@
 # omastoic quote book — author-slug <TAB> citation <TAB> text
-# All 64 entries retained; editions, source passages and editorial notes are in
+# All 79 entries retained; editions, source passages and editorial notes are in
 # docs/quote-sources.json and CREDITS.md. Internal omissions are marked … .
 # Terminal punctuation/quotation marks and line breaks are normalized; words
 # follow the credited public-domain translation, not internet paraphrases.
@@ -73,3 +73,19 @@ cleanthes	Diogenes Laertius VII.174	When I perceive myself to be in good health 
 chrysippus	Diogenes Laertius VII.87	To live according to virtue is the same thing as living according to one's experience of those things which happen by nature.
 chrysippus	Diogenes Laertius VII.182	If I had attended to the multitude I should not have been a philosopher.
 chrysippus	Plutarch, Stoic Contradictions 34	For no particular thing, not even the least, can be otherwise than according to common Nature and its reason.
+
+marcus	Meditations VII.71	It is a ridiculous thing for a man not to fly from his own badness, which is indeed possible, but to fly from other men's badness, which is impossible.
+marcus	Meditations VII.34	Consider that as the heaps of sand piled on one another hide the former sands, so in life the events which go before are soon covered by those which come after.
+marcus	Meditations VII.15	Whatever any one does or says, I must be good; just as if the gold, or the emerald, or the purple were always saying this. Whatever any one does or says, I must be emerald and keep my colour.
+marcus	Meditations VII.8	Let not future things disturb thee, for thou wilt come to them, if it shall be necessary, having with thee the same reason which now thou usest for present things.
+marcus	Meditations V.2	How easy it is to repel and to wipe away every impression which is troublesome or unsuitable, and immediately to be in all tranquility.
+marcus	Meditations IV.37	Thou wilt soon die, and thou art not yet simple, not free from perturbations, nor without suspicion of being hurt by external things, nor kindly disposed towards all …
+marcus	Meditations VI.54	That which is not good for the swarm, neither is it good for the bee.
+seneca	Letters 5.5	Philosophy calls for plain living, but not for penance; and we may perfectly well be plain and neat at the same time.
+seneca	Letters 5.9	Beasts avoid the dangers which they see, and when they have escaped them are free from care; but we men torment ourselves over that which is to come as well as over that which is past.
+seneca	Letters 24.19	We do not suddenly fall on death, but advance towards it by slight degrees; we die every day.
+seneca	Letters 28.1	You need a change of soul rather than a change of climate.
+epictetus	Enchiridion 6	Be not elated at any advantage (excellence) which belongs to another.
+epictetus	Enchiridion 14	Whoever then wishes to be free let him neither wish for anything nor avoid anything which depends on others: if he does not observe this rule, he must be a slave.
+epictetus	Enchiridion 23	If it should ever happen to you to be turned to externals in order to please some person, you must know that you have lost your purpose in life.
+epictetus	Enchiridion 42	When any person treats you ill or speaks ill of you, remember that he does this or says this because he thinks that it is his duty … say on each occasion, It seemed so to him.

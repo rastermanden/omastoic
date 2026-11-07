@@ -38,8 +38,9 @@ Glyptotek's Zeno and Cleanthes. Those entries are in the git history, and
 
 ## Translations
 
-The 64 entries were reviewed against the following **public-domain US source
-editions** for 2.2.0. Antiquity alone does not clear a modern translation, and
+Every entry was reviewed against the following **public-domain US source
+editions**: the 64 shipped in 2.2.0, and the 15 added afterwards from the same
+editions. Antiquity alone does not clear a modern translation, and
 public-domain status is jurisdiction-dependent (not a worldwide license claim).
 The underlying translations/versions below were published before 1931; the
 undated McKay scan corroborates Long, rather than supplying a new rights basis.
@@ -88,3 +89,8 @@ translations. Corrections extend beyond the two initially reported errors:
   Epicurus, not itself the preceding Epicurus quotation. Diogenes reports
   that the Zeno/goodness saying was also attributed to Socrates. Long's collected fragments are attributed material, not all
   securely authentic. These transmission limits are recorded, not concealed.
+- Fifteen further entries were added later from the same editions: Marcus
+  *Meditations* VII.71, VII.34, VII.15, VII.8, V.2, IV.37, VI.54; Seneca
+  *Letters* 5.5, 5.9, 24.19, 28.1; Epictetus *Enchiridion* 6, 14, 23, 42. They
+  are appended after the original rows, so the existing `q01`–`q64` ids keep
+  pointing at the same lines.
