@@ -764,9 +764,11 @@ async function pickInterval(current: number): Promise<number | undefined> {
   return n;
 }
 
+/** Gum splits every `--selected` value on commas, so a chooser label cannot contain one. */
 function quoteLabel(quote: BundledQuote): string {
+  const clip = (value: string) => value.replaceAll(", ", " ").replaceAll(",", " ").trim();
   const text = quote.text.length > 48 ? `${quote.text.slice(0, 47)}…` : quote.text;
-  return `${quote.id}  ${quote.citation}  ${text}`;
+  return `${quote.id}  ${clip(quote.citation)}  ${clip(text)}`;
 }
 
 async function pickQuotes(name: string, choices: BundledQuote[], selected: string[] | null): Promise<string[] | undefined> {

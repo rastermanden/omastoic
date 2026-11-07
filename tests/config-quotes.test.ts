@@ -734,3 +734,79 @@ test("confirming config keeps stored custom ids when quotes.tsv cannot be parsed
     });
   } finally { s.cleanup(); }
 });
+
+test("confirming a quote whose label contains a comma keeps it in rotation", async () => {
+  const s = sandbox();
+  const settingsPath = join(s.config, "omastoic/config.json");
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  const line = "Hello, Captain.";
+  try {
+    s.put(quotesPath, `marcus\tDesk, note\t${line}\n`);
+    s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01", "q02"] } }));
+    // gum 2.0.2 splits each --selected value on commas, then checks an option only when the whole label matches a piece.
+    s.stub("gum", [
+      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
+      "case \"$1\" in",
+      "  choose)",
+      "    case \"$*\" in",
+      "      *Stoics*) printf '%s\\n' 'Marcus Aurelius' ;;",
+      "      *)",
+      "        selected=()",
+      "        options=()",
+      "        prev=",
+      "        for arg in \"$@\"; do",
+      "          if [[ \"$prev\" == --selected ]]; then",
+      "            IFS=',' read -ra parts <<< \"$arg\"",
+      "            for part in \"${parts[@]}\"; do selected+=(\"$part\"); done",
+      "          elif [[ \"$prev\" == --limit || \"$prev\" == --header || \"$arg\" == --* || \"$arg\" == choose ]]; then",
+      "            :",
+      "          else",
+      "            options+=(\"$arg\")",
+      "          fi",
+      "          prev=\"$arg\"",
+      "        done",
+      "        for opt in \"${options[@]}\"; do",
+      "          for part in \"${selected[@]+\"${selected[@]}\"}\"; do",
+      "            if [[ \"$opt\" == \"$part\" ]]; then printf '%s\\n' \"$opt\"; break; fi",
+      "          done",
+      "        done",
+      "        ;;",
+      "    esac",
+      "    ;;",
+      "  input) printf '%s\\n' 30 ;;",
+      "  confirm) exit 1 ;;",
+      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    const configured = await pty(s, ["config"]);
+    expect(configured.code).toBe(0);
+    expect(configured.stderr).not.toContain("unexpected gum");
+    const gum = readFileSync(join(s.home, "gum.log"), "utf8");
+    expect(gum).toContain("--selected c01  Desk note  Hello Captain.");
+    expect(gum).not.toContain("--selected c01  Desk, note");
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+      authors: ["marcus"],
+      interval: 30,
+      quotes: { marcus: ["q01", "q02", "c01"] },
+    });
+    expect(readFileSync(quotesPath, "utf8")).toBe(`marcus\tDesk, note\t${line}\n`);
+    const listed = await s.cli(["config", "--list"]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain(`* c01  marcus  Desk, note  ${line}`);
+    expect(listed.stdout).toContain("* q01  marcus");
+    expect(listed.stdout).toContain("* q02  marcus");
+    const pool = await s.cli(["status"]);
+    expect(pool.code).toBe(0);
+    expect(pool.stdout).toContain("3 quotes:");
+    expect(pool.stdout).toMatch(/Marcus Aurelius\s+3\s+portrait/);
+    const seen = new Set<string>();
+    for (let i = 0; i < 24; i++) {
+      const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+      expect(shown.code).toBe(0);
+      if (shown.stdout.includes(line)) seen.add("custom");
+      if (shown.stdout.includes("Meditations II.5")) seen.add("q01");
+      if (shown.stdout.includes("Meditations IV.17")) seen.add("q02");
+    }
+    expect([...seen].sort()).toEqual(["custom", "q01", "q02"]);
+  } finally { s.cleanup(); }
+});
