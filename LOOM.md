@@ -1,10 +1,10 @@
 # Loom agent notes for omastoic
 
-omastoic is an Omarchy 4 (Quattro) shell plugin. Before you design, build, test, debug, release or publish it, read the matching skill from [build-omarchy-plugins](https://github.com/tcballard/build-omarchy-plugins) (pinned at `edc72aa`):
+omastoic is an Omarchy 4 (Quattro) shell plugin. Before you design, build, test, debug, release or publish it, read the matching skill, vendored from [build-omarchy-plugins](https://github.com/tcballard/build-omarchy-plugins) at `edc72aa`:
 
-`~/Work/skills/build-omarchy-plugins/skills/<name>/SKILL.md`
+`.agents/skills/<name>/SKILL.md`
 
-Follow any `references/` files the skill links to. If the path can't be read, say so and carry on without it.
+Follow any `references/` files the skill links to. See `.agents/skills/README.md` for attribution and updating.
 
 | Skill | Use when |
 |---|---|
