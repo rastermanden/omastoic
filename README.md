@@ -120,7 +120,7 @@ ticked until you change it, and then it asks whether to add one of your own
 quotes. Nothing outside omastoic is required.
 
 The Stoics and their quotes are small built-in checklists, not a gum prompt:
-space or `x` toggles the focused row, `1`–`6` (Stoics) or `1`–`9` (the quotes on
+space, `x` or Tab toggles the focused row, `1`–`6` (Stoics) or `1`–`9` (the quotes on
 screen) toggle that numbered row, arrows or `j`/`k` move, `/` types a filter over
 the quote id, citation and text that Enter applies, `a` selects every shown row,
 `n` none, Enter saves, and `q`, Esc or Ctrl-C cancels without writing. The quote

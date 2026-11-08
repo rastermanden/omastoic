@@ -116,6 +116,17 @@ test("digits toggle the row number on screen and arrows or j/k move the focus", 
   expect(await focus).toEqual(["q03"]);
 });
 
+test("tab toggles the focused row like space and x", async () => {
+  const h = harness();
+  const picked = pickQuotesTui("Marcus Aurelius", rows, [], h.io);
+  h.send("\t");
+  h.send("j");
+  h.send("\t");
+  h.send("\r");
+  expect(await picked).toEqual(["q01", "q02"]);
+  expect(h.text()).toContain("space/x/tab toggle");
+});
+
 test("a checks every row and n clears every row", async () => {
   const every = harness();
   const all = pickQuotesTui("Marcus Aurelius", rows, [], every.io);
@@ -280,7 +291,7 @@ test("the frame shows checked rows, numbers, filter and hints, and never uses th
   expect(frame).toContain("1 [ ] q01");
   expect(frame).toContain("2 [x] q02");
   expect(frame).toContain("3 [ ] q03");
-  expect(frame).toContain("space/x toggle");
+  expect(frame).toContain("space/x/tab toggle");
   expect(frame).toContain("1-9");
   expect(frame).toContain("/ filter");
   expect(frame).toContain("a all");
