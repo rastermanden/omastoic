@@ -78,6 +78,38 @@ function decode(buffer: string): { key: Key; rest: string } | "more" {
 
 const HINTS = "space/x toggle · 1-9 · j/k · / filter · a all · n none · enter save · q cancel";
 
+type FilterKey =
+  | { kind: "text"; value: string }
+  | { kind: "backspace" }
+  | { kind: "enter" }
+  | { kind: "cancel" }
+  | { kind: "escape" }
+  | { kind: "navigate" };
+
+/**
+ * One key from the head of the buffer while the filter line has focus. Arrows,
+ * page keys and other escape sequences do nothing here, but they must arrive
+ * whole even when a read split them, so a fragment never becomes filter text or
+ * a shortcut. Printable bytes are text; everything else is navigation.
+ */
+function decodeFilter(buffer: string): { key: FilterKey; rest: string } | "more" {
+  const [first] = buffer;
+  if (first === "\x1b") {
+    if (buffer.length === 1) return "more";
+    const sequence = /^\x1b(?:\[[0-9;]*[A-Za-z~]|O[A-Za-z])/.exec(buffer);
+    if (sequence) return { key: { kind: "navigate" }, rest: buffer.slice(sequence[0].length) };
+    // An escape at the head of a partial sequence is still waiting for its tail.
+    if (buffer[1] === "[" || buffer[1] === "O") return "more";
+    return { key: { kind: "escape" }, rest: buffer.slice(1) };
+  }
+  const rest = buffer.slice(1);
+  if (first === "\r" || first === "\n") return { key: { kind: "enter" }, rest };
+  if (first === "\x7f" || first === "\x08") return { key: { kind: "backspace" }, rest };
+  if (first === "\x03" || first === "\x04") return { key: { kind: "cancel" }, rest };
+  if (first >= " ") return { key: { kind: "text", value: first }, rest };
+  return { key: { kind: "navigate" }, rest };
+}
+
 function headerFor(name: string): string {
   const trimmed = name.trim();
   return trimmed ? `Quotes from ${trimmed}` : "Quotes";
@@ -204,30 +236,44 @@ export async function pickQuotesTui(
 
       // While typing a filter, keys are text: no shortcut may steal them.
       if (typing) {
-        const char = buffer[0]!;
-        buffer = buffer.slice(1);
-        if (char === "\r" || char === "\n") {
+        const decoded = decodeFilter(buffer);
+        if (decoded === "more") {
+          const chunk = await source.next(ESCAPE_GRACE_MS);
+          if (chunk.kind === "chunk") { buffer += chunk.value; continue; }
+          // No tail arrived: this was a lone escape, the way out of the filter.
+          buffer = "";
+          filter = "";
           typing = false;
           focus = 0;
           page = 0;
-        } else if (char === "\x7f" || char === "\x08") {
+          if (chunk.kind === "eof") return undefined;
+          draw();
+          continue;
+        }
+        buffer = decoded.rest;
+        const key = decoded.key;
+        if (key.kind === "cancel") return undefined;
+        if (key.kind === "escape") {
+          filter = "";
+          typing = false;
+          focus = 0;
+          page = 0;
+        } else if (key.kind === "enter") {
+          typing = false;
+          focus = 0;
+          page = 0;
+        } else if (key.kind === "backspace") {
           filter = [...filter].slice(0, -1).join("");
           focus = 0;
           page = 0;
-        } else if (char === "\x1b") {
-          // A lone escape clears the filter; an arrow sequence is swallowed whole.
-          const sequence = /^\[[0-9;]*[A-Za-z~]/.exec(buffer);
-          if (sequence) buffer = buffer.slice(sequence[0].length);
-          else filter = "";
-          typing = false;
-          focus = 0;
-          page = 0;
-        } else if (char === "\x03" || char === "\x04") {
-          return undefined;
-        } else if (char >= " " && filter.length < MAX_FILTER) {
-          filter += char;
-          focus = 0;
-          page = 0;
+        } else if (key.kind === "text") {
+          if (filter.length < MAX_FILTER) {
+            filter += key.value;
+            focus = 0;
+            page = 0;
+          }
+        } else if (key.kind === "navigate") {
+          continue;
         }
         draw();
         continue;
