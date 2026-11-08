@@ -139,6 +139,51 @@ async function escapeIsSequence(source: ChunkSource, buffer: { value: string }):
   return true;
 }
 
+type EditKey =
+  | { kind: "insert"; value: string }
+  | { kind: "backspace" }
+  | { kind: "delete" }
+  | { kind: "left" }
+  | { kind: "right" }
+  | { kind: "home" }
+  | { kind: "end" }
+  | { kind: "clear" }
+  | { kind: "confirm" }
+  | { kind: "cancel" }
+  | { kind: "ignore" };
+
+/**
+ * One key of an editable line. Escape sequences are decoded whole; a sequence
+ * a read split waits for its tail, so no fragment is typed or cancels.
+ */
+function decodeEdit(buffer: string): { key: EditKey; rest: string } | "more" {
+  const [first] = buffer;
+  if (first === "\x1b") {
+    if (buffer.length === 1) return "more";
+    const sequence = /^\x1b(?:\[[0-9;]*[A-Za-z~]|O[A-Za-z])/.exec(buffer);
+    if (!sequence) {
+      // A partial sequence is not a cancel; it is still arriving.
+      if (buffer[1] === "[" || buffer[1] === "O") return "more";
+      return { key: { kind: "cancel" }, rest: buffer.slice(1) };
+    }
+    const rest = buffer.slice(sequence[0].length);
+    const name = sequence[0];
+    if (name === "\x1b[D" || name === "\x1bOD") return { key: { kind: "left" }, rest };
+    if (name === "\x1b[C" || name === "\x1bOC") return { key: { kind: "right" }, rest };
+    if (name === "\x1b[H" || name === "\x1bOH" || name === "\x1b[1~" || name === "\x1b[7~") return { key: { kind: "home" }, rest };
+    if (name === "\x1b[F" || name === "\x1bOF" || name === "\x1b[4~" || name === "\x1b[8~") return { key: { kind: "end" }, rest };
+    if (name === "\x1b[3~") return { key: { kind: "delete" }, rest };
+    return { key: { kind: "ignore" }, rest };
+  }
+  const rest = buffer.slice(1);
+  if (first === "\r" || first === "\n") return { key: { kind: "confirm" }, rest };
+  if (first === "\x03" || first === "\x04") return { key: { kind: "cancel" }, rest };
+  if (first === "\x7f" || first === "\x08") return { key: { kind: "backspace" }, rest };
+  if (first === "\x15") return { key: { kind: "clear" }, rest };
+  if (first >= " ") return { key: { kind: "insert", value: first }, rest };
+  return { key: { kind: "ignore" }, rest };
+}
+
 /** A single editable line: enter accepts, ctrl-c, ctrl-d or escape cancel. */
 export async function askLine(prompt: LinePrompt, io: PickerIo): Promise<string | undefined> {
   const { input, output } = io;
@@ -154,25 +199,65 @@ export async function askLine(prompt: LinePrompt, io: PickerIo): Promise<string 
   }
 
   const limit = prompt.charLimit ?? MAX_FIELD;
-  let text = prompt.value ?? "";
+  const chars = [...(prompt.value ?? "")];
+  let cursor = chars.length;
+  const label = `${prompt.header}: `;
+  const width = (): number => (Number.isInteger(output.columns) && (output.columns ?? 0) > 4 ? (output.columns as number) - 1 : FALLBACK_COLUMNS - 1);
   let frame: Frame;
-  const redraw = () => frame.draw([clip(`${prompt.header}: ${text}`, output.columns)]);
+  const redraw = () => {
+    // A line longer than the terminal scrolls under the cursor instead of hiding it.
+    const caret = label.length + cursor;
+    const room = width();
+    const start = caret > room - 1 ? caret - (room - 1) : 0;
+    const shown = (label + chars.join("")).slice(start, start + room);
+    frame.draw([shown]);
+    const back = start + shown.length - caret;
+    if (back > 0) output.write(`\x1b[${back}D`);
+  };
   frame = startFrame(io, redraw);
+  // An editable line shows its caret; the prompts that only display text do not.
+  output.write(SHOW_CURSOR);
   const buffer = { value: "" };
   try {
     redraw();
     for (;;) {
-      const char = await nextChar(frame.source, buffer);
-      if (char == null) return undefined;
-      if (char === "\r" || char === "\n") return text;
-      if (char === "\x03" || char === "\x04") return undefined;
-      if (char === "\x1b") {
-        if (await escapeIsSequence(frame.source, buffer)) continue;
+      if (!buffer.value) {
+        const chunk = await frame.source.next();
+        if (chunk.kind === "eof") return undefined;
+        if (chunk.kind !== "chunk") continue;
+        buffer.value = chunk.value;
+        continue;
+      }
+      const decoded = decodeEdit(buffer.value);
+      if (decoded === "more") {
+        const more = await frame.source.next(ESCAPE_GRACE_MS);
+        if (more.kind === "chunk") { buffer.value += more.value; continue; }
+        // A lone escape still cancels.
         return undefined;
       }
-      if (char === "\x7f" || char === "\x08") text = [...text].slice(0, -1).join("");
-      else if (char === "\x15") text = "";
-      else if (char >= " " && [...text].length < limit) text += char;
+      buffer.value = decoded.rest;
+      const key = decoded.key;
+      if (key.kind === "confirm") return chars.join("");
+      if (key.kind === "cancel") return undefined;
+      if (key.kind === "backspace") {
+        if (cursor > 0) { chars.splice(cursor - 1, 1); cursor -= 1; }
+      } else if (key.kind === "delete") {
+        if (cursor < chars.length) chars.splice(cursor, 1);
+      } else if (key.kind === "left") {
+        if (cursor > 0) cursor -= 1;
+      } else if (key.kind === "right") {
+        if (cursor < chars.length) cursor += 1;
+      } else if (key.kind === "home") {
+        cursor = 0;
+      } else if (key.kind === "end") {
+        cursor = chars.length;
+      } else if (key.kind === "clear") {
+        chars.length = 0;
+        cursor = 0;
+      } else if (key.kind === "insert" && chars.length < limit) {
+        chars.splice(cursor, 0, key.value);
+        cursor += 1;
+      }
       redraw();
     }
   } finally {
