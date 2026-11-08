@@ -9,10 +9,10 @@ export type Author = { slug: string; name: string; dates: string };
 
 export const ART_GAP = 4;
 
-/** Bundled row ids are `q01`, `q02`, … in `data/quotes.tsv` order. */
+/** Bundled ids are `q01`, `q02`, … Custom ids are `c01`, `c02`, … `c00` means custom quotes were explicitly cleared. */
 export function canonicalQuoteId(raw: string): string | null {
   const id = raw.trim().toLowerCase();
-  if (!/^q(?:0[1-9]|[1-9]\d+)$/.test(id)) return null;
+  if (!/^(?:q(?:0[1-9]|[1-9]\d+)|c(?:00|0[1-9]|[1-9]\d+))$/.test(id)) return null;
   return id;
 }
 
@@ -20,6 +20,10 @@ export type BundledQuote = Quote & { id: string };
 
 export function indexBundled(quotes: Quote[]): BundledQuote[] {
   return quotes.map((quote, index) => ({ ...quote, id: `q${String(index + 1).padStart(2, "0")}` }));
+}
+
+export function indexCustom(quotes: Quote[]): BundledQuote[] {
+  return quotes.map((quote, index) => ({ ...quote, id: `c${String(index + 1).padStart(2, "0")}` }));
 }
 
 export function parseQuotes(tsv: string): Quote[] {

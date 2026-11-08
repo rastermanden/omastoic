@@ -62,8 +62,11 @@ There is no periodic rotation timer while no saver windows are open. The
 configurable timer defaults to 60 seconds; another monitor opening does not
 interrupt a quote already being read. Each rotation reads `config.json` and
 `quotes.tsv`. Omitting `quotes` keeps every bundled line for the selected
-authors. A per-author id list keeps only those bundled lines, and lines in
-`quotes.tsv` are always added. When a filter matches nothing, rotation uses
+authors. A per-author id list keeps only those bundled lines. Custom lines
+in `quotes.tsv` stay in rotation with that list until their checkbox is
+cleared. That file and `config.json` live in the user
+config directory, outside the plugin checkout, so a plugin update does not
+replace them. When a filter matches nothing, rotation uses
 the fallback in the README settings section. PTY/monitor sizing is shared
 across outputs, with quote-only fallback. The host rereads branding between
 effects, so file cadence and visible effect cadence are distinct.

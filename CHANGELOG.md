@@ -14,9 +14,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   takes a per-author `quotes` id list (`q01`, …); `omastoic config --quotes`,
   the gum picker, and `omastoic config --list` edit and show it. Omitting a
   Stoic keeps every bundled line of theirs.
-- `omastoic config --add` appends a tab-separated line to
-  `~/.config/omastoic/quotes.tsv`. Custom lines stay in rotation alongside any
-  bundled selection.
+- Custom quotes are `c01`, `c02`, … in `omastoic config --list` and in the gum
+  checkboxes. A bundled-only allow-list still keeps them in rotation, so a new
+  quote shows up without typing an id.
+- `omastoic config --add` appends a quote to `~/.config/omastoic/quotes.tsv`.
+  With gum it asks for the author slug, citation, and text; `omastoic config`
+  offers the same questions. A tab-separated line still works for scripts.
+  Custom lines stay in rotation with a bundled selection until they are
+  unchecked. Plugin update does not touch that file or `config.json`.
 - Fifteen further bundled quotes (79 in total) from the same public-domain
   editions: Marcus *Meditations* VII.71, VII.34, VII.15, VII.8, V.2, IV.37 and
   VI.54; Seneca *Letters* 5.5, 5.9, 24.19 and 28.1; Epictetus *Enchiridion* 6,

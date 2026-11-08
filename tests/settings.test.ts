@@ -114,6 +114,9 @@ test("rotation keeps custom lines and falls back when a filter matches nothing",
   const custom: Quote[] = [{ author: "marcus", citation: "Mine", text: "added" }];
   expect(bundled.map((quote) => quote.id)).toEqual(["q01", "q02", "q03"]);
   expect(inRotation(bundled, custom, { quotes: { marcus: ["q02"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third", "added"]);
+  const indexed = [{ ...custom[0], id: "c01" }];
+  expect(inRotation(bundled, indexed, { quotes: { marcus: ["q02"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third", "added"]);
+  expect(inRotation(bundled, indexed, { quotes: { marcus: ["q02", "c00"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third"]);
   expect(inRotation(bundled, [], { authors: ["seneca"], quotes: { seneca: [] } })).toEqual({
     quotes: bundled,
     ignoredSelection: false,
@@ -126,4 +129,79 @@ test("rotation keeps custom lines and falls back when a filter matches nothing",
     ignoredSelection: true,
     ignoredAuthors: false,
   });
+});
+
+test("a missing custom id drops only that id", () => {
+  const book = [
+    { id: "q01", author: "marcus" },
+    { id: "q02", author: "marcus" },
+    { id: "c02", author: "marcus" },
+    { id: "q03", author: "seneca" },
+    { id: "q04", author: "seneca" },
+  ];
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "c01"], seneca: ["q03"] } }, roster, book)).toEqual({
+    quotes: { marcus: ["q01", "c00"], seneca: ["q03"] },
+  });
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "c01", "c02"], seneca: ["q03"] } }, roster, book)).toEqual({
+    quotes: { marcus: ["q01", "c02"], seneca: ["q03"] },
+  });
+  expect(normalizeSettings({ interval: 12, quotes: { marcus: ["q99", "c01"] } }, roster, book)).toEqual({ interval: 12 });
+  expect(normalizeSettings({ quotes: { marcus: ["q01", "c01"], seneca: ["q03"] } }, roster, book, false)).toEqual({
+    quotes: { marcus: ["q01", "c01"], seneca: ["q03"] },
+  });
+  expect(compactSettings({ interval: 30, quotes: { marcus: ["q01", "c01"], seneca: ["q03"] } }, roster, book, false)).toEqual({
+    interval: 30,
+    quotes: { marcus: ["q01", "c01"], seneca: ["q03"] },
+  });
+  expect(applyQuoteFlags({ marcus: ["q01", "c01"], seneca: ["q03"] }, ["seneca=q04"], roster, book, false)).toEqual({
+    ok: true,
+    quotes: { marcus: ["q01", "c01"], seneca: ["q04"] },
+  });
+  const bundled = indexBundled([
+    { author: "marcus", citation: "A", text: "first" },
+    { author: "marcus", citation: "A", text: "second" },
+    { author: "seneca", citation: "B", text: "third" },
+  ]);
+  const settings = normalizeSettings({ quotes: { marcus: ["q02", "c01"] } }, roster, [
+    { id: "q01", author: "marcus" },
+    { id: "q02", author: "marcus" },
+    { id: "c02", author: "marcus" },
+    { id: "q03", author: "seneca" },
+  ]);
+  expect(inRotation(bundled, [{ ...bundled[0], id: "c02", citation: "Old", text: "stays off" }], settings).quotes.map((quote) => quote.text)).toEqual([
+    "second",
+    "third",
+  ]);
+  expect(applyQuoteFlags({ marcus: ["q01", "c01", "c00"] }, ["marcus=q02"], roster, book, false)).toEqual({
+    ok: true,
+    quotes: { marcus: ["q02", "c01", "c00"] },
+  });
+  expect(applyQuoteFlags({ marcus: ["q01", "c00"], seneca: ["q03"] }, ["marcus=none"], roster, book, false)).toEqual({
+    ok: true,
+    quotes: { marcus: ["c00"], seneca: ["q03"] },
+  });
+});
+
+test("cleared custom lines stay out when rotation falls back", () => {
+  const bundled = indexBundled([
+    { author: "marcus", citation: "A", text: "first" },
+    { author: "marcus", citation: "A", text: "second" },
+    { author: "seneca", citation: "B", text: "third" },
+  ]);
+  const cleared = [{ author: "marcus", citation: "Mine", text: "cleared", id: "c01" }];
+  const authorFallback = inRotation(bundled, cleared, { authors: ["marcus"], quotes: { marcus: ["c00"] } });
+  expect(authorFallback.ignoredAuthors).toBe(true);
+  expect(authorFallback.quotes.map((quote) => quote.text)).toEqual(["first", "second", "third"]);
+  const omitted = inRotation(bundled, cleared, { authors: ["marcus"], quotes: { marcus: ["c02"] } });
+  expect(omitted.ignoredAuthors).toBe(true);
+  expect(omitted.quotes.map((quote) => quote.text)).not.toContain("cleared");
+  const empty = inRotation(bundled, cleared, { quotes: { marcus: ["c00"], seneca: ["c00"] } });
+  expect(empty.ignoredSelection).toBe(true);
+  expect(empty.quotes.map((quote) => quote.text)).toEqual(["first", "second", "third"]);
+  const implicit = inRotation(bundled, [{ author: "marcus", citation: "Mine", text: "added", id: "c01" }], {
+    authors: ["zeno"],
+    quotes: { marcus: ["q02"] },
+  });
+  expect(implicit.ignoredAuthors).toBe(true);
+  expect(implicit.quotes.map((quote) => quote.text)).toContain("added");
 });

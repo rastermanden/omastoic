@@ -73,11 +73,12 @@ omastoic next                  # another quote, only if we still own the slot
 omastoic preview               # MUTATING: select Stoics and launch the saver
 omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
 omastoic status
-omastoic config                # Stoics, their quotes, and the interval (gum)
+omastoic config                # Stoics, their quotes, the interval, and a new quote (gum)
 omastoic config --authors marcus,seneca --interval 90
 omastoic config --authors all --interval 60
 omastoic config --quotes marcus=q01,q02
 omastoic config --quotes marcus=none --quotes seneca=all
+omastoic config --add          # author, citation, and text (gum)
 omastoic config --add $'marcus\tMeditations IX.1\tYour line.'
 omastoic config --list
 ```
@@ -114,7 +115,7 @@ means none of their bundled lines. Listing every id for a Stoic is stored as
 the default and the key is omitted. `omastoic config --quotes marcus=q01,q02`
 writes that list; `--quotes marcus=all` and `--quotes all` clear restrictions.
 With gum, `omastoic config` asks once per selected Stoic, all lines selected
-until you change them.
+until you change them. It then asks whether to add one of your own quotes.
 
 ```json
 {
@@ -123,16 +124,28 @@ until you change them.
 }
 ```
 
-Your own `quotes.tsv` in that directory adds entries to the bundled book, and
-those lines stay in rotation even when that Stoic's bundled ids are limited.
-Append them with `omastoic config --add` or by editing the file:
-**author slug, citation, text**, separated by tabs. Slugs contain letters,
-digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
+Your own `quotes.tsv` in that directory adds entries to the bundled book.
+Each quote is `c01`, `c02`, … in file order. `omastoic config --list` stars the
+ones in rotation, and the gum quote checkboxes show them checked while they
+stay in rotation. A bundled-only id list still keeps every custom line, so a
+new quote shows up without typing its id. Unchecking it in the checkbox then
+leaves it out (`c00` clears every custom line for that Stoic).
+The file lives only under `~/.config/omastoic/`, never in the plugin checkout,
+so `omarchy plugin update` cannot overwrite it or `config.json`. Uninstall
+leaves both in place; `omastoic uninstall --purge` removes them.
+
+`omastoic config --add` in a terminal asks for the author slug, the citation,
+and the text. Each field opens with an editable example: `marcus`,
+`Meditations IX.1`, and `Your line.`. `omastoic config` offers the same three
+questions. From a script, or when gum is missing, pass one tab-separated line,
+or edit the file: **author slug, citation, text**. Slugs contain lowercase
+letters, digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
 citations to 256 characters and quote text to 4096; terminal control escapes
 are rejected. An unknown author renders without a portrait. A quote selection
 that matches nothing is ignored. The selected Stoics' lines are used when an
 author list is set; otherwise the whole book is. An author list that still
-matches nothing uses the whole book.
+matches nothing uses the whole book. Custom lines left unchecked stay out of
+both.
 
 The shared canvas uses the smallest measured terminal/monitor grid. Portraits
 are hidden when either dimension cannot fit. Wrapping accounts for CJK,
