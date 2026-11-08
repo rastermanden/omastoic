@@ -1131,7 +1131,9 @@ async function main(): Promise<number> {
       console.log(`omastoic — the Stoics on your Omarchy screensaver
 
   omastoic toggle      hand the screensaver to the Stoics, or give it back
+  omastoic next        write another quote, only if the Stoics still own the slot
   omastoic preview     write a new canvas and start the screensaver now
+  omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
   omastoic config      choose Stoics, their quotes, and seconds, or add a quote
                        (--plain asks for numbers instead of keys)
   omastoic status      who has the screensaver, and what is in the quote book

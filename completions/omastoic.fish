@@ -1,7 +1,9 @@
 # fish completion for omastoic
 complete -c omastoic -f
 complete -c omastoic -n "__fish_use_subcommand" -a toggle -d "Hand the screensaver to the Stoics, or give it back"
+complete -c omastoic -n "__fish_use_subcommand" -a next -d "Write another quote, only if the Stoics still own the slot"
 complete -c omastoic -n "__fish_use_subcommand" -a preview -d "Write a new canvas and start the screensaver now"
+complete -c omastoic -n "__fish_use_subcommand" -a show -d "Print a canvas as text, without writing desktop or state files"
 complete -c omastoic -n "__fish_use_subcommand" -a config -d "Choose Stoics, their quotes, and seconds, or add a quote"
 complete -c omastoic -n "__fish_use_subcommand" -a status -d "Who has the screensaver, and what is in the quote book"
 complete -c omastoic -n "__fish_use_subcommand" -a uninstall -d "Take the service, menu row and plugin back out"
@@ -14,3 +16,5 @@ complete -c omastoic -n "__fish_seen_subcommand_from config" -l add -d "Add a qu
 complete -c omastoic -n "__fish_seen_subcommand_from config" -l list -d "List bundled and custom quote ids"
 complete -c omastoic -n "__fish_seen_subcommand_from config" -l plain -d "Ask for the Stoics and quotes as numbers instead of keys"
 complete -c omastoic -n "__fish_seen_subcommand_from uninstall" -l purge -d "Also drop quotes and settings"
+complete -c omastoic -n "__fish_seen_subcommand_from show" -l cols -x -d "Grid width in cells"
+complete -c omastoic -n "__fish_seen_subcommand_from show" -l rows -x -d "Grid height in cells"
