@@ -187,6 +187,58 @@ test("a resize to a shorter terminal repaints inside the new height", async () =
   expect(lines.length).toBeLessThanOrEqual(6);
 });
 
+test("an arrow split across reads stays inside the filter line", async () => {
+  const h = harness();
+  const picked = pickQuotesTui("Marcus Aurelius", many, [], h.io);
+  h.send("/");
+  h.send("2");
+  h.send("\x1b");
+  h.send("[B");
+  h.send("\r");
+  h.send("1");
+  h.send("\r");
+  // A fragmented down arrow must not leave the filter, clear it, or select all.
+  expect(await picked).toEqual(["q02"]);
+  expect(h.text()).toContain("filter: 2 (2 of 12)");
+});
+
+test("fragmented navigation in the filter line never changes the selection", async () => {
+  const h = harness();
+  const picked = pickQuotesTui("Marcus Aurelius", many, [], h.io);
+  h.send("/");
+  h.send("\x1b");
+  h.send("[A");
+  h.send("\x1b");
+  h.send("[B");
+  h.send("\r");
+  h.send(" ");
+  h.send("\r");
+  // Down must not move the focus while filtering: space still toggles the first quote.
+  expect(await picked).toEqual(["q01"]);
+});
+
+test("a lone escape cancels the filter line and keeps the typed filter out of the keys", async () => {
+  const cancelled = harness();
+  const picked = pickQuotesTui("Marcus Aurelius", many, [], cancelled.io);
+  cancelled.send("/2");
+  cancelled.send("\x1b");
+  cancelled.send("1\r");
+  // Escape clears the filter and leaves navigation mode: 1 toggles the first row.
+  expect(await picked).toEqual(["q01"]);
+
+  const typed = harness();
+  const kept = pickQuotesTui("Marcus Aurelius", rows, [], typed.io);
+  typed.send("/78");
+  typed.send("\x1b");
+  typed.send("[D");
+  typed.send(".16");
+  typed.send("\r");
+  typed.send("1");
+  typed.send("\r");
+  expect(await kept).toEqual(["q03"]);
+  expect(typed.text()).toContain("filter: 78.16 (1 of 3)");
+});
+
 test("paging shows the next page and digits map to that page", async () => {
   const h = harness({ columns: 80 });
   const picked = pickQuotesTui("Marcus Aurelius", many, [], h.io);
