@@ -18,6 +18,7 @@ import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes,
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
+import { pickAuthors } from "./author-picker.ts";
 import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
 import {
@@ -717,32 +718,9 @@ async function gumText(args: string[]): Promise<string | null> {
   return result.out;
 }
 
-async function pickAuthors(roster: Map<string, { name: string }>, selected: string[]): Promise<string[] | undefined> {
-  const byName = new Map([...roster].map(([slug, a]) => [a.name, slug]));
-  const args = [
-    "choose",
-    "--no-limit",
-    "--limit",
-    String(roster.size + 1),
-    "--header",
-    "Stoics on the screensaver  (x or tab to toggle, enter to confirm)",
-  ];
-  if (selected.length) {
-    for (const slug of selected) {
-      const name = roster.get(slug)?.name;
-      if (name) args.push("--selected", name);
-    }
-  } else {
-    args.push("--selected", "*");
-  }
-  args.push(...byName.keys());
-  const out = await gumText(args);
-  if (out == null) return undefined;
-  if (!out) return [];
-  return out.split("\n").flatMap((line) => {
-    const slug = byName.get(line.trim());
-    return slug ? [slug] : [];
-  });
+async function pickAuthorList(roster: Map<string, { name: string }>, selected: string[], plain: boolean): Promise<string[] | undefined> {
+  const rows = [...roster].map(([slug, author]) => ({ slug, name: author.name }));
+  return pickAuthors(rows, selected, { plain, input: process.stdin, output: process.stdout, signals: process });
 }
 
 async function pickInterval(current: number): Promise<number | undefined> {
@@ -961,9 +939,11 @@ async function configure(rest: string[]): Promise<number> {
   const quoteFlags = flagValues(rest, "quotes");
   const addFlags = flagValues(rest, "add");
   const list = rest.includes("--list");
+  // --plain only changes how the Stoics are chosen; the quote and interval prompts are unchanged.
+  const plain = rest.includes("--plain");
   const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && !list;
 
-  if (interactive && !process.stdin.isTTY) {
+  if (interactive && !process.stdin.isTTY && !plain) {
     printSettings(current, roster, catalog);
     console.log(`  omastoic config --authors marcus,seneca --interval 15`);
     console.log(`  omastoic config --quotes marcus=q01,q02`);
@@ -972,6 +952,7 @@ async function configure(rest: string[]): Promise<number> {
     console.log(`  omastoic config --add`);
     console.log(`  omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'`);
     console.log(`  omastoic config --list`);
+    console.log(`  omastoic config --plain`);
     return 0;
   }
 
@@ -987,7 +968,7 @@ async function configure(rest: string[]): Promise<number> {
       console.error("          omastoic config --list");
       return 1;
     }
-    const picked = await pickAuthors(roster, current.authors ?? []);
+    const picked = await pickAuthorList(roster, current.authors ?? [], plain);
     if (picked == null) return 0;
     next.authors = picked;
     const editing = picked.length ? picked : slugs;
@@ -1206,6 +1187,7 @@ async function main(): Promise<number> {
   omastoic toggle      hand the screensaver to the Stoics, or give it back
   omastoic preview     write a new canvas and start the screensaver now
   omastoic config      choose Stoics, their quotes, and seconds, or add a quote with gum
+                       (--plain asks for the Stoics as numbers instead of keys)
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 

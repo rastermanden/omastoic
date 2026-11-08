@@ -8,6 +8,22 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- `omastoic config` asks for the Stoics with a small built-in terminal
+  checklist instead of gum's multi-select: space or `x` toggles the focused row,
+  `1`–`6` toggle the roster in its listed order, arrows or `j`/`k` move, `a`
+  selects all, `n` none, Enter saves, and `q`, Esc or Ctrl-C cancels without
+  writing. The cursor, raw mode and the picker's own lines are restored on every
+  exit, including resize and signals. The quote checkboxes, the interval prompt
+  and the custom-quote prompts are unchanged, and so is an empty selection
+  (all six in rotation).
+- `omastoic config --plain` — or a terminal that cannot go raw, or output
+  redirected away from the terminal — asks for the Stoics as a numbered prompt:
+  `1 3`, `all`, `none`, an empty line for the current set, and end of input
+  cancels. Without `--plain`, a pipe still prints the current settings and the
+  flag examples instead of prompting.
+
 ### Added
 
 - Choose which bundled quotes from each Stoic stay in rotation. `config.json`
