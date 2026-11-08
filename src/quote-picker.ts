@@ -65,7 +65,7 @@ function decode(buffer: string): { key: Key; rest: string } | "more" {
   const rest = buffer.slice(1);
   if (first === "\r" || first === "\n") return { key: { kind: "confirm" }, rest };
   if (first === "\x03" || first === "\x04") return { key: { kind: "cancel" }, rest };
-  if (first === " ") return { key: { kind: "toggle" }, rest };
+  if (first === " " || first === "\t") return { key: { kind: "toggle" }, rest };
   if (first === "x" || first === "X") return { key: { kind: "toggle" }, rest };
   if (first === "j" || first === "J") return { key: { kind: "down" }, rest };
   if (first === "k" || first === "K") return { key: { kind: "up" }, rest };
@@ -77,7 +77,7 @@ function decode(buffer: string): { key: Key; rest: string } | "more" {
   return { key: { kind: "ignore" }, rest };
 }
 
-const HINTS = "space/x toggle · 1-9 · j/k · / filter · a all · n none · enter save · q cancel";
+const HINTS = "space/x/tab toggle, 1-9, j/k, / filter, a all, n none, enter save, q cancel";
 
 type FilterKey =
   | { kind: "text"; value: string }
