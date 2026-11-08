@@ -64,8 +64,9 @@ function harness(opts: { isTTY?: boolean; raw?: boolean; fail?: string; isRaw?: 
   const end = () => { ended = true; offer(); };
   const resize = () => events.emit("resize");
   const setColumns = (columns: number) => { output.columns = columns; };
+  const setRows = (rows: number) => { output.rows = rows; };
   return {
-    io: { input, output, signals }, modes, text, send, end, resize, events, writes, setColumns,
+    io: { input, output, signals }, modes, text, send, end, resize, events, writes, setColumns, setRows,
     reader: { released: () => returned, nextAfterReturn: () => nextAfterReturn },
   };
 }
@@ -141,6 +142,49 @@ test("the filter line narrows the list, numbers what is shown and applies on ent
   // The frame history holds the unfiltered first draw; the last frame is what is on screen.
   const lastFrame = frame.split("\x1b[J").at(-1)!;
   expect(lastFrame).not.toContain("Meditations II.5");
+});
+
+test("a short terminal fits the header, status, rows and hints inside its height", async () => {
+  for (const height of [1, 2, 3, 4, 5, 6, 7]) {
+    const h = harness({ rows: height });
+    const picked = pickQuotesTui("Marcus Aurelius", many, [], h.io);
+    h.send("\r");
+    expect(await picked).toEqual([]);
+    const frames = h.text().split("\x1b[J").slice(1, -1);
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      const lines = frame.replace(/\x1b\[\d*A/g, "").replace(/\r/g, "").split("\n");
+      // Every line printed must sit on a real row of this terminal.
+      expect(lines.length).toBeLessThanOrEqual(height);
+    }
+  }
+});
+
+test("a short terminal pages by the rows that actually fit", async () => {
+  const h = harness({ rows: 5 });
+  const picked = pickQuotesTui("Marcus Aurelius", many, [], h.io);
+  h.send("\x1b[6~");
+  h.send("1");
+  h.send("\r");
+  // Five rows leave two quote rows, so page two starts at q03.
+  expect(await picked).toEqual(["q03"]);
+  expect(h.text()).toContain("page 2/6");
+});
+
+test("a resize to a shorter terminal repaints inside the new height", async () => {
+  const h = harness({ rows: 24 });
+  const picked = pickQuotesTui("Marcus Aurelius", many, null, h.io);
+  h.setRows(6);
+  h.resize();
+  h.send("\r");
+  expect(await picked).toEqual(many.map((row) => row.id));
+  const frames = h.text().split("\x1b[J");
+  // frames[1] is the first draw, frames[2] the redraw after the shrink.
+  const moved = /\x1b\[(\d+)A\r$/.exec(frames[1]!);
+  expect(moved).not.toBeNull();
+  expect(Number(moved![1])).toBeLessThanOrEqual(5);
+  const lines = frames[2]!.replace(/\x1b\[\d*A/g, "").replace(/\r/g, "").split("\n");
+  expect(lines.length).toBeLessThanOrEqual(6);
 });
 
 test("paging shows the next page and digits map to that page", async () => {

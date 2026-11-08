@@ -110,10 +110,24 @@ export async function pickQuotesTui(
   let drawn = 0;
   let buffer = "";
 
-  const pageSize = (): number => {
+  /** The screen height, or null when the terminal does not report one. */
+  const terminalHeight = (): number | null => {
     const height = output.rows;
-    if (Number.isInteger(height) && (height ?? 0) > 6) return Math.min(MAX_PAGE, Math.max(3, (height as number) - 4));
-    return FALLBACK_PAGE;
+    return Number.isInteger(height) && (height ?? 0) > 0 ? (height as number) : null;
+  };
+  // Header, status and hints always share the screen with the quote rows, so a
+  // page is only as tall as what the terminal actually has left.
+  const pageSize = (): number => {
+    const height = terminalHeight();
+    if (height == null) return FALLBACK_PAGE;
+    return Math.min(MAX_PAGE, Math.max(1, height - 3));
+  };
+  /** Moving up more rows than the screen has would paint over its top edge. */
+  const upTo = (lines: number): string => {
+    const moves = lines > 0 ? lines - 1 : 0;
+    const height = terminalHeight();
+    const allowed = height == null ? moves : Math.min(moves, height - 1);
+    return allowed > 0 ? `\x1b[${allowed}A` : "";
   };
   const visible = (): QuoteRow[] => {
     const needle = filter.trim().toLowerCase();
@@ -146,17 +160,25 @@ export async function pickQuotesTui(
       lines.push(`${cursor} ${position} [${checked.has(row.id) ? "x" : " "}] ${quoteChoiceLabel(row)}`);
     });
     lines.push(HINTS);
+    const height = terminalHeight();
+    if (height != null && lines.length > height) {
+      // A screen too short for the hints drops them, then the status line; the
+      // rows that remain are the ones the page size already fitted.
+      lines.pop();
+      if (lines.length > height && lines[1] === paged) lines.splice(1, 1);
+      if (lines.length > height) lines.length = Math.max(1, height);
+    }
     return lines.map(clip);
   };
 
   const clearFrame = (): string => {
-    const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
+    const up = upTo(drawn);
     drawn = 0;
     return `${up}\r\x1b[J`;
   };
   const draw = (): void => {
     const lines = frameLines();
-    const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
+    const up = upTo(drawn);
     drawn = lines.length;
     output.write(`${up}\r\x1b[J${lines.join("\n")}`);
   };
@@ -171,7 +193,6 @@ export async function pickQuotesTui(
     output.on?.("resize", onResize);
     for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"] as const) signals?.on(signal, onSignal);
 
-    let buffer = "";
     for (;;) {
       if (!buffer) {
         const chunk = await source.next();
