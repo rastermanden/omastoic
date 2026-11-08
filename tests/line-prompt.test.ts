@@ -204,6 +204,57 @@ test("a piped confirm prompt reads one word and an empty line is no", async () =
   expect(await aborted).toBeUndefined();
 });
 
+test("left, right, home and end move the cursor, and typing inserts where it stands", async () => {
+  const middle = harness();
+  const asking = askLine({ header: "Citation", value: "Marcus" }, middle.io);
+  middle.send("\x1b[D\x1b[DX\r");
+  expect(await asking).toBe("MarcXus");
+
+  const start = harness();
+  const atStart = askLine({ header: "Citation", value: "marcus" }, start.io);
+  start.send("\x1b[HX\x1b[FY\r");
+  expect(await atStart).toBe("XmarcusY");
+
+  const right = harness();
+  const moved = askLine({ header: "Citation", value: "marcus" }, right.io);
+  right.send("\x1b[H\x1b[C\x1b[CZ\r");
+  expect(await moved).toBe("maZrcus");
+});
+
+test("backspace and delete remove the character beside the cursor", async () => {
+  const h = harness();
+  const asking = askLine({ header: "Citation", value: "marcus" }, h.io);
+  h.send("\x1b[H\x1b[3~\x1b[F\x7f\r");
+  // Home deletes the m, end backs over the s.
+  expect(await asking).toBe("arcu");
+
+  const empty = harness();
+  const nothing = askLine({ header: "Citation" }, empty.io);
+  empty.send("\x1b[D\x1b[3~\x7f\r");
+  expect(await nothing).toBe("");
+});
+
+test("a fragmented arrow moves the cursor before the next character is typed", async () => {
+  const h = harness();
+  const asking = askLine({ header: "Citation", value: "marcus" }, h.io);
+  h.send("\x1b");
+  h.send("[D");
+  h.send("X\r");
+  expect(await asking).toBe("marcuXs");
+});
+
+test("the whole line is redrawn around the cursor, so no stale text remains", async () => {
+  const h = harness();
+  const asking = askLine({ header: "Citation", value: "marcus" }, h.io);
+  h.send("\x1b[H");
+  h.send("\r");
+  expect(await asking).toBe("marcus");
+  // Home leaves the caret before the text, and the redraw moves it there.
+  expect(h.text()).toContain("\x1b[6D");
+  const drawn = h.text().split("\x1b[J").filter((frame) => frame.includes("Citation: ")).at(-1)!;
+  expect(drawn).toContain("Citation: marcus");
+});
+
 test("a signal cancels every prompt and restores the terminal", async () => {
   const line = harness();
   const asking = askLine({ header: "Author slug", value: "marcus" }, line.io);
