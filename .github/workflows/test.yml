@@ -34,7 +34,7 @@ jobs:
           bun test tests
       - name: Bash syntax
         run: |
-          for script in install.sh uninstall.sh bin/omastoic scripts/*.sh; do
+          for script in install.sh uninstall.sh bin/omastoic completions/omastoic.bash scripts/*.sh tests/fixtures/*.sh; do
             bash -n "$script"
           done
       - name: Validate with the real Omarchy CLI
