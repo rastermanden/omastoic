@@ -74,6 +74,7 @@ omastoic preview               # MUTATING: select Stoics and launch the saver
 omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
 omastoic status
 omastoic config                # Stoics, their quotes, the interval, and a new quote (gum)
+omastoic config --plain        # same, but the Stoics are a numbered prompt
 omastoic config --authors marcus,seneca --interval 90
 omastoic config --authors all --interval 60
 omastoic config --quotes marcus=q01,q02
@@ -116,6 +117,14 @@ the default and the key is omitted. `omastoic config --quotes marcus=q01,q02`
 writes that list; `--quotes marcus=all` and `--quotes all` clear restrictions.
 With gum, `omastoic config` asks once per selected Stoic, all lines selected
 until you change them. It then asks whether to add one of your own quotes.
+
+The Stoics themselves are a small built-in checklist, not a gum prompt: space or
+`x` toggles the focused row, `1`–`6` toggle the roster in its listed order,
+arrows or `j`/`k` move, `a` selects all, `n` none, Enter saves, and `q`, Esc or
+Ctrl-C cancels without writing. Unticking everything keeps all six in rotation,
+as leaving `authors` out does. `omastoic config --plain`, a non-raw terminal or a
+pipe uses a numbered prompt instead: enter `1 3`, `all`, `none`, or an empty
+line to keep the current set; end of input cancels.
 
 ```json
 {

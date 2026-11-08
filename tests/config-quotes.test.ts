@@ -4,14 +4,21 @@ import { join } from "node:path";
 import { root, sandbox } from "./sandbox.ts";
 
 const ptyScript = [
-  "import os, pty, select, sys",
+  "import binascii, os, pty, select, sys",
   "pid, fd = pty.fork()",
   "if pid == 0:",
   "    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
+  "marker = binascii.unhexlify(os.environ.get('PTY_MARKER', ''))",
+  "keys = binascii.unhexlify(os.environ.get('PTY_KEYS', ''))",
+  "sent = not keys",
   "buf = b''",
   "while True:",
-  "    ready, _, _ = select.select([fd], [], [], 3)",
+  "    ready, _, _ = select.select([fd], [], [], 5)",
   "    if not ready:",
+  "        if not sent:",
+  "            os.write(fd, keys)",
+  "            sent = True",
+  "            continue",
   "        os.kill(pid, 15)",
   "        sys.stderr.write('timed out waiting for config')",
   "        raise SystemExit(1)",
@@ -22,13 +29,25 @@ const ptyScript = [
   "    if not chunk:",
   "        break",
   "    buf += chunk",
+  "    if not sent and (not marker or marker in buf):",
+  "        os.write(fd, keys)",
+  "        sent = True",
   "_, status = os.waitpid(pid, 0)",
   "sys.stdout.buffer.write(buf)",
   "raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)",
 ].join("\n");
 
-function pty(s: ReturnType<typeof sandbox>, args: string[], extra: Record<string, string> = {}) {
-  return s.exec(["/usr/bin/python3", "-c", ptyScript, process.execPath, join(root, "src/cli.ts"), ...args], extra);
+/**
+ * Run the CLI on a real pty. The default answer to the author picker keeps only
+ * Marcus, which is what the gum stub used to answer before the picker existed.
+ */
+function pty(s: ReturnType<typeof sandbox>, args: string[], extra: Record<string, string> = {}, keys = "n1\r") {
+  const hex = (text: string) => Buffer.from(text, "utf8").toString("hex");
+  return s.exec(["/usr/bin/python3", "-c", ptyScript, process.execPath, join(root, "src/cli.ts"), ...args], {
+    ...extra,
+    PTY_KEYS: hex(keys),
+    PTY_MARKER: hex("space/x toggle"),
+  });
 }
 
 const gitEnv = {
