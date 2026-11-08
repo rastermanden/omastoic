@@ -45,8 +45,10 @@ export function rawTtyUsable(input: PickerInput, output: PickerOutput): boolean 
 
 type Chunk = { kind: "chunk"; value: string } | { kind: "eof" } | { kind: "timeout" };
 
-/** Buffers terminal reads so keys can be read one at a time, with a grace timer. */
-class ChunkSource {
+/** Buffers terminal reads so keys can be read one at a time, with a grace timer.
+ * The quote picker and the line prompts reuse it so every widget reads the one
+ * terminal the same way and hands it back the same way. */
+export class ChunkSource {
   private queue: string[] = [];
   private ended = false;
   private closed = false;
