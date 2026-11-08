@@ -28,7 +28,7 @@ export type PickerSignals = {
   off?(event: string, listener: () => void): unknown;
 };
 
-export type PickerIo = { input: PickerInput; output: PickerOutput; signals?: PickerSignals };
+export type PickerIo = { input: PickerInput; output: PickerOutput; signals?: PickerSignals; /** A reader shared by every prompt in one config run, so no byte of a pipe is dropped. */ source?: ChunkSource };
 export type PickOptions = PickerIo & { plain: boolean };
 
 const HIDE_CURSOR = "\x1b[?25l";
@@ -58,7 +58,7 @@ export class ChunkSource {
   private detach: (() => void) | null = null;
 
   constructor(input: AsyncIterable<unknown>) {
-    // process.stdin is shared with the gum prompts that follow, so it is read
+    // process.stdin is shared with the prompts that follow, so it is read
     // through add/removeListener rather than an async iterator: an iterator's
     // return() would destroy the stream. The listener is removed on close and
     // the fd is left open.
@@ -111,9 +111,16 @@ export class ChunkSource {
     this.notify();
   }
 
+  /** Give bytes back, so the next prompt in the same run reads what this one did not use. */
+  unshift(chunk: string): void {
+    if (!chunk || this.closed) return;
+    this.queue.unshift(chunk);
+    this.notify();
+  }
+
   /**
    * Hand the terminal back. The pending read is released but the stream itself
-   * is left open, so the gum prompts that follow this picker read every key.
+   * is left open, so the prompts that follow this picker read every key.
    */
   close(): void {
     if (this.closed) return;
@@ -232,10 +239,12 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
   // No saved author list means all six, which is what the old chooser showed.
   if (!checked.size) for (const row of rows) checked.add(row.slug);
 
-  const source = new ChunkSource(input);
+  const source = io.source ?? new ChunkSource(input);
+  const ownsSource = io.source == null;
   const wasRaw = input.isRaw === true;
   let focus = 0;
   let drawn = 0;
+  let buffer = "";
 
   const clearFrame = (): string => {
     const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
@@ -259,7 +268,6 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
     output.on?.("resize", onResize);
     for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"] as const) signals?.on(signal, onSignal);
 
-    let buffer = "";
     for (;;) {
       if (!buffer) {
         const chunk = await source.next();
@@ -294,7 +302,8 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
       if (rows.length) draw();
     }
   } finally {
-    source.close();
+    if (ownsSource) source.close();
+    else source.unshift(buffer);
     try { output.write(`${clearFrame()}${SHOW_CURSOR}`); } catch { /* the tty is already gone */ }
     if (!wasRaw) {
       try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }
@@ -317,7 +326,8 @@ export async function pickAuthorsPlain(rows: AuthorRow[], selected: string[], io
   if (!checked.size) for (const row of rows) checked.add(row.slug);
   const ordered = () => rows.filter((row) => checked.has(row.slug)).map((row) => row.slug);
 
-  const source = new ChunkSource(input);
+  const source = io.source ?? new ChunkSource(input);
+  const ownsSource = io.source == null;
   let pending = "";
   const readLine = async (): Promise<string | null> => {
     for (;;) {
@@ -371,8 +381,9 @@ export async function pickAuthorsPlain(rows: AuthorRow[], selected: string[], io
       return rows.filter((row) => pick.includes(row.slug)).map((row) => row.slug);
     }
   } finally {
-    // The quote prompts that follow read the same terminal.
-    source.close();
+    // The prompts that follow read the same terminal.
+    if (ownsSource) source.close();
+    else source.unshift(pending);
   }
 }
 /** `--plain`, or a tty that cannot go raw, gets the numbered prompt. */

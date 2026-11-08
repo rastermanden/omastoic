@@ -32,8 +32,9 @@ function clip(text: string, columns: number | undefined): string {
  * reader — is released by `done()`, which every exit path calls.
  */
 function startFrame(io: PickerIo, redraw: () => void): Frame {
-  const { input, output, signals } = io;
-  const source = new ChunkSource(input);
+  const { input, output, signals, source: shared } = io;
+  const source = shared ?? new ChunkSource(input);
+  const ownsSource = shared == null;
   const wasRaw = input.isRaw === true;
   const onResize = () => redraw();
   const onSignal = () => source.inject("\x03");
@@ -53,7 +54,7 @@ function startFrame(io: PickerIo, redraw: () => void): Frame {
       output.write(`${up}\r\x1b[J${lines.join("\n")}`);
     },
     done() {
-      source.close();
+      if (ownsSource) source.close();
       try {
         const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
         output.write(`${up}\r\x1b[J${SHOW_CURSOR}`);
@@ -77,6 +78,8 @@ function lineReader(source: ChunkSource): { line(): Promise<string | null>; rest
         if (newline >= 0) {
           const line = pending.slice(0, newline);
           pending = pending.slice(newline + 1);
+          // Whatever followed the answer belongs to the next prompt in the run.
+          if (pending) { source.unshift(pending); pending = ""; }
           return line.replace(/\r$/, "");
         }
         const chunk = await source.next();
@@ -131,12 +134,13 @@ async function escapeIsSequence(source: ChunkSource, buffer: { value: string }):
 export async function askLine(prompt: LinePrompt, io: PickerIo): Promise<string | undefined> {
   const { input, output } = io;
   if (!rawTtyUsable(input, output)) {
-    const source = new ChunkSource(input);
+    const source = io.source ?? new ChunkSource(input);
+    const ownsSource = io.source == null;
     try {
       output.write(`${prompt.header}: `);
       return (await lineReader(source).line()) ?? undefined;
     } finally {
-      source.close();
+      if (ownsSource) source.close();
     }
   }
 
@@ -163,6 +167,7 @@ export async function askLine(prompt: LinePrompt, io: PickerIo): Promise<string 
       redraw();
     }
   } finally {
+    io.source?.unshift(buffer.value);
     frame.done();
   }
 }
@@ -171,12 +176,13 @@ export async function askLine(prompt: LinePrompt, io: PickerIo): Promise<string 
 export async function askText(prompt: LinePrompt, io: PickerIo): Promise<string | undefined> {
   const { input, output } = io;
   if (!rawTtyUsable(input, output)) {
-    const source = new ChunkSource(input);
+    const source = io.source ?? new ChunkSource(input);
+    const ownsSource = io.source == null;
     try {
       output.write(`${prompt.header}: `);
       return (await lineReader(source).rest()) ?? undefined;
     } finally {
-      source.close();
+      if (ownsSource) source.close();
     }
   }
 
@@ -203,6 +209,8 @@ export async function askText(prompt: LinePrompt, io: PickerIo): Promise<string 
       }
       if (char === "\r" || char === "\n") {
         if ([...text].length < limit) text += "\n";
+      } else if (char === "\x15") {
+        text = "";
       } else if (char === "\x7f" || char === "\x08") {
         text = [...text].slice(0, -1).join("");
       } else if (char >= " " && [...text].length < limit) {
@@ -211,6 +219,7 @@ export async function askText(prompt: LinePrompt, io: PickerIo): Promise<string 
       redraw();
     }
   } finally {
+    io.source?.unshift(buffer.value);
     frame.done();
   }
 }
@@ -220,14 +229,15 @@ export async function askConfirm(prompt: string, io: PickerIo): Promise<boolean 
   const { input, output } = io;
   const line = `${prompt} [y/N] `;
   if (!rawTtyUsable(input, output)) {
-    const source = new ChunkSource(input);
+    const source = io.source ?? new ChunkSource(input);
+    const ownsSource = io.source == null;
     try {
       output.write(line);
       const answer = (await lineReader(source).line())?.trim().toLowerCase();
       if (answer == null) return undefined;
       return answer === "y" || answer === "yes";
     } finally {
-      source.close();
+      if (ownsSource) source.close();
     }
   }
 
@@ -248,6 +258,7 @@ export async function askConfirm(prompt: string, io: PickerIo): Promise<boolean 
       }
     }
   } finally {
+    io.source?.unshift(buffer.value);
     frame.done();
   }
 }

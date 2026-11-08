@@ -96,10 +96,11 @@ export async function pickQuotesTui(
 ): Promise<string[] | undefined> {
   const { input, output, signals } = io;
   const known = new Set(rows.map((row) => row.id));
-  // No saved list means every quote, which is what the gum chooser showed.
+  // No saved list means every quote, which is what the chooser showed before.
   const checked = new Set(selected == null ? rows.map((row) => row.id) : selected.filter((id) => known.has(id)));
 
-  const source = new ChunkSource(input);
+  const source = io.source ?? new ChunkSource(input);
+  const ownsSource = io.source == null;
   const wasRaw = input.isRaw === true;
   const header = headerFor(name);
   let filter = "";
@@ -107,6 +108,7 @@ export async function pickQuotesTui(
   let focus = 0;
   let page = 0;
   let drawn = 0;
+  let buffer = "";
 
   const pageSize = (): number => {
     const height = output.rows;
@@ -243,7 +245,8 @@ export async function pickQuotesTui(
       draw();
     }
   } finally {
-    source.close();
+    if (ownsSource) source.close();
+    else source.unshift(buffer);
     try { output.write(`${clearFrame()}${SHOW_CURSOR}`); } catch { /* the tty is already gone */ }
     if (!wasRaw) {
       try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }
@@ -271,7 +274,8 @@ export async function pickQuotesPlain(
   const checked = new Set(selected == null ? rows.map((row) => row.id) : selected.filter((id) => known.has(id)));
   const ordered = () => rows.filter((row) => checked.has(row.id)).map((row) => row.id);
 
-  const source = new ChunkSource(input);
+  const source = io.source ?? new ChunkSource(input);
+  const ownsSource = io.source == null;
   let pending = "";
   const readLine = async (): Promise<string | null> => {
     for (;;) {
@@ -326,7 +330,8 @@ export async function pickQuotesPlain(
     }
   } finally {
     // The prompts that follow read the same terminal.
-    source.close();
+    if (ownsSource) source.close();
+    else source.unshift(pending);
   }
 }
 
