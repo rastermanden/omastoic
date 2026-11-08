@@ -141,6 +141,11 @@ test("the text prompt backs over a line break, cancels on ctrl-c, and is capped"
   const capped = askText({ header: "Quote text", charLimit: 5 }, limited.io);
   limited.send("abcdefg\x04");
   expect(await capped).toBe("abcde");
+
+  const cleared = harness();
+  const wiped = askText({ header: "Quote text", value: "Your line." }, cleared.io);
+  cleared.send("\x15A fresh line.\x04");
+  expect(await wiped).toBe("A fresh line.");
 });
 
 test("a piped text prompt reads to end of input", async () => {

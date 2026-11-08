@@ -10,34 +10,44 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- `omastoic config` asks for the Stoics with a small built-in terminal
-  checklist instead of gum's multi-select: space or `x` toggles the focused row,
-  `1`–`6` toggle the roster in its listed order, arrows or `j`/`k` move, `a`
-  selects all, `n` none, Enter saves, and `q`, Esc or Ctrl-C cancels without
-  writing. The cursor, raw mode and the picker's own lines are restored on every
-  exit, including resize and signals. The quote checkboxes, the interval prompt
-  and the custom-quote prompts are unchanged, and so is an empty selection
-  (all six in rotation).
+- `omastoic config` asks for a Stoic's quotes with a built-in terminal
+  checklist instead of gum's multi-select: space or `x` toggles the focused
+  line, `1`–`9` toggle the row with that number on screen, arrows or `j`/`k`
+  move, `/` types a filter that Enter applies, `a` selects every shown line,
+  `n` none, PgUp/PgDn or ←/→ turn pages, Enter saves, and `q`, Esc, Ctrl-C or
+  Ctrl-D cancels without writing. The quote id is the key, so a choice survives
+  filtering, paging and a redraw.
+- The interval, author, citation, quote-text and `Add a custom quote?` prompts
+  are built in as well: single editable lines, a Ctrl-D multi-line block, and a
+  `[y/N]` question. `gum` is no longer used, checked for, or required.
 - `omastoic config --plain` — or a terminal that cannot go raw, or output
-  redirected away from the terminal — asks for the Stoics as a numbered prompt:
-  `1 3`, `all`, `none`, an empty line for the current set, and end of input
-  cancels. Without `--plain`, a pipe still prints the current settings and the
-  flag examples instead of prompting.
+  redirected away from the terminal — asks for the Stoics and their quotes as
+  numbered prompts: numbers, ids, `all`, `none`, an empty line for the current
+  set, and end of input cancels. Without `--plain`, a pipe still prints the
+  current settings and the flag examples instead of prompting.
+- Every prompt shares one reader, so a script can answer the whole run in one
+  pipe without losing a line between screens.
 
 ### Added
 
+- `omastoic config` asks for the Stoics with a small built-in terminal
+  checklist: space or `x` toggles the focused row, `1`–`6` toggle the roster in
+  its listed order, arrows or `j`/`k` move, `a` selects all, `n` none, Enter
+  saves, and `q`, Esc or Ctrl-C cancels without writing. The cursor, raw mode
+  and the picker's own lines are restored on every exit, including resize and
+  signals. An empty selection still means all six in rotation.
 - Choose which bundled quotes from each Stoic stay in rotation. `config.json`
   takes a per-author `quotes` id list (`q01`, …); `omastoic config --quotes`,
-  the gum picker, and `omastoic config --list` edit and show it. Omitting a
+  the quote checklist, and `omastoic config --list` edit and show it. Omitting a
   Stoic keeps every bundled line of theirs.
-- Custom quotes are `c01`, `c02`, … in `omastoic config --list` and in the gum
-  checkboxes. A bundled-only allow-list still keeps them in rotation, so a new
+- Custom quotes are `c01`, `c02`, … in `omastoic config --list` and in the quote
+  checklist. A bundled-only allow-list still keeps them in rotation, so a new
   quote shows up without typing an id.
 - `omastoic config --add` appends a quote to `~/.config/omastoic/quotes.tsv`.
-  With gum it asks for the author slug, citation, and text; `omastoic config`
-  offers the same questions. A tab-separated line still works for scripts.
-  Custom lines stay in rotation with a bundled selection until they are
-  unchecked. Plugin update does not touch that file or `config.json`.
+  In a terminal it asks for the author slug, citation, and text; `omastoic
+  config` offers the same questions. A tab-separated line still works for
+  scripts. Custom lines stay in rotation with a bundled selection until they
+  are unchecked. Plugin update does not touch that file or `config.json`.
 - Fifteen further bundled quotes (79 in total) from the same public-domain
   editions: Marcus *Meditations* VII.71, VII.34, VII.15, VII.8, V.2, IV.37 and
   VI.54; Seneca *Letters* 5.5, 5.9, 24.19 and 28.1; Epictetus *Enchiridion* 6,

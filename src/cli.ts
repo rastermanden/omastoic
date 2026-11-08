@@ -18,7 +18,9 @@ import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes,
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
-import { pickAuthors } from "./author-picker.ts";
+import { ChunkSource, pickAuthors } from "./author-picker.ts";
+import { pickQuotes, type QuoteRow } from "./quote-picker.ts";
+import { askConfirm, askLine, askText } from "./line-prompt.ts";
 import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
 import {
@@ -705,36 +707,22 @@ function flagValues(rest: string[], name: string): string[] {
   return out;
 }
 
-async function gumRun(args: string[]): Promise<{ out: string; code: number } | null> {
-  if (!Bun.which("gum")) return null;
-  const proc = Bun.spawn(["gum", ...args], { stdin: "inherit", stdout: "pipe", stderr: "inherit" });
-  const out = (await new Response(proc.stdout).text()).trim();
-  return { out, code: await proc.exited };
-}
-
-async function gumText(args: string[]): Promise<string | null> {
-  const result = await gumRun(args);
-  if (result == null || result.code !== 0) return null;
-  return result.out;
-}
-
-async function pickAuthorList(roster: Map<string, { name: string }>, selected: string[], plain: boolean): Promise<string[] | undefined> {
+async function pickAuthorList(roster: Map<string, { name: string }>, selected: string[], io: ConfigIo): Promise<string[] | undefined> {
   const rows = [...roster].map(([slug, author]) => ({ slug, name: author.name }));
-  return pickAuthors(rows, selected, { plain, input: process.stdin, output: process.stdout, signals: process });
+  return pickAuthors(rows, selected, { ...io, plain: io.plain });
 }
 
-async function pickInterval(current: number): Promise<number | undefined> {
-  const out = await gumText([
-    "input",
-    "--header",
-    "Seconds between quotes while the screensaver is up",
-    "--placeholder",
-    String(DEFAULT_INTERVAL),
-    "--value",
-    String(current),
-  ]);
-  if (out == null) return undefined;
-  const n = parseInterval(out);
+/** Everything `config` asks shares one reader, so a piped answer is never dropped. */
+type ConfigIo = { input: typeof process.stdin; output: typeof process.stdout; signals: typeof process; plain: boolean; source: ChunkSource };
+
+async function pickInterval(current: number, io: ConfigIo): Promise<number | undefined> {
+  const header = "Seconds between quotes while the screensaver is up";
+  const answer = await askLine(
+    { header, value: String(current), charLimit: 8 },
+    io,
+  );
+  if (answer == null) return undefined;
+  const n = parseInterval(answer.trim());
   if (n == null) {
     console.error(`omastoic: interval must be a whole number of seconds from 1 to 3600`);
     return undefined;
@@ -742,41 +730,22 @@ async function pickInterval(current: number): Promise<number | undefined> {
   return n;
 }
 
-/** Gum splits every `--selected` value on commas, so a chooser label cannot contain one. */
-function quoteLabel(quote: BundledQuote): string {
-  const clip = (value: string) => value.replaceAll(", ", " ").replaceAll(",", " ").trim();
-  const text = quote.text.length > 48 ? `${quote.text.slice(0, 47)}…` : quote.text;
-  return `${quote.id}  ${clip(quote.citation)}  ${clip(text)}`;
+/** A bundled or custom quote as the quote picker shows it: the id is the key. */
+function quoteRows(choices: BundledQuote[]): QuoteRow[] {
+  return choices.map((quote) => ({ id: quote.id, citation: quote.citation, text: quote.text }));
 }
 
-async function pickQuotes(name: string, choices: BundledQuote[], selected: string[] | null): Promise<string[] | undefined> {
-  const byLabel = new Map(choices.map((quote) => [quoteLabel(quote), quote.id]));
-  const args = [
-    "choose",
-    "--no-limit",
-    "--limit",
-    String(choices.length + 1),
-    "--header",
-    `Quotes from ${name}  (x or tab to toggle, enter to confirm)`,
-  ];
-  const chosen = selected ?? choices.map((quote) => quote.id);
-  if (chosen.length === choices.length) args.push("--selected", "*");
-  else for (const quote of choices) if (chosen.includes(quote.id)) args.push("--selected", quoteLabel(quote));
-  args.push(...byLabel.keys());
-  const out = await gumText(args);
-  if (out == null) return undefined;
-  if (!out) return [];
-  return out.split("\n").flatMap((line) => {
-    const id = byLabel.get(line.trim());
-    return id ? [id] : [];
-  });
+async function pickQuoteList(name: string, choices: BundledQuote[], selected: string[] | null, io: ConfigIo): Promise<string[] | undefined> {
+  return pickQuotes(name, quoteRows(choices), selected, io);
 }
+
+/** The quote picker is the id-keyed checklist; the labels live in quote-picker.ts. */
 
 const QUOTE_HEADER = "# author-slug <TAB> citation <TAB> text\n";
 
 type PromptedQuote = { kind: "quote"; quote: Quote } | { kind: "cancel" } | { kind: "invalid" };
 
-/** Collapse tabs and newlines so a gum answer stays one quotes.tsv row. */
+/** Collapse tabs and newlines so an answer stays one quotes.tsv row. */
 function flatField(value: string): string {
   return value.replace(/[\t\r\n]+/g, " ").replace(/ {2,}/g, " ").trim();
 }
@@ -791,38 +760,12 @@ function addUsage(): void {
   console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
 }
 
-async function promptCustomQuote(): Promise<PromptedQuote> {
-  const author = await gumText([
-    "input",
-    "--header",
-    "Author slug",
-    "--value",
-    "marcus",
-    "--char-limit",
-    "64",
-  ]);
+async function promptCustomQuote(io: ConfigIo): Promise<PromptedQuote> {
+  const author = await askLine({ header: "Author slug", value: "marcus", charLimit: 64 }, io);
   if (author == null) return { kind: "cancel" };
-  const citation = await gumText([
-    "input",
-    "--header",
-    "Citation",
-    "--value",
-    "Meditations IX.1",
-    "--char-limit",
-    "256",
-  ]);
+  const citation = await askLine({ header: "Citation", value: "Meditations IX.1", charLimit: 256 }, io);
   if (citation == null) return { kind: "cancel" };
-  const text = await gumText([
-    "write",
-    "--header",
-    "Quote text",
-    "--value",
-    "Your line.",
-    "--char-limit",
-    "4096",
-    "--height",
-    "6",
-  ]);
+  const text = await askText({ header: "Quote text (ctrl-d to finish)", value: "Your line.", charLimit: 4096 }, io);
   if (text == null) return { kind: "cancel" };
   try {
     const rows = parseQuotes(`${flatField(author)}\t${flatField(citation)}\t${flatField(text)}\n`);
@@ -837,11 +780,11 @@ async function promptCustomQuote(): Promise<PromptedQuote> {
   }
 }
 
-async function offerCustomQuote(): Promise<PromptedQuote | { kind: "skip" } | { kind: "abort" }> {
-  const answer = await gumRun(["confirm", "Add a custom quote?"]);
-  if (answer == null || (answer.code !== 0 && answer.code !== 1)) return { kind: "abort" };
-  if (answer.code === 1) return { kind: "skip" };
-  return promptCustomQuote();
+async function offerCustomQuote(io: ConfigIo): Promise<PromptedQuote | { kind: "skip" } | { kind: "abort" }> {
+  const answer = await askConfirm("Add a custom quote?", io);
+  if (answer == null) return { kind: "abort" };
+  if (!answer) return { kind: "skip" };
+  return promptCustomQuote(io);
 }
 
 async function appendQuotes(lines: string[]): Promise<number> {
@@ -939,7 +882,8 @@ async function configure(rest: string[]): Promise<number> {
   const quoteFlags = flagValues(rest, "quotes");
   const addFlags = flagValues(rest, "add");
   const list = rest.includes("--list");
-  // --plain only changes how the Stoics are chosen; the quote and interval prompts are unchanged.
+  // --plain asks for numbers instead of keys for the Stoics and their quotes; the
+  // interval and custom-quote prompts read a line either way.
   const plain = rest.includes("--plain");
   const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && !list;
 
@@ -961,42 +905,40 @@ async function configure(rest: string[]): Promise<number> {
   let quoteFailure: number | null = null;
 
   if (interactive) {
-    if (!Bun.which("gum")) {
-      console.error("omastoic: gum is missing — set authors, quotes and seconds from the command line:");
-      console.error("          omastoic config --authors marcus --quotes marcus=q01,q02 --interval 15");
-      console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
-      console.error("          omastoic config --list");
-      return 1;
-    }
-    const picked = await pickAuthorList(roster, current.authors ?? [], plain);
-    if (picked == null) return 0;
-    next.authors = picked;
-    const editing = picked.length ? picked : slugs;
-    next.quotes = { ...(current.quotes ?? {}) };
-    for (const slug of editing) {
-      const choices = [...bundled.filter((quote) => quote.author === slug), ...customBook.quotes.filter((quote) => quote.author === slug)];
-      if (!choices.length) continue;
-      const selected = current.quotes && Object.hasOwn(current.quotes, slug)
-        ? choices.filter((quote) => quoteKept(quote.id, current.quotes?.[slug])).map((quote) => quote.id)
-        : null;
-      const ids = await pickQuotes(roster.get(slug)?.name ?? slug, choices, selected);
-      if (ids == null) return 0;
-      const picked = ids.filter((id) => id !== "c00");
-      if (choices.some((quote) => quote.id.startsWith("c")) && !picked.some((id) => id.startsWith("c"))) picked.push("c00");
-      if (!customBook.readable) {
-        for (const id of current.quotes?.[slug] ?? []) {
-          if (id.startsWith("c") && !picked.includes(id)) picked.push(id);
+    const io: ConfigIo = { input: process.stdin, output: process.stdout, signals: process, plain, source: new ChunkSource(process.stdin) };
+    try {
+      const picked = await pickAuthorList(roster, current.authors ?? [], io);
+      if (picked == null) return 0;
+      next.authors = picked;
+      const editing = picked.length ? picked : slugs;
+      next.quotes = { ...(current.quotes ?? {}) };
+      for (const slug of editing) {
+        const choices = [...bundled.filter((quote) => quote.author === slug), ...customBook.quotes.filter((quote) => quote.author === slug)];
+        if (!choices.length) continue;
+        const selected = current.quotes && Object.hasOwn(current.quotes, slug)
+          ? choices.filter((quote) => quoteKept(quote.id, current.quotes?.[slug])).map((quote) => quote.id)
+          : null;
+        const ids = await pickQuoteList(roster.get(slug)?.name ?? slug, choices, selected, io);
+        if (ids == null) return 0;
+        const picked = ids.filter((id) => id !== "c00");
+        if (choices.some((quote) => quote.id.startsWith("c")) && !picked.some((id) => id.startsWith("c"))) picked.push("c00");
+        if (!customBook.readable) {
+          for (const id of current.quotes?.[slug] ?? []) {
+            if (id.startsWith("c") && !picked.includes(id)) picked.push(id);
+          }
         }
+        next.quotes[slug] = picked;
       }
-      next.quotes[slug] = picked;
+      const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL, io);
+      if (seconds == null) return 0;
+      next.interval = seconds;
+      const offered = await offerCustomQuote(io);
+      if (offered.kind === "abort") return 0;
+      if (offered.kind === "invalid") quoteFailure = 1;
+      else if (offered.kind === "quote") quoteLines = [quoteRow(offered.quote)];
+    } finally {
+      io.source.close();
     }
-    const seconds = await pickInterval(current.interval ?? DEFAULT_INTERVAL);
-    if (seconds == null) return 0;
-    next.interval = seconds;
-    const offered = await offerCustomQuote();
-    if (offered.kind === "abort") return 0;
-    if (offered.kind === "invalid") quoteFailure = 1;
-    else if (offered.kind === "quote") quoteLines = [quoteRow(offered.quote)];
   } else {
     if (authorsFlag != null) {
       const parsed = parseAuthorList(authorsFlag, slugs);
@@ -1028,12 +970,7 @@ async function configure(rest: string[]): Promise<number> {
           addUsage();
           return 1;
         }
-        if (!Bun.which("gum")) {
-          console.error("omastoic: gum is missing — pass one tab-separated line:");
-          console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
-          return 1;
-        }
-        const prompted = await promptCustomQuote();
+        const prompted = await promptCustomQuote({ input: process.stdin, output: process.stdout, signals: process, plain, source: new ChunkSource(process.stdin) });
         if (prompted.kind === "invalid") quoteFailure = 1;
         else if (prompted.kind === "quote") quoteLines = [quoteRow(prompted.quote)];
       } else {
@@ -1186,8 +1123,8 @@ async function main(): Promise<number> {
 
   omastoic toggle      hand the screensaver to the Stoics, or give it back
   omastoic preview     write a new canvas and start the screensaver now
-  omastoic config      choose Stoics, their quotes, and seconds, or add a quote with gum
-                       (--plain asks for the Stoics as numbers instead of keys)
+  omastoic config      choose Stoics, their quotes, and seconds, or add a quote
+                       (--plain asks for numbers instead of keys)
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 

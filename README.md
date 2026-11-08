@@ -73,13 +73,13 @@ omastoic next                  # another quote, only if we still own the slot
 omastoic preview               # MUTATING: select Stoics and launch the saver
 omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
 omastoic status
-omastoic config                # Stoics, their quotes, the interval, and a new quote (gum)
-omastoic config --plain        # same, but the Stoics are a numbered prompt
+omastoic config                # Stoics, their quotes, the interval, and a new quote
+omastoic config --plain        # same, but the pickers are numbered prompts
 omastoic config --authors marcus,seneca --interval 90
 omastoic config --authors all --interval 60
 omastoic config --quotes marcus=q01,q02
 omastoic config --quotes marcus=none --quotes seneca=all
-omastoic config --add          # author, citation, and text (gum)
+omastoic config --add          # author, citation, and text
 omastoic config --add $'marcus\tMeditations IX.1\tYour line.'
 omastoic config --list
 ```
@@ -115,16 +115,20 @@ them). A missing Stoic means every bundled line of theirs. `[]`
 means none of their bundled lines. Listing every id for a Stoic is stored as
 the default and the key is omitted. `omastoic config --quotes marcus=q01,q02`
 writes that list; `--quotes marcus=all` and `--quotes all` clear restrictions.
-With gum, `omastoic config` asks once per selected Stoic, all lines selected
-until you change them. It then asks whether to add one of your own quotes.
+With `omastoic config`, each selected Stoic gets one quote checklist, every line
+ticked until you change it, and then it asks whether to add one of your own
+quotes. Nothing outside omastoic is required.
 
-The Stoics themselves are a small built-in checklist, not a gum prompt: space or
-`x` toggles the focused row, `1`–`6` toggle the roster in its listed order,
-arrows or `j`/`k` move, `a` selects all, `n` none, Enter saves, and `q`, Esc or
-Ctrl-C cancels without writing. Unticking everything keeps all six in rotation,
-as leaving `authors` out does. `omastoic config --plain`, a non-raw terminal or a
-pipe uses a numbered prompt instead: enter `1 3`, `all`, `none`, or an empty
-line to keep the current set; end of input cancels.
+The Stoics and their quotes are small built-in checklists, not a gum prompt:
+space or `x` toggles the focused row, `1`–`6` (Stoics) or `1`–`9` (the quotes on
+screen) toggle that numbered row, arrows or `j`/`k` move, `/` types a filter over
+the quote id, citation and text that Enter applies, `a` selects every shown row,
+`n` none, Enter saves, and `q`, Esc or Ctrl-C cancels without writing. The quote
+list pages with PgUp/PgDn or ←/→ and shows the page in its status line.
+Unticking every Stoic keeps all six in rotation, as leaving `authors` out does.
+`omastoic config --plain`, a non-raw terminal or a pipe uses numbered prompts
+instead: enter `1 3`, ids, `all`, `none`, or an empty line to keep the current
+set; end of input cancels.
 
 ```json
 {
@@ -135,7 +139,7 @@ line to keep the current set; end of input cancels.
 
 Your own `quotes.tsv` in that directory adds entries to the bundled book.
 Each quote is `c01`, `c02`, … in file order. `omastoic config --list` stars the
-ones in rotation, and the gum quote checkboxes show them checked while they
+ones in rotation, and the quote checklist shows them checked while they
 stay in rotation. A bundled-only id list still keeps every custom line, so a
 new quote shows up without typing its id. Unchecking it in the checkbox then
 leaves it out (`c00` clears every custom line for that Stoic).
@@ -144,10 +148,12 @@ so `omarchy plugin update` cannot overwrite it or `config.json`. Uninstall
 leaves both in place; `omastoic uninstall --purge` removes them.
 
 `omastoic config --add` in a terminal asks for the author slug, the citation,
-and the text. Each field opens with an editable example: `marcus`,
-`Meditations IX.1`, and `Your line.`. `omastoic config` offers the same three
-questions. From a script, or when gum is missing, pass one tab-separated line,
-or edit the file: **author slug, citation, text**. Slugs contain lowercase
+and the text. The first two are single lines, prefilled with an editable example
+(`marcus`, `Meditations IX.1`); Ctrl-U clears a line, Enter accepts it. The text
+is a block: Enter starts a new line and Ctrl-D finishes it. `omastoic config`
+offers the same three questions after the pickers. From a script, or with stdin
+redirected, pass one tab-separated line, or edit the file: **author slug,
+citation, text**. Slugs contain lowercase
 letters, digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
 citations to 256 characters and quote text to 4096; terminal control escapes
 are rejected. An unknown author renders without a portrait. A quote selection

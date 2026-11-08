@@ -3,51 +3,12 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, write
 import { join } from "node:path";
 import { root, sandbox } from "./sandbox.ts";
 
-const ptyScript = [
-  "import binascii, os, pty, select, sys",
-  "pid, fd = pty.fork()",
-  "if pid == 0:",
-  "    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
-  "marker = binascii.unhexlify(os.environ.get('PTY_MARKER', ''))",
-  "keys = binascii.unhexlify(os.environ.get('PTY_KEYS', ''))",
-  "sent = not keys",
-  "buf = b''",
-  "while True:",
-  "    ready, _, _ = select.select([fd], [], [], 5)",
-  "    if not ready:",
-  "        if not sent:",
-  "            os.write(fd, keys)",
-  "            sent = True",
-  "            continue",
-  "        os.kill(pid, 15)",
-  "        sys.stderr.write('timed out waiting for config')",
-  "        raise SystemExit(1)",
-  "    try:",
-  "        chunk = os.read(fd, 4096)",
-  "    except OSError:",
-  "        break",
-  "    if not chunk:",
-  "        break",
-  "    buf += chunk",
-  "    if not sent and (not marker or marker in buf):",
-  "        os.write(fd, keys)",
-  "        sent = True",
-  "_, status = os.waitpid(pid, 0)",
-  "sys.stdout.buffer.write(buf)",
-  "raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)",
-].join("\n");
+import { pty, SHOWS } from "./pty.ts";
 
-/**
- * Run the CLI on a real pty. The default answer to the author picker keeps only
- * Marcus, which is what the gum stub used to answer before the picker existed.
- */
-function pty(s: ReturnType<typeof sandbox>, args: string[], extra: Record<string, string> = {}, keys = "n1\r") {
-  const hex = (text: string) => Buffer.from(text, "utf8").toString("hex");
-  return s.exec(["/usr/bin/python3", "-c", ptyScript, process.execPath, join(root, "src/cli.ts"), ...args], {
-    ...extra,
-    PTY_KEYS: hex(keys),
-    PTY_MARKER: hex("space/x toggle"),
-  });
+/** A config run on a pty with a gum stub that fails if anything still calls it. */
+function configPty(s: ReturnType<typeof sandbox>, args: string[], steps: { marker: string; keys: string }[]) {
+  s.stub("gum", "echo 'gum must not run any more' >&2\nexit 1");
+  return pty(s, args, steps);
 }
 
 const gitEnv = {
@@ -195,13 +156,13 @@ test("config --add without a value is a usage error when it cannot prompt", asyn
     expect(missing.stderr).toContain("omastoic config --add");
     expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
 
-    symlinkSync("/usr/bin/flock", join(s.bin, "flock"));
-    symlinkSync("/bin/sh", join(s.bin, "sh"));
-    const terminal = await pty(s, ["config", "--add"], { PATH: s.bin });
-    expect(terminal.code).toBe(1);
-    expect(terminal.stdout + terminal.stderr).toContain("gum is missing");
-    expect(terminal.stdout + terminal.stderr).toContain("marcus");
-    expect(terminal.stdout + terminal.stderr).not.toContain("Author slug");
+    // On a terminal the same command asks instead, with no gum anywhere.
+    const terminal = await configPty(s, ["config", "--add"], [
+      { marker: SHOWS.author, keys: "\x03" },
+    ]);
+    expect(terminal.code).toBe(0);
+    expect(terminal.stdout).toContain("Author slug: marcus");
+    expect(terminal.stdout + terminal.stderr).not.toContain("gum must not run any more");
     expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
   } finally { s.cleanup(); }
 });
@@ -209,29 +170,20 @@ test("config --add without a value is a usage error when it cannot prompt", asyn
 test("config --add prompts for author, citation and text", async () => {
   const s = sandbox();
   try {
-    s.stub("gum", [
-      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
-      "case \"$1\" in",
-      "  input)",
-      "    case \"$*\" in",
-      "      *Author*) echo marcus ;;",
-      "      *Citation*) printf '%s\\n' $'Desk note\\nwith a tab\\there' ;;",
-      "      *) echo \"unexpected input: $*\" >&2; exit 1 ;;",
-      "    esac",
-      "    ;;",
-      "  write)",
-      "    printf '%s\\n' 'A custom sentence' 'for the saver.'",
-      "    ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const added = await pty(s, ["config", "--add"]);
+    const added = await configPty(s, ["config", "--add"], [
+      { marker: SHOWS.author, keys: "\x15marcus\r" },
+      { marker: SHOWS.citation, keys: "\x15Desk note\r" },
+      { marker: SHOWS.text, keys: "\x15A custom sentence\rfor the saver.\x04" },
+    ]);
     expect(added.code).toBe(0);
     const saved = readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8");
-    expect(saved).toBe("# author-slug <TAB> citation <TAB> text\nmarcus\tDesk note with a tab here\tA custom sentence for the saver.\n");
+    expect(saved).toBe("# author-slug <TAB> citation <TAB> text\nmarcus\tDesk note\tA custom sentence for the saver.\n");
     expect(saved).not.toContain("\t\t");
-    expect(readFileSync(join(s.home, "gum.log"), "utf8")).toContain("Author slug");
-    const again = await pty(s, ["config", "--add"]);
+    const again = await configPty(s, ["config", "--add"], [
+      { marker: SHOWS.author, keys: "\x15marcus\r" },
+      { marker: SHOWS.citation, keys: "\x15Desk note\r" },
+      { marker: SHOWS.text, keys: "\x15A custom sentence\rfor the saver.\x04" },
+    ]);
     expect(again.code).toBe(1);
     expect(again.stdout + again.stderr).toContain("already in");
   } finally { s.cleanup(); }
@@ -240,100 +192,57 @@ test("config --add prompts for author, citation and text", async () => {
 test("accepting the prefilled quote suggestion writes that line", async () => {
   const s = sandbox();
   try {
-    s.stub("gum", [
-      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
-      "value=\"\"",
-      "prev=\"\"",
-      "for arg in \"$@\"; do",
-      "  if [[ \"$prev\" == --value ]]; then value=\"$arg\"; fi",
-      "  prev=\"$arg\"",
-      "done",
-      "case \"$1\" in",
-      "  input|write)",
-      "    [[ -n \"$value\" ]] || { echo \"no editable value\" >&2; exit 1; }",
-      "    printf '%s\\n' \"$value\"",
-      "    ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const added = await pty(s, ["config", "--add"]);
+    const added = await configPty(s, ["config", "--add"], [
+      { marker: SHOWS.author, keys: "\r" },
+      { marker: SHOWS.citation, keys: "\r" },
+      { marker: SHOWS.text, keys: "\x04" },
+    ]);
     expect(added.code).toBe(0);
     expect(readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8")).toBe(
       "# author-slug <TAB> citation <TAB> text\nmarcus\tMeditations IX.1\tYour line.\n",
     );
-    const log = readFileSync(join(s.home, "gum.log"), "utf8");
-    expect(log).toContain("Author slug");
-    expect(log).toContain("Citation");
-    expect(log).toContain("Quote text");
-    expect(log).toContain("--value marcus");
-    expect(log).toContain("--value Meditations IX.1");
-    expect(log).toContain("--value Your line.");
   } finally { s.cleanup(); }
 });
 
 test("cancelling the add prompt writes nothing, and a bad slug is rejected", async () => {
   const s = sandbox();
   try {
-    s.stub("gum", [
-      "case \"$1\" in",
-      "  input) exit 1 ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const cancelled = await pty(s, ["config", "--add"]);
+    const cancelled = await configPty(s, ["config", "--add"], [
+      { marker: SHOWS.author, keys: "\x03" },
+    ]);
     expect(cancelled.code).toBe(0);
     expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
 
-    s.stub("gum", [
-      "case \"$1\" in",
-      "  input)",
-      "    case \"$*\" in",
-      "      *Author*) echo 'Marcus Aurelius' ;;",
-      "      *) echo 'Desk note' ;;",
-      "    esac",
-      "    ;;",
-      "  write) echo 'A custom sentence for the saver.' ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const rejected = await pty(s, ["config", "--add"]);
+    const rejected = await configPty(s, ["config", "--add"], [
+      { marker: SHOWS.author, keys: "Marcus Aurelius\r" },
+      { marker: SHOWS.citation, keys: "Desk note\r" },
+      { marker: SHOWS.text, keys: "A custom sentence for the saver.\x04" },
+    ]);
     expect(rejected.code).toBe(1);
     expect(rejected.stdout + rejected.stderr).toContain("invalid quote author slug");
     expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
   } finally { s.cleanup(); }
 });
 
-test("omastoic config offers a gum quote after the Stoic prompts", async () => {
+test("omastoic config offers a custom quote after the Stoic and quote prompts", async () => {
   const s = sandbox();
   try {
-    s.stub("gum", [
-      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
-      "case \"$1\" in",
-      "  choose)",
-      "    case \"$*\" in",
-      "      *Stoics*) echo 'Marcus Aurelius' ;;",
-      "    esac",
-      "    ;;",
-      "  input)",
-      "    case \"$*\" in",
-      "      *Seconds*) echo 30 ;;",
-      "      *Author*) echo marcus ;;",
-      "      *Citation*) echo 'Desk note' ;;",
-      "      *) echo \"unexpected input: $*\" >&2; exit 1 ;;",
-      "    esac",
-      "    ;;",
-      "  write) echo 'A custom sentence for the saver.' ;;",
-      "  confirm) exit 0 ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const configured = await pty(s, ["config"]);
+    const configured = await configPty(s, ["config"], [
+      { marker: SHOWS.authors, keys: "n1\r" },
+      { marker: SHOWS.quotes, keys: "\r" },
+      { marker: SHOWS.interval, keys: "\x1530\r" },
+      { marker: SHOWS.confirm, keys: "y" },
+      { marker: SHOWS.author, keys: "\x15marcus\r" },
+      { marker: SHOWS.citation, keys: "\x15Desk note\r" },
+      { marker: SHOWS.text, keys: "\x15A custom sentence for the saver.\x04" },
+    ]);
     expect(configured.code).toBe(0);
-    expect(readFileSync(join(s.home, "gum.log"), "utf8")).toContain("Add a custom quote?");
+    expect(configured.stdout).toContain("Add a custom quote? [y/N]");
+    // The picker kept every line, so the settings stay compact; the custom line
+    // itself is what the quote book gained.
     expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({
       authors: ["marcus"],
       interval: 30,
-      quotes: { marcus: ["c01"] },
     });
     expect(readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8")).toContain("marcus\tDesk note\tA custom sentence for the saver.\n");
   } finally { s.cleanup(); }
@@ -343,27 +252,18 @@ test("accepted settings survive a cancelled or invalid optional quote", async ()
   const s = sandbox();
   const settingsPath = join(s.config, "omastoic/config.json");
   const quotesPath = join(s.config, "omastoic/quotes.tsv");
-  const wizard = (confirm: string, author: string) => [
-    "case \"$1\" in",
-    "  choose)",
-    "    case \"$*\" in",
-    "      *Stoics*) echo 'Marcus Aurelius' ;;",
-    "    esac",
-    "    ;;",
-    "  input)",
-    "    case \"$*\" in",
-    "      *Seconds*) echo 30 ;;",
-    author,
-    "    esac",
-    "    ;;",
-    `  confirm) ${confirm} ;;`,
-    "  write) echo 'A custom sentence for the saver.' ;;",
-    "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-    "esac",
-  ].join("\n");
+  // Every screen answers the same way; only the quote step differs per case.
+  const screens = [
+    { marker: SHOWS.authors, keys: "n1\r" },
+    { marker: SHOWS.quotes, keys: "n\r" },
+    { marker: SHOWS.interval, keys: "\x1530\r" },
+  ];
   try {
-    s.stub("gum", wizard("exit 0", "      *) exit 1 ;;"));
-    const escaped = await pty(s, ["config"]);
+    const escaped = await configPty(s, ["config"], [
+      ...screens,
+      { marker: SHOWS.confirm, keys: "y" },
+      { marker: SHOWS.author, keys: "\x03" },
+    ]);
     expect(escaped.code).toBe(0);
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
       authors: ["marcus"],
@@ -373,8 +273,13 @@ test("accepted settings survive a cancelled or invalid optional quote", async ()
     expect(existsSync(quotesPath)).toBe(false);
 
     rmSync(settingsPath);
-    s.stub("gum", wizard("exit 0", "      *Author*) echo 'Marcus Aurelius' ;;\n      *) echo 'Desk note' ;;"));
-    const rejected = await pty(s, ["config"]);
+    const rejected = await configPty(s, ["config"], [
+      ...screens,
+      { marker: SHOWS.confirm, keys: "y" },
+      { marker: SHOWS.author, keys: "Marcus Aurelius\r" },
+      { marker: SHOWS.citation, keys: "Desk note\r" },
+      { marker: SHOWS.text, keys: "A custom sentence for the saver.\x04" },
+    ]);
     expect(rejected.code).toBe(1);
     expect(rejected.stdout + rejected.stderr).toContain("invalid quote author slug");
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
@@ -385,36 +290,26 @@ test("accepted settings survive a cancelled or invalid optional quote", async ()
     expect(existsSync(quotesPath)).toBe(false);
 
     rmSync(settingsPath);
-    s.stub("gum", wizard("exit 130", "      *) echo 'should not ask' >&2; exit 1 ;;"));
-    const aborted = await pty(s, ["config"]);
+    const aborted = await configPty(s, ["config"], [
+      ...screens,
+      { marker: SHOWS.confirm, keys: "\x1b" },
+    ]);
     expect(aborted.code).toBe(0);
     expect(existsSync(settingsPath)).toBe(false);
     expect(existsSync(quotesPath)).toBe(false);
 
-    s.stub("gum", [
-      "case \"$1\" in",
-      "  input) exit 1 ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const flagged = await pty(s, ["config", "--authors", "seneca", "--interval", "30", "--add"]);
+    const flagged = await configPty(s, ["config", "--authors", "seneca", "--interval", "30", "--add"], [
+      { marker: SHOWS.author, keys: "\x03" },
+    ]);
     expect(flagged.code).toBe(0);
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ authors: ["seneca"], interval: 30 });
     expect(existsSync(quotesPath)).toBe(false);
 
-    s.stub("gum", [
-      "case \"$1\" in",
-      "  input)",
-      "    case \"$*\" in",
-      "      *Author*) echo 'Marcus Aurelius' ;;",
-      "      *) echo 'Desk note' ;;",
-      "    esac",
-      "    ;;",
-      "  write) echo 'A custom sentence for the saver.' ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const flaggedBad = await pty(s, ["config", "--interval", "45", "--add"]);
+    const flaggedBad = await configPty(s, ["config", "--interval", "45", "--add"], [
+      { marker: SHOWS.author, keys: "Marcus Aurelius\r" },
+      { marker: SHOWS.citation, keys: "Desk note\r" },
+      { marker: SHOWS.text, keys: "A custom sentence for the saver.\x04" },
+    ]);
     expect(flaggedBad.code).toBe(1);
     expect(flaggedBad.stdout + flaggedBad.stderr).toContain("invalid quote author slug");
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ authors: ["seneca"], interval: 45 });
@@ -463,23 +358,15 @@ test("a bundled allow-list still shows a custom quote in the list, checkbox, and
     }
     expect([...seen].sort()).toEqual(["bundled", "custom"]);
 
-    s.stub("gum", [
-      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
-      "case \"$1\" in",
-      "  choose)",
-      "    case \"$*\" in",
-      "      *Stoics*) echo 'Marcus Aurelius' ;;",
-      "    esac",
-      "    ;;",
-      "  input) echo 30 ;;",
-      "  confirm) exit 1 ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const configured = await pty(s, ["config"]);
+    const configured = await configPty(s, ["config"], [
+      { marker: SHOWS.authors, keys: "n1\r" },
+      { marker: SHOWS.quotes, keys: "\r" },
+      { marker: SHOWS.interval, keys: "\x1530\r" },
+      { marker: SHOWS.confirm, keys: "n" },
+    ]);
     expect(configured.code).toBe(0);
-    const gum = readFileSync(join(s.home, "gum.log"), "utf8");
-    expect(gum).toContain("--selected c01  Desk note  A custom sentence for the saver.");
+    // A bundled-only allow-list still keeps the custom line, so it stays checked.
+    expect(JSON.parse(readFileSync(settingsPath, "utf8")).quotes.marcus).toEqual(["q01", "c01"]);
   } finally { s.cleanup(); }
 });
 
@@ -601,34 +488,15 @@ test("the quote wizard keeps a cleared custom selection when a line is added", a
   try {
     s.put(join(s.config, "omastoic/quotes.tsv"), "marcus\tOne\tCleared alpha line stays off.\nmarcus\tTwo\tCleared beta line stays off.\n");
     s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01", "c00"] } }));
-    s.stub("gum", [
-      "case \"$1\" in",
-      "  choose)",
-      "    case \"$*\" in",
-      "      *Stoics*) echo 'Marcus Aurelius' ;;",
-      "      *)",
-      "        prev=",
-      "        for arg in \"$@\"; do",
-      "          if [[ \"$prev\" == --selected ]]; then printf '%s\\n' \"$arg\"; fi",
-      "          prev=\"$arg\"",
-      "        done",
-      "        ;;",
-      "    esac",
-      "    ;;",
-      "  input)",
-      "    case \"$*\" in",
-      "      *Seconds*) echo 30 ;;",
-      "      *Author*) echo marcus ;;",
-      "      *Citation*) echo 'Three' ;;",
-      "      *) echo \"unexpected input: $*\" >&2; exit 1 ;;",
-      "    esac",
-      "    ;;",
-      "  write) echo 'Fresh gamma line joins rotation.' ;;",
-      "  confirm) exit 0 ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const configured = await pty(s, ["config"]);
+    const configured = await configPty(s, ["config"], [
+      { marker: SHOWS.authors, keys: "n1\r" },
+      { marker: SHOWS.quotes, keys: "\r" },
+      { marker: SHOWS.interval, keys: "\x1530\r" },
+      { marker: SHOWS.confirm, keys: "y" },
+      { marker: SHOWS.author, keys: "\x15marcus\r" },
+      { marker: SHOWS.citation, keys: "\x15Three\r" },
+      { marker: SHOWS.text, keys: "\x15Fresh gamma line joins rotation.\x04" },
+    ]);
     expect(configured.code).toBe(0);
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
       authors: ["marcus"],
@@ -724,26 +592,12 @@ test("confirming config keeps stored custom ids when quotes.tsv cannot be parsed
   try {
     s.put(quotesPath, "Marcus Aurelius\tDesk\tLine\n");
     s.put(settingsPath, JSON.stringify({ quotes: { marcus: ["c00"], seneca: ["q19"] } }));
-    s.stub("gum", [
-      "case \"$1\" in",
-      "  choose)",
-      "    case \"$*\" in",
-      "      *Stoics*) echo 'Marcus Aurelius' ;;",
-      "      *)",
-      "        prev=",
-      "        for arg in \"$@\"; do",
-      "          if [[ \"$prev\" == --selected ]]; then printf '%s\\n' \"$arg\"; fi",
-      "          prev=\"$arg\"",
-      "        done",
-      "        ;;",
-      "    esac",
-      "    ;;",
-      "  input) echo 30 ;;",
-      "  confirm) exit 1 ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const configured = await pty(s, ["config"]);
+    const configured = await configPty(s, ["config"], [
+      { marker: SHOWS.authors, keys: "n1\r" },
+      { marker: SHOWS.quotes, keys: "\r" },
+      { marker: SHOWS.interval, keys: "\x1530\r" },
+      { marker: SHOWS.confirm, keys: "n" },
+    ]);
     expect(configured.code).toBe(0);
     expect(readFileSync(quotesPath, "utf8")).toBe("Marcus Aurelius\tDesk\tLine\n");
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
@@ -754,7 +608,7 @@ test("confirming config keeps stored custom ids when quotes.tsv cannot be parsed
   } finally { s.cleanup(); }
 });
 
-test("confirming a quote whose label contains a comma keeps it in rotation", async () => {
+test("adjusting a quote whose citation contains a comma keeps it in rotation", async () => {
   const s = sandbox();
   const settingsPath = join(s.config, "omastoic/config.json");
   const quotesPath = join(s.config, "omastoic/quotes.tsv");
@@ -762,47 +616,13 @@ test("confirming a quote whose label contains a comma keeps it in rotation", asy
   try {
     s.put(quotesPath, `marcus\tDesk, note\t${line}\n`);
     s.put(settingsPath, JSON.stringify({ authors: ["marcus"], quotes: { marcus: ["q01", "q02"] } }));
-    // gum 2.0.2 splits each --selected value on commas, then checks an option only when the whole label matches a piece.
-    s.stub("gum", [
-      "printf '%s\\n' \"$*\" >> \"$HOME/gum.log\"",
-      "case \"$1\" in",
-      "  choose)",
-      "    case \"$*\" in",
-      "      *Stoics*) printf '%s\\n' 'Marcus Aurelius' ;;",
-      "      *)",
-      "        selected=()",
-      "        options=()",
-      "        prev=",
-      "        for arg in \"$@\"; do",
-      "          if [[ \"$prev\" == --selected ]]; then",
-      "            IFS=',' read -ra parts <<< \"$arg\"",
-      "            for part in \"${parts[@]}\"; do selected+=(\"$part\"); done",
-      "          elif [[ \"$prev\" == --limit || \"$prev\" == --header || \"$arg\" == --* || \"$arg\" == choose ]]; then",
-      "            :",
-      "          else",
-      "            options+=(\"$arg\")",
-      "          fi",
-      "          prev=\"$arg\"",
-      "        done",
-      "        for opt in \"${options[@]}\"; do",
-      "          for part in \"${selected[@]+\"${selected[@]}\"}\"; do",
-      "            if [[ \"$opt\" == \"$part\" ]]; then printf '%s\\n' \"$opt\"; break; fi",
-      "          done",
-      "        done",
-      "        ;;",
-      "    esac",
-      "    ;;",
-      "  input) printf '%s\\n' 30 ;;",
-      "  confirm) exit 1 ;;",
-      "  *) echo \"unexpected gum: $*\" >&2; exit 1 ;;",
-      "esac",
-    ].join("\n"));
-    const configured = await pty(s, ["config"]);
+    const configured = await configPty(s, ["config"], [
+      { marker: SHOWS.authors, keys: "n1\r" },
+      { marker: SHOWS.quotes, keys: "\r" },
+      { marker: SHOWS.interval, keys: "\x1530\r" },
+      { marker: SHOWS.confirm, keys: "n" },
+    ]);
     expect(configured.code).toBe(0);
-    expect(configured.stderr).not.toContain("unexpected gum");
-    const gum = readFileSync(join(s.home, "gum.log"), "utf8");
-    expect(gum).toContain("--selected c01  Desk note  Hello Captain.");
-    expect(gum).not.toContain("--selected c01  Desk, note");
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
       authors: ["marcus"],
       interval: 30,
