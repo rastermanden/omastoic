@@ -28,6 +28,7 @@ exit 0`);
   stub("omarchy-toggle-enabled", '[[ -f "$HOME/toggle" ]]');
   stub("omarchy-toggle", 'if [[ $2 == on ]]; then touch "$HOME/toggle"; else rm -f "$HOME/toggle"; fi');
   stub("omarchy", 'if [[ ${1:-} == plugin && ${2:-} == remove ]]; then rm -rf "$XDG_CONFIG_HOME/omarchy/plugins/$3"; fi');
+  stub("omarchy-shell", 'echo ok');
   stub("omarchy-notification-send", "exit 0");
   stub("omarchy-launch-screensaver", "exit 0");
   stub("ttfx", "exit 0");

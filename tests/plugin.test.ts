@@ -276,3 +276,23 @@ test("native backend is rejected before installing external artifacts", async ()
     expect(existsSync(join(s.state, "installed"))).toBe(false);
   } finally { s.cleanup(); }
 });
+
+test("install.sh copies a runtime tree without the authoring payload", async () => {
+  const missing = ["rsync", "jq", "python3"].filter((name) => !Bun.which(name));
+  if (missing.length) {
+    console.log(`skipping install.sh copy test: ${missing.join(", ")} not on PATH`);
+    return;
+  }
+  const s = sandbox();
+  try {
+    const result = await s.exec(["bash", join(root, "install.sh")]);
+    expect(result.code).toBe(0);
+    for (const path of ["manifest.json", "Service.qml", "bin/omastoic"]) {
+      expect(existsSync(join(s.plugin, path))).toBe(true);
+    }
+    // Developer-only material stays in the checkout: a copied .agents/ tree
+    // would ship agent skills (and their AGENTS.md instructions) to users.
+    expect(existsSync(join(s.plugin, ".agents"))).toBe(false);
+    expect(existsSync(join(s.plugin, "assets/local"))).toBe(false);
+  } finally { s.cleanup(); }
+});
