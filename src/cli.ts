@@ -713,7 +713,16 @@ async function pickAuthorList(roster: Map<string, { name: string }>, selected: s
 }
 
 /** Everything `config` asks shares one reader, so a piped answer is never dropped. */
-type ConfigIo = { input: typeof process.stdin; output: typeof process.stdout; signals: typeof process; plain: boolean; source: ChunkSource };
+type ConfigIo = { input: typeof process.stdin; output: typeof process.stdout; signals: typeof process; plain: boolean; source: ChunkSource; fatal: (signal: string) => void };
+
+/** The prompt has handed the terminal back; die by the signal that interrupted it. */
+function raiseSignal(signal: string): void {
+  process.kill(process.pid, signal === "SIGHUP" ? "SIGHUP" : "SIGTERM");
+}
+
+function configIo(plain: boolean): ConfigIo {
+  return { input: process.stdin, output: process.stdout, signals: process, plain, source: new ChunkSource(process.stdin), fatal: raiseSignal };
+}
 
 async function pickInterval(current: number, io: ConfigIo): Promise<number | undefined> {
   const header = "Seconds between quotes while the screensaver is up";
@@ -905,7 +914,7 @@ async function configure(rest: string[]): Promise<number> {
   let quoteFailure: number | null = null;
 
   if (interactive) {
-    const io: ConfigIo = { input: process.stdin, output: process.stdout, signals: process, plain, source: new ChunkSource(process.stdin) };
+    const io: ConfigIo = configIo(plain);
     try {
       const picked = await pickAuthorList(roster, current.authors ?? [], io);
       if (picked == null) return 0;
@@ -970,7 +979,7 @@ async function configure(rest: string[]): Promise<number> {
           addUsage();
           return 1;
         }
-        const prompted = await promptCustomQuote({ input: process.stdin, output: process.stdout, signals: process, plain, source: new ChunkSource(process.stdin) });
+        const prompted = await promptCustomQuote(configIo(plain));
         if (prompted.kind === "invalid") quoteFailure = 1;
         else if (prompted.kind === "quote") quoteLines = [quoteRow(prompted.quote)];
       } else {

@@ -135,6 +135,40 @@ test("q, escape, ctrl-c, ctrl-d and eof all cancel without a selection", async (
   expect(closed.modes).toEqual([true, false]);
 });
 
+test("a fatal signal restores the terminal before the process is handed the signal", async () => {
+  for (const name of ["SIGTERM", "SIGHUP"]) {
+    const h = harness();
+    let raised: string | null = null;
+    let rawAtRaise: boolean | undefined;
+    let cursorAtRaise: boolean | undefined;
+    const io = {
+      ...h.io,
+      fatal: (signal: string) => {
+        raised = signal;
+        rawAtRaise = h.modes.at(-1);
+        cursorAtRaise = h.text().endsWith("\x1b[?25h");
+      },
+    };
+    const picked = pickAuthorsTui(rows, ["marcus"], io);
+    h.io.signals.emit(name);
+    expect(await picked).toBeUndefined();
+    expect(raised as string | null).toBe(name);
+    expect(rawAtRaise).toBe(false);
+    expect(cursorAtRaise).toBe(true);
+    expect(h.io.signals.listenerCount(name)).toBe(0);
+  }
+});
+
+test("SIGINT still cancels the author picker without raising a signal", async () => {
+  const h = harness();
+  let raised: string | null = null;
+  const picked = pickAuthorsTui(rows, ["marcus"], { ...h.io, fatal: (signal) => { raised = signal; } });
+  h.io.signals.emit("SIGINT");
+  expect(await picked).toBeUndefined();
+  expect(raised).toBeNull();
+  expect(h.modes).toEqual([true, false]);
+});
+
 test("the picker shows checked rows, numbering and key hints, then cleans up", async () => {
   const h = harness();
   const picked = pickAuthorsTui(rows, ["marcus", "zeno"], h.io);

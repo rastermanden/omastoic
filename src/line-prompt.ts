@@ -37,14 +37,21 @@ function startFrame(io: PickerIo, redraw: () => void): Frame {
   const ownsSource = shared == null;
   const wasRaw = input.isRaw === true;
   const onResize = () => redraw();
-  const onSignal = () => source.inject("\x03");
+  // SIGINT is a user cancelling; SIGTERM and SIGHUP mean the process must die.
+  let fatal: string | null = null;
+  const onSignal = (signal: string) => {
+    if (signal === "SIGTERM" || signal === "SIGHUP") fatal = signal;
+    source.inject("\x03");
+  };
+  // A stream reports only that the event fired, so each listener knows its name.
+  const signalListeners = Object.fromEntries(SIGNALS.map((signal) => [signal, () => onSignal(signal)])) as Record<(typeof SIGNALS)[number], () => void>;
   let drawn = 0;
 
   // A terminal that is already raw belongs to whatever set it that way.
   if (!wasRaw) input.setRawMode?.(true);
   output.write(HIDE_CURSOR);
   output.on?.("resize", onResize);
-  for (const signal of SIGNALS) signals?.on(signal, onSignal);
+  for (const signal of SIGNALS) signals?.on(signal, signalListeners[signal]);
 
   return {
     source,
@@ -63,7 +70,9 @@ function startFrame(io: PickerIo, redraw: () => void): Frame {
         try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }
       }
       output.off?.("resize", onResize);
-      for (const signal of SIGNALS) signals?.off?.(signal, onSignal);
+      for (const signal of SIGNALS) signals?.off?.(signal, signalListeners[signal]);
+      // The terminal is back, so the signal can now take its normal course.
+      if (fatal) io.fatal?.(fatal);
     },
   };
 }

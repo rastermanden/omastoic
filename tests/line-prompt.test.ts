@@ -225,6 +225,63 @@ test("a signal cancels every prompt and restores the terminal", async () => {
   expect(confirm.modes).toEqual([true, false]);
 });
 
+test("a fatal signal restores every prompt before the process is handed the signal", async () => {
+  const line = harness();
+  let raised: string | null = null;
+  let rawAtRaise: boolean | undefined;
+  let cursorAtRaise: boolean | undefined;
+  const asking = askLine({ header: "Author slug", value: "marcus" }, {
+    ...line.io,
+    fatal: (signal: string) => {
+      raised = signal;
+      rawAtRaise = line.modes.at(-1);
+      cursorAtRaise = line.text().endsWith("\x1b[?25h");
+    },
+  });
+  line.io.signals.emit("SIGTERM");
+  expect(await asking).toBeUndefined();
+  expect(raised as string | null).toBe("SIGTERM");
+  expect(rawAtRaise).toBe(false);
+  expect(cursorAtRaise).toBe(true);
+
+  const text = harness();
+  let textRaised: string | null = null;
+  const writing = askText({ header: "Quote text" }, { ...text.io, fatal: (signal) => { textRaised = signal; } });
+  text.io.signals.emit("SIGHUP");
+  expect(await writing).toBeUndefined();
+  expect(textRaised as string | null).toBe("SIGHUP");
+  expect(text.modes).toEqual([true, false]);
+
+  const confirm = harness();
+  let confirmRaised: string | null = null;
+  const confirming = askConfirm("Add a custom quote?", { ...confirm.io, fatal: (signal) => { confirmRaised = signal; } });
+  confirm.io.signals.emit("SIGTERM");
+  expect(await confirming).toBeUndefined();
+  expect(confirmRaised as string | null).toBe("SIGTERM");
+  expect(confirm.modes).toEqual([true, false]);
+});
+
+test("SIGINT still cancels a prompt like ctrl-c without raising a signal", async () => {
+  const h = harness();
+  let raised: string | null = null;
+  const asking = askLine({ header: "Author slug" }, { ...h.io, fatal: (signal) => { raised = signal; } });
+  h.io.signals.emit("SIGINT");
+  expect(await asking).toBeUndefined();
+  expect(raised).toBeNull();
+  expect(h.modes).toEqual([true, false]);
+});
+
+test("a fatal signal leaves an already raw terminal raw", async () => {
+  const h = harness({ isRaw: true });
+  let raised: string | null = null;
+  const asking = askLine({ header: "Citation", value: "Desk note" }, { ...h.io, fatal: (signal) => { raised = signal; } });
+  h.io.signals.emit("SIGTERM");
+  expect(await asking).toBeUndefined();
+  expect(raised).toBe("SIGTERM");
+  expect(h.modes).toEqual([]);
+  expect(h.text().endsWith("\x1b[?25h")).toBe(true);
+});
+
 test("an already raw terminal is left as it was found", async () => {
   const h = harness({ isRaw: true });
   const asking = askLine({ header: "Citation", value: "Desk note" }, h.io);

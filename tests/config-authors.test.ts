@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { root, sandbox } from "./sandbox.ts";
 
-import { pty as runPty, SHOWS } from "./pty.ts";
+import { pty as runPty, ptySignal, SHOWS } from "./pty.ts";
 
 /** `config` on a pty with a loud gum stub: every prompt must be the CLI's own. */
 function pty(s: ReturnType<typeof sandbox>, args: string[], steps: { marker: string; keys: string }[] = []) {
@@ -33,6 +33,22 @@ test("every config prompt runs in the terminal, so gum is not needed", async () 
     expect(saved.quotes.marcus).not.toContain("q01");
   } finally { s.cleanup(); }
 });
+
+test("SIGTERM and SIGHUP hand the terminal back, then kill the process as themselves", async () => {
+  for (const [name, number] of [["SIGTERM", 15], ["SIGHUP", 1]] as const) {
+    const s = sandbox();
+    try {
+      const killed = await ptySignal(s, ["config"], SHOWS.authors, name);
+      // The driver saw the prompt, the child died by that signal, and the tty is cooked again.
+      expect(killed.stderr).toContain(`SIGNAL signaled=1 number=${number} code=-1 marker=1 cooked=1`);
+      expect(killed.code).toBe(0);
+      expect(killed.stdout).toContain(SHOWS.authors);
+      expect(killed.stdout.trimEnd().endsWith("\x1b[?25h")).toBe(true);
+      // A fatal signal is not a cancelled config: nothing is written.
+      expect(existsSync(join(s.config, "omastoic/config.json"))).toBe(false);
+    } finally { s.cleanup(); }
+  }
+}, 30000);
 
 test("cancelling the author picker writes nothing", async () => {
   const s = sandbox();

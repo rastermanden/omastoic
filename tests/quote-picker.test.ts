@@ -321,6 +321,53 @@ test("a signal and a broken terminal both clean up", async () => {
   expect(broken.text().endsWith("\x1b[?25h")).toBe(true);
 });
 
+test("a fatal signal restores the terminal before the process is handed the signal", async () => {
+  for (const name of ["SIGTERM", "SIGHUP"]) {
+    const h = harness();
+    let raised: string | null = null;
+    let rawAtRaise: boolean | undefined;
+    let cursorAtRaise: boolean | undefined;
+    let listenersAtRaise = -1;
+    const io = {
+      ...h.io,
+      fatal: (signal: string) => {
+        raised = signal;
+        rawAtRaise = h.modes.at(-1);
+        cursorAtRaise = h.text().endsWith("\x1b[?25h");
+        listenersAtRaise = h.io.signals.listenerCount(name);
+      },
+    };
+    const picked = pickQuotesTui("Marcus Aurelius", rows, ["q01"], io);
+    h.io.signals.emit(name);
+    expect(await picked).toBeUndefined();
+    expect(raised as string | null).toBe(name);
+    expect(rawAtRaise).toBe(false);
+    expect(cursorAtRaise).toBe(true);
+    expect(listenersAtRaise).toBe(0);
+  }
+});
+
+test("SIGINT still cancels like ctrl-c and is not raised again", async () => {
+  const h = harness();
+  let raised: string | null = null;
+  const picked = pickQuotesTui("Marcus Aurelius", rows, ["q01"], { ...h.io, fatal: (signal) => { raised = signal; } });
+  h.io.signals.emit("SIGINT");
+  expect(await picked).toBeUndefined();
+  expect(raised).toBeNull();
+  expect(h.modes).toEqual([true, false]);
+});
+
+test("a fatal signal leaves an already raw terminal raw", async () => {
+  const h = harness({ isRaw: true });
+  let raised: string | null = null;
+  const picked = pickQuotesTui("Marcus Aurelius", rows, ["q01"], { ...h.io, fatal: (signal) => { raised = signal; } });
+  h.io.signals.emit("SIGTERM");
+  expect(await picked).toBeUndefined();
+  expect(raised).toBe("SIGTERM");
+  expect(h.modes).toEqual([]);
+  expect(h.text().endsWith("\x1b[?25h")).toBe(true);
+});
+
 test("an already raw terminal is left as it was found, and so is a raw-less one", async () => {
   const raw = harness({ isRaw: true });
   const picked = pickQuotesTui("Marcus Aurelius", rows, null, raw.io);
