@@ -16,6 +16,7 @@ const FALLBACK_PAGE = 8;
 const MAX_PAGE = 8;
 /** A filter is a search, not a second quote. */
 const MAX_FILTER = 64;
+const SIGNALS = ["SIGTERM", "SIGHUP", "SIGINT"] as const;
 
 /** The id is the stable key; the citation and the first words identify the line. */
 export function quoteChoiceLabel(row: QuoteRow): string {
@@ -141,6 +142,8 @@ export async function pickQuotesTui(
   let page = 0;
   let drawn = 0;
   let buffer = "";
+  // SIGINT is a user cancelling; SIGTERM and SIGHUP mean the process must die.
+  let fatal: string | null = null;
 
   /** The screen height, or null when the terminal does not report one. */
   const terminalHeight = (): number | null => {
@@ -215,7 +218,12 @@ export async function pickQuotesTui(
     output.write(`${up}\r\x1b[J${lines.join("\n")}`);
   };
   const onResize = () => { followFocus(); draw(); };
-  const onSignal = () => { source.inject("\x03"); };
+  const onSignal = (signal: string) => {
+    if (signal === "SIGTERM" || signal === "SIGHUP") fatal = signal;
+    source.inject("\x03");
+  };
+  // A stream reports only that the event fired, so each listener knows its name.
+  const signalListeners = SIGNALS.map((signal) => [signal, () => onSignal(signal)] as const);
 
   try {
     // A terminal that is already raw belongs to whatever set it that way.
@@ -223,7 +231,7 @@ export async function pickQuotesTui(
     output.write(HIDE_CURSOR);
     draw();
     output.on?.("resize", onResize);
-    for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"] as const) signals?.on(signal, onSignal);
+    for (const [signal, listener] of signalListeners) signals?.on(signal, listener);
 
     for (;;) {
       if (!buffer) {
@@ -319,7 +327,9 @@ export async function pickQuotesTui(
       try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }
     }
     output.off?.("resize", onResize);
-    for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"] as const) signals?.off?.(signal, onSignal);
+    for (const [signal, listener] of signalListeners) signals?.off?.(signal, listener);
+    // The terminal is back, so the signal can now take its normal course.
+    if (fatal) io.fatal?.(fatal);
   }
 }
 

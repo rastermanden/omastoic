@@ -28,7 +28,7 @@ export type PickerSignals = {
   off?(event: string, listener: () => void): unknown;
 };
 
-export type PickerIo = { input: PickerInput; output: PickerOutput; signals?: PickerSignals; /** A reader shared by every prompt in one config run, so no byte of a pipe is dropped. */ source?: ChunkSource };
+export type PickerIo = { input: PickerInput; output: PickerOutput; signals?: PickerSignals; /** Called once the terminal is back for a fatal SIGTERM/SIGHUP, so the process can die by it. */ fatal?: (signal: string) => void; /** A reader shared by every prompt in one config run, so no byte of a pipe is dropped. */ source?: ChunkSource };
 export type PickOptions = PickerIo & { plain: boolean };
 
 const HIDE_CURSOR = "\x1b[?25l";
@@ -36,6 +36,7 @@ const SHOW_CURSOR = "\x1b[?25h";
 /** How long a trailing escape byte waits for the rest of an arrow sequence. */
 const ESCAPE_GRACE_MS = 20;
 const FALLBACK_COLUMNS = 80;
+const SIGNALS = ["SIGTERM", "SIGHUP", "SIGINT"] as const;
 
 /** A raw tty is the only way the picker reads single keys without echo, and it
  * can only draw when stdout is that same terminal. */
@@ -245,6 +246,8 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
   let focus = 0;
   let drawn = 0;
   let buffer = "";
+  // SIGINT is a user cancelling; SIGTERM and SIGHUP mean the process must die.
+  let fatal: string | null = null;
 
   const clearFrame = (): string => {
     const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
@@ -258,7 +261,12 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
     output.write(`${up}\r\x1b[J${lines.join("\n")}`);
   };
   const onResize = () => { draw(); };
-  const onSignal = () => { source.inject("\x03"); };
+  const onSignal = (signal: string) => {
+    if (signal === "SIGTERM" || signal === "SIGHUP") fatal = signal;
+    source.inject("\x03");
+  };
+  // A stream reports only that the event fired, so each listener knows its name.
+  const signalListeners = SIGNALS.map((signal) => [signal, () => onSignal(signal)] as const);
 
   try {
     // A terminal that is already raw belongs to whatever set it that way.
@@ -266,7 +274,7 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
     output.write(HIDE_CURSOR);
     draw();
     output.on?.("resize", onResize);
-    for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"] as const) signals?.on(signal, onSignal);
+    for (const [signal, listener] of signalListeners) signals?.on(signal, listener);
 
     for (;;) {
       if (!buffer) {
@@ -309,7 +317,9 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
       try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }
     }
     output.off?.("resize", onResize);
-    for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"] as const) signals?.off?.(signal, onSignal);
+    for (const [signal, listener] of signalListeners) signals?.off?.(signal, listener);
+    // The terminal is back, so the signal can now take its normal course.
+    if (fatal) io.fatal?.(fatal);
   }
 }
 const PLAIN_PROMPT = "Select Stoics [1-6, all, none, or a list; empty keeps the current set]: ";
