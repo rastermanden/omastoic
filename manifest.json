@@ -7,8 +7,9 @@
   "license": "MIT",
   "homepage": "https://github.com/rastermanden/omastoic",
   "description": "The Stoics on your Omarchy screensaver — braille portraits and cited quotes from Marcus Aurelius, Seneca, Epictetus and the founders of the school.",
-  "kinds": ["service"],
+  "kinds": ["service", "panel"],
   "entryPoints": {
-    "service": "Service.qml"
+    "service": "Service.qml",
+    "panel": "ui/Panel.qml"
   }
 }

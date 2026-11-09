@@ -74,6 +74,7 @@ omastoic preview               # MUTATING: select Stoics and launch the saver
 omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
 omastoic status
 omastoic config                # Stoics, their quotes, the interval, and a new quote
+omastoic ui                    # same settings in a Quickshell panel
 omastoic config --plain        # same, but the pickers are numbered prompts
 omastoic config --authors marcus,seneca --interval 90
 omastoic config --authors all --interval 60

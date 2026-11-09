@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "test": "bun test",
+    "qml": "bun scripts/check-qml.ts",
     "art": "bun scripts/fetch-sources.sh && bun scripts/transcode.ts"
   }
 }
