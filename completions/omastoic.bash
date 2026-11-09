@@ -8,7 +8,7 @@ _omastoic() {
   prev="${COMP_WORDS[COMP_CWORD - 1]}"
   cmd="${COMP_WORDS[1]}"
 
-  local commands="toggle next preview show config status uninstall help"
+  local commands="toggle next preview show config ui status uninstall help"
   local authors="@AUTHORS@"
 
   if ((COMP_CWORD == 1)); then
