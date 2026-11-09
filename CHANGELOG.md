@@ -30,6 +30,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A Quickshell settings panel (`Panel.qml`, `omastoic ui`) for the settings
+  `omastoic config` already owns: the Stoics in rotation, seconds per quote, and
+  one of your own quotes. It reads and writes through the CLI — `omastoic panel
+  state` and `omastoic panel apply` — so `config.json` keeps one validator, one
+  lock and one daemon restart. It reuses the host kit's `MultiSelect`, `Toggle`,
+  `NumberField`, `TextField`, `Button`, `PanelHero` and `PanelSectionHeader`.
+  Opening is left to the user: `omarchy-shell shell toggle
+  io.github.rastermanden.omastoic`, or a keybind on `omastoic ui`.
 - `omastoic config` asks for the Stoics with a small built-in terminal
   checklist: space or `x` toggles the focused row, `1`–`6` toggle the roster in
   its listed order, arrows or `j`/`k` move, `a` selects all, `n` none, Enter

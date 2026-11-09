@@ -6,12 +6,13 @@ import { PLUGIN_ID } from "../src/plugin-id.ts";
 
 const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-test("manifest describes a loadable third-party service with a matching release", () => {
+test("manifest describes a loadable third-party service and panel with a matching release", () => {
   expect(manifest.schemaVersion).toBe(1);
   expect(manifest.id).toBe(PLUGIN_ID);
-  expect(manifest.kinds).toEqual(["service"]);
+  expect(manifest.kinds).toEqual(["service", "panel"]);
   expect(manifest.entryPoints.service).toBe("Service.qml");
-  expect(existsSync(join(root, manifest.entryPoints.service))).toBe(true);
+  expect(manifest.entryPoints.panel).toBe("ui/Panel.qml");
+  for (const entry of Object.values(manifest.entryPoints)) expect(existsSync(join(root, entry))).toBe(true);
   expect(manifest.version).toBe(pkg.version);
 });
 
