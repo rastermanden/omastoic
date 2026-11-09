@@ -24,10 +24,21 @@ with its own idea of the format.
 
 2. **`ui/Panel.qml`, a `panel`-kind entry point.** The manifest gains
    `kinds: ["service", "panel"]` and `entryPoints.panel`. The host loads it on
-   demand and injects `shell`, `manifest`, `open(payload)` and `close()`. The
-   item is a `PanelWindow` overlay: scrim, `Esc` and scrim-click to dismiss, one
-   card in the middle. There is no bar-widget entry point, so nothing has to be
-   added to the bar layout in `shell.json`.
+   demand and injects `shell`, `manifest` (with `__sourceDir`), `open(payload)`
+   and `close()`. The item is a `PanelWindow` overlay: scrim, `Esc` and
+   scrim-click to dismiss, one card in the middle. There is no bar-widget entry
+   point, so nothing has to be added to the bar layout in `shell.json`.
+
+   The panel lives in `ui/` rather than at the plugin root because the host
+   would not load it from there: every attempt answered with Qt's
+   `File name case mismatch` (`Panel.qml[-1:-1]`), for that path only and
+   whatever the file contained. The same file one directory down loads, so the
+   entry point stays in `ui/`.
+
+   `bin/omastoic` is found through the manifest's `__sourceDir` — the host keeps
+   that field on the manifest it hands a third-party plugin — so the panel does
+   not assume where the plugin is installed. A bare `Panel` outside the host
+   (the smoke harness) falls back to the file's own directory.
 
 3. **Host components reused** from `/usr/share/omarchy/shell`:
    `qs.Ui.MultiSelect` (the Stoic roster), `qs.Ui.Toggle` (all six on/off),
@@ -45,15 +56,35 @@ with its own idea of the format.
 ## Steps
 
 - [x] Plan (this file).
-- [ ] `omastoic panel state` / `panel apply` in `src/cli.ts`, with Bun tests in
+- [x] `omastoic panel state` / `panel apply` in `src/cli.ts`, with Bun tests in
       `tests/panel.test.ts` that assert the saved JSON equals what
       `omastoic config --authors … --interval …` writes.
-- [ ] `omastoic ui` summon command, with the `omarchy-shell` stub in tests.
-- [ ] `ui/Panel.qml` plus manifest wiring.
-- [ ] `scripts/check-qml.ts`: rewrites the `qs.` imports against the host shell
+- [x] `omastoic ui` summon command, with the `omarchy-shell` stub in tests.
+- [x] `ui/Panel.qml` plus manifest wiring.
+- [x] `scripts/check-qml.ts`: rewrites the `qs.` imports against the host shell
       directory and runs `qmllint`, so the QML is machine-checked instead of
-      eyeballed.
-- [ ] `STATUS.md`: what works, how to open it, what is missing.
+      eyeballed. `bun run qml`, and `tests/qml.test.ts` fails on a real problem.
+- [x] `scripts/qml-smoke.ts`: loads the panel in a throwaway Quickshell config
+      against the host kit and a fake CLI, so open/read/edit/save is exercised
+      end to end (`bun scripts/qml-smoke.ts`; opt-in, it needs a Wayland
+      session).
+- [x] `STATUS.md`: what works, how to open it, what is missing.
+
+## Loading it in the host shell
+
+The shell keeps the QML it has compiled for the life of the process, and the
+`Qt.clearComponentCache()` call it makes on a plugin reload does not exist in
+the Qt 6.12 build shipped here, so an edited panel keeps running its first
+version. After changing panel code:
+
+1. `rsync -a --exclude .git --exclude node_modules <worktree>/ \
+    ~/.config/omarchy/plugins/io.github.rastermanden.omastoic/`
+2. `omarchy-restart-shell`
+3. `omarchy-shell shell toggle io.github.rastermanden.omastoic`
+
+A plugin reload on its own re-creates the panel's `Loader`, which closes an open
+panel and picks up a *new* entry-point URL, but it does not recompile a file
+whose URL the engine already knows.
 
 ## Non-goals
 
