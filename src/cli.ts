@@ -796,7 +796,7 @@ async function offerCustomQuote(io: ConfigIo): Promise<PromptedQuote | { kind: "
   return promptCustomQuote(io);
 }
 
-async function appendQuotes(lines: string[]): Promise<number> {
+async function appendQuotes(lines: string[], quiet = false): Promise<number> {
   const parsed: Quote[] = [];
   for (const line of lines) {
     let rows: Quote[];
@@ -841,7 +841,7 @@ async function appendQuotes(lines: string[]): Promise<number> {
   }
   mkdirSync(USER_CONFIG, { recursive: true });
   atomicWrite(path, next);
-  console.log(`→ added ${rows.length} ${rows.length === 1 ? "quote" : "quotes"} to ${path}`);
+  if (!quiet) console.log(`→ added ${rows.length} ${rows.length === 1 ? "quote" : "quotes"} to ${path}`);
   return 0;
 }
 
@@ -1028,6 +1028,130 @@ async function configure(rest: string[]): Promise<number> {
   return 0;
 }
 
+// --- panel ---------------------------------------------------------------------
+// The Quickshell panel (ui/Panel.qml) never reads or writes config.json itself.
+// It asks for this state, and sends one JSON object back; every write still goes
+// through the same validators, lock and daemon restart as `omastoic config`.
+
+/** What the panel renders. Read-only: no lock, no writes, no state directory. */
+async function panelState(): Promise<string> {
+  const roster = await authors();
+  const settings = await config();
+  const custom = await indexedCustom();
+  const catalog = [...choicesOf(await bundledBook()), ...choicesOf(custom.quotes)];
+  const selected = settings.authors?.length ? settings.authors : [...roster.keys()];
+  return JSON.stringify(
+    {
+      settings,
+      summary: describeSettings(settings, roster, catalog),
+      allAuthors: !settings.authors?.length,
+      authors: [...roster.values()].map((author) => ({
+        slug: author.slug,
+        name: author.name,
+        dates: author.dates,
+        selected: selected.includes(author.slug),
+      })),
+      customQuotes: custom.quotes.length,
+      customQuotesError: custom.error ?? "",
+      configPath: SETTINGS_FILE,
+      quotesPath: join(USER_CONFIG, "quotes.tsv"),
+    },
+    null,
+    2,
+  );
+}
+
+/** Collapse a panel field so it stays one quotes.tsv row, exactly like the prompts. */
+function panelQuote(raw: unknown): { quote: Quote } | { error: string } {
+  const row = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const fields = ["author", "citation", "text"].map((key) => (typeof row[key] === "string" ? flatField(row[key] as string) : ""));
+  if (fields.some((field) => !field)) return { error: "panel addQuote needs an author, a citation and the quote text" };
+  try {
+    const parsed = parseQuotes(`${fields[0]}\t${fields[1]}\t${fields[2]}\n`);
+    if (parsed.length !== 1) return { error: "panel addQuote needs one author, citation and text" };
+    return { quote: parsed[0] };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+/** One JSON object from the panel: the fields `config` owns, plus one quote to add. */
+async function panelApply(raw: string): Promise<number> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    payload = null;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    console.error("omastoic: panel apply expects a JSON object");
+    return 1;
+  }
+
+  const value = payload as Record<string, unknown>;
+  const roster = await authors();
+  const slugs = [...roster.keys()];
+  const bundled = await bundledBook();
+  const custom = await indexedCustom();
+  let catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
+  let next: Settings = { ...(await config()) };
+  let settingsTouched = false;
+
+  if (Object.hasOwn(value, "interval")) {
+    const seconds =
+      typeof value.interval === "number" || typeof value.interval === "string" ? parseInterval(String(value.interval)) : null;
+    if (seconds == null) {
+      console.error("omastoic: interval must be a whole number of seconds from 1 to 3600");
+      return 1;
+    }
+    next.interval = seconds;
+    settingsTouched = true;
+  }
+
+  if (Object.hasOwn(value, "authors")) {
+    if (!Array.isArray(value.authors) || !value.authors.every((slug) => typeof slug === "string")) {
+      console.error("omastoic: panel authors must be a list of Stoic slugs — an empty list means all six");
+      return 1;
+    }
+    const wanted = [...new Set(value.authors as string[])];
+    const unknown = wanted.find((slug) => !slugs.includes(slug));
+    if (unknown) {
+      console.error(`omastoic: unknown author ${unknown} — try: ${slugs.join(", ")} (or an empty list for all six)`);
+      return 1;
+    }
+    next.authors = wanted;
+    settingsTouched = true;
+  }
+
+  let added: Quote | null = null;
+  if (Object.hasOwn(value, "addQuote")) {
+    const quote = panelQuote(value.addQuote);
+    if ("error" in quote) {
+      console.error(`omastoic: ${quote.error}`);
+      return 1;
+    }
+    added = quote.quote;
+  }
+
+  let selectionTouched = false;
+  if (added) {
+    const code = await appendQuotes([quoteRow(added)], true);
+    if (code !== 0) return code;
+    const customNow = indexCustom(await customQuotes());
+    catalog = [...choicesOf(bundled), ...choicesOf(customNow)];
+    const remembered = rememberAddedQuote(next, customNow, added);
+    if (remembered !== next) {
+      next = remembered;
+      selectionTouched = true;
+    }
+  }
+
+  if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog, custom.readable);
+  if (settingsTouched || added) await restartDaemon();
+  console.log(await panelState());
+  return 0;
+}
+
 async function status(): Promise<number> {
   const quotes = await quoteBook();
   const byAuthor = new Map<string, number>();
@@ -1127,6 +1251,32 @@ async function main(): Promise<number> {
     case "config":
     case "configure":
       return configure(rest);
+    case "panel": {
+      const action = rest[0];
+      if (action === "state") {
+        console.log(await panelState());
+        return 0;
+      }
+      if (action === "apply") {
+        const raw = rest[1] ?? (process.stdin.isTTY ? "" : await Bun.stdin.text());
+        if (!raw.trim()) {
+          console.error("omastoic: panel apply expects a JSON object as an argument or on stdin");
+          return 1;
+        }
+        return panelApply(raw);
+      }
+      console.error("usage: omastoic panel state | omastoic panel apply '<json>'");
+      return 1;
+    }
+    case "ui": {
+      const toggled = Bun.spawnSync(["omarchy-shell", "shell", "toggle", PLUGIN_ID], { stdout: "ignore", stderr: "ignore" });
+      if (toggled.exitCode !== 0) {
+        console.error("omastoic: could not reach the Omarchy shell — is omarchy-shell running?");
+        console.error(`          otherwise: omarchy-shell shell toggle ${PLUGIN_ID}`);
+        return 1;
+      }
+      return 0;
+    }
     default:
       console.log(`omastoic — the Stoics on your Omarchy screensaver
 
@@ -1136,6 +1286,7 @@ async function main(): Promise<number> {
   omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
   omastoic config      choose Stoics, their quotes, and seconds, or add a quote
                        (--plain asks for numbers instead of keys)
+  omastoic ui          open the settings panel in the Omarchy shell
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 
@@ -1154,7 +1305,8 @@ Settings: ${join(USER_CONFIG, "config.json")}`);
 
 try {
   const command = Bun.argv[2];
-  const mutating = ["on", "off", "toggle", "next", "preview", "setup", "install", "uninstall", "config", "configure"].includes(command);
+  const mutating = ["on", "off", "toggle", "next", "preview", "setup", "install", "uninstall", "config", "configure"].includes(command)
+    || (command === "panel" && Bun.argv[3] === "apply");
   process.exit(await (mutating ? locked(STATE, main) : main()));
 } catch (error) {
   console.error(`omastoic: ${(error as Error).message}`);

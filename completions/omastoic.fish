@@ -5,6 +5,7 @@ complete -c omastoic -n "__fish_use_subcommand" -a next -d "Write another quote,
 complete -c omastoic -n "__fish_use_subcommand" -a preview -d "Write a new canvas and start the screensaver now"
 complete -c omastoic -n "__fish_use_subcommand" -a show -d "Print a canvas as text, without writing desktop or state files"
 complete -c omastoic -n "__fish_use_subcommand" -a config -d "Choose Stoics, their quotes, and seconds, or add a quote"
+complete -c omastoic -n "__fish_use_subcommand" -a ui -d "Open the settings panel in the Omarchy shell"
 complete -c omastoic -n "__fish_use_subcommand" -a status -d "Who has the screensaver, and what is in the quote book"
 complete -c omastoic -n "__fish_use_subcommand" -a uninstall -d "Take the service, menu row and plugin back out"
 complete -c omastoic -n "__fish_use_subcommand" -a help -d "Show help"
