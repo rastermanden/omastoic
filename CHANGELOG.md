@@ -30,7 +30,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- A Quickshell settings panel (`Panel.qml`, `omastoic ui`) for the settings
+- A Quickshell settings panel (`ui/Panel.qml`, `omastoic ui`) for the settings
   `omastoic config` already owns: the Stoics in rotation, seconds per quote, and
   one of your own quotes. It reads and writes through the CLI — `omastoic panel
   state` and `omastoic panel apply` — so `config.json` keeps one validator, one
