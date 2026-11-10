@@ -1052,6 +1052,13 @@ async function panelState(): Promise<string> {
         selected: selected.includes(author.slug),
       })),
       customQuotes: custom.quotes.length,
+      customList: custom.quotes.map((quote) => ({
+        id: quote.id,
+        author: quote.author,
+        name: roster.get(quote.author)?.name ?? quote.author,
+        citation: quote.citation,
+        text: quote.text,
+      })),
       customQuotesError: custom.error ?? "",
       configPath: SETTINGS_FILE,
       quotesPath: join(USER_CONFIG, "quotes.tsv"),

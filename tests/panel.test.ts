@@ -96,6 +96,8 @@ test("panel apply adds a custom quote and keeps it in rotation", async () => {
     expect(result.stderr).toBe("");
     const state = stateOf(result);
     expect(state.customQuotes).toBe(1);
+    expect(state.customList).toHaveLength(1);
+    expect(state.customList[0].id).toBe("c01");
     expect(readFileSync(quotesPath(s), "utf8")).toContain("marcus\tMeditations IX.1\tThe panel wrote this line.");
     expect(saved(s)).toEqual({ interval: 45, authors: ["marcus"] });
     // The line is in rotation: `config --list` stars it, and show renders it.

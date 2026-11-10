@@ -24,6 +24,7 @@ export const STATE_JSON = {
     { slug: "zeno", name: "Zeno of Citium", dates: "c. 334 – 262 BC", selected: false },
   ],
   customQuotes: 1,
+  customList: [{ id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Meditations IX.1", text: "Your line." }],
   customQuotesError: "",
   configPath: "/dev/null",
   quotesPath: "/dev/null",
@@ -95,7 +96,7 @@ ShellRoot {
     Timer {
       interval: 1800; running: true; repeat: false
       onTriggered: {
-        console.log("loaded:", panel.interval, panel.selectedAuthors.join(","), panel.customQuotes, "error=" + panel.error)
+        console.log("loaded:", panel.interval, panel.selectedAuthors.join(","), panel.customQuotes, "error=" + panel.error, "list=" + panel.customList.length)
         // A partial pick turns "all" on; "all" turned off picks nobody, and nobody blocks Save.
         panel.toggleAll()
         console.log("toggled on:", panel.selectedAuthors.join(","), panel.allPicked)
@@ -155,13 +156,13 @@ if (import.meta.main) {
     console.log(result.log.trim());
     for (const needle of [
       "summary:",
-      "loaded: 90 marcus,seneca 1 error=\n",
+      "loaded: 90 marcus,seneca 1 error= list=1",
       "toggled on: marcus,seneca,zeno true",
       "toggled off: 0 true",
       "half quote: false Meditations IX.1 Your quote needs quote text",
       "name author: marcus",
       "other author: tomas-sowell",
-      "saved: 30 marcus,seneca,zeno  Saved. Your quote is in rotation.",
+      "saved: 30 marcus,seneca,zeno  Saved. Your quote is at the top of the list above and in rotation.",
     ]) {
       if (!result.log.includes(needle)) {
         console.error(`qml smoke: missing ${JSON.stringify(needle)}`);

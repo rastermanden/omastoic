@@ -40,6 +40,7 @@ Item {
   property var roster: []
   property string summary: ""
   property int customQuotes: 0
+  property var customList: []
   property string busyLabel: ""
   readonly property bool busy: busyLabel !== ""
   property string error: ""
@@ -124,7 +125,7 @@ Item {
     busyLabel = ""
     if (run.exitCode !== 0) error = run.stderr.trim() !== "" ? run.stderr.trim() : fallback
     else error = adoptState(run.stdout) ? "" : "Could not read the omastoic state."
-    if (run === applyRun && error === "") notice = run.addedQuote ? "Saved. Your quote is in rotation." : "Saved."
+    if (run === applyRun && error === "") notice = run.addedQuote ? "Saved. Your quote is at the top of the list above and in rotation." : "Saved."
   }
 
   function clearNotice() {
@@ -150,6 +151,7 @@ Item {
     roster = parsed.authors instanceof Array ? parsed.authors : []
     summary = String(parsed.summary || "")
     customQuotes = Number(parsed.customQuotes) || 0
+    customList = parsed.customList instanceof Array ? parsed.customList : []
     interval = Number(settings.interval) || 60
     newCitation = ""
     newText = ""
@@ -340,6 +342,49 @@ Item {
           PanelSectionHeader {
             text: "Your own quote" + (root.customQuotes > 0 ? " · " + root.customQuotes + " added" : "")
             foreground: Commons.Color.popups.text
+          }
+
+          // Your quotes as `panel state` reports them, newest first, so a save is visible here.
+          ListView {
+            id: customView
+            width: parent.width
+            visible: root.customList.length > 0
+            height: Math.min(contentHeight, Style.space(150))
+            clip: true
+            spacing: Style.space(8)
+            boundsBehavior: Flickable.StopAtBounds
+            model: root.customList.slice().reverse()
+            delegate: Column {
+              required property var modelData
+              width: customView.width
+              spacing: Style.space(2)
+              Text {
+                width: parent.width
+                text: "“" + modelData.text + "”"
+                color: Commons.Color.popups.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+              Text {
+                width: parent.width
+                text: "— " + modelData.name + ", " + modelData.citation
+                color: Qt.darker(Commons.Color.popups.text, 1.4)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
+            }
+          }
+
+          Text {
+            width: parent.width
+            visible: root.customList.length === 0
+            text: "No quotes of your own yet. Add one below."
+            color: Qt.darker(Commons.Color.popups.text, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
           }
 
           TextField {
