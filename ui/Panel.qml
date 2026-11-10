@@ -63,9 +63,15 @@ Item {
   property string listFilter: "all"
   property string search: ""
   property var expanded: ({})
+  // The list follows the chips: picked Stoics' quotes plus your own.
+  readonly property var pickedQuotes: quotes.filter(function(quote) {
+    return quote.custom || !quote.switchable || picked.indexOf(quote.author) !== -1
+  })
+  readonly property int pickedOnCount: pickedQuotes.filter(function(quote) { return quote.inRotation }).length
   readonly property var shownQuotes: {
     const needle = search.trim().toLowerCase()
-    const ordered = mine.slice().reverse().concat(quotes.filter(function(quote) { return !quote.custom }))
+    const book = pickedQuotes.filter(function(quote) { return !quote.custom })
+    const ordered = mine.slice().reverse().concat(book)
     return ordered.filter(function(quote) {
       if (listFilter === "on" && !quote.inRotation) return false
       if (listFilter === "off" && quote.inRotation) return false
@@ -461,7 +467,7 @@ Item {
             text: root.picked.length === 0
               ? (root.mineOn ? "No Stoics: only your own quotes rotate." : "Nothing is on, so the whole book rotates.")
               : root.picked.length === root.roster.length ? "All six Stoics, plus your own quotes that are on."
-              : "Click a name to add or drop that Stoic."
+              : "Click a name to add or drop that Stoic. The list shows only the picked ones."
           }
 
           NumberField {
@@ -486,9 +492,9 @@ Item {
               id: filterTags
               value: root.listFilter
               options: [
-                { value: "all", label: "All " + root.quotes.length },
-                { value: "on", label: "On " + root.rotatingCount },
-                { value: "off", label: "Off " + (root.quotes.length - root.rotatingCount) },
+                { value: "all", label: "All " + root.pickedQuotes.length },
+                { value: "on", label: "On " + root.pickedOnCount },
+                { value: "off", label: "Off " + (root.pickedQuotes.length - root.pickedOnCount) },
                 { value: "mine", label: "Mine " + root.mine.length }
               ]
               spacing: Style.space(6)
@@ -699,6 +705,7 @@ Item {
             width: parent.width
             visible: root.loaded && root.shownQuotes.length === 0
             text: root.listFilter === "mine" && root.mine.length === 0 ? "No quotes of your own yet. Use + Add quote."
+              : root.picked.length === 0 && root.mine.length === 0 ? "No Stoics picked. Click a name above, or add a quote of your own."
               : "No quote matches."
           }
         }

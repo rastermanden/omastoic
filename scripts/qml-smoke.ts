@@ -107,8 +107,12 @@ ShellRoot {
         panel.listFilter = "off"; console.log("off:", harness.ids())
         panel.listFilter = "mine"; console.log("mine:", harness.ids())
         panel.listFilter = "all"
-        panel.search = "zeno"; console.log("search:", harness.ids())
+        panel.search = "II.5"; console.log("search:", harness.ids())
         panel.search = ""
+        // The list follows the chips: an unpicked Stoic's quotes leave it.
+        panel.settings = Object.assign({}, panel.settings, { authors: ["seneca"] })
+        console.log("chips:", harness.ids())
+        panel.settings = Object.assign({}, panel.settings, { authors: ["marcus", "seneca"] })
         // Names become slugs; a Stoic's short or full name becomes that Stoic's slug.
         panel.newAuthor = "Seneca"; console.log("slug:", panel.authorSlug)
         panel.newAuthor = "Marcus Aurelius"; console.log("slug:", panel.authorSlug)
@@ -162,11 +166,12 @@ if (import.meta.main) {
   } else {
     console.log(result.log.trim());
     for (const needle of [
-      "loaded: marcus,seneca 2 c01,q01,q02 true",
+      "loaded: marcus,seneca 2 c01,q01 true",
       "on: c01,q01",
-      "off: q02",
+      "off: \n",
       "mine: c01",
-      "search: q02",
+      "search: q01",
+      "chips: c01",
       "slug: seneca",
       "slug: marcus",
       "slug: tomas-sowell Needs a citation and the quote.",
