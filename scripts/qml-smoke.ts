@@ -114,6 +114,13 @@ ShellRoot {
         panel.quoteState = "on"
         console.log("on:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
         panel.quoteState = "any"
+        // Unsaved picks move the list: drop Marcus, add Zeno.
+        panel.selectedAuthors = ["seneca", "zeno"]
+        panel.quoteState = "on"
+        console.log("picked:", panel.picksChanged, panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
+        panel.selectedAuthors = ["marcus", "seneca"]
+        console.log("unpicked:", panel.picksChanged, panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
+        panel.quoteState = "any"
         // A partial pick turns "all" on; "all" turned off picks nobody, and nobody blocks Save.
         panel.toggleAll()
         console.log("toggled on:", panel.selectedAuthors.join(","), panel.allPicked)
@@ -189,6 +196,8 @@ if (import.meta.main) {
       "stoics: q01,q02",
       "off: q02",
       "on: c01,q01",
+      "picked: true q02",
+      "unpicked: false c01,q01",
       "toggled on: marcus,seneca,zeno true",
       "toggled off: 0 true",
       "half quote: false Meditations IX.1 Your quote needs quote text",

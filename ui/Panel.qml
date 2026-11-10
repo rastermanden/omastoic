@@ -47,16 +47,27 @@ Item {
   // Which rotation state the list shows: "any", "on" (in rotation) or "off".
   property string quoteState: "any"
   readonly property int mineCount: quotes.filter(function(quote) { return quote.custom }).length
-  readonly property int rotatingCount: quotes.filter(function(quote) { return quote.inRotation }).length
+  // The list follows the Stoics picked above before Save: with the picks as
+  // saved it shows the CLI's own rotation; with changed picks it shows what
+  // Save would put in rotation.
+  readonly property var savedAuthors: settings.authors instanceof Array && settings.authors.length ? settings.authors : allSlugs
+  readonly property bool picksChanged: selectedAuthors.length !== savedAuthors.length
+    || selectedAuthors.some(function(slug) { return savedAuthors.indexOf(slug) === -1 })
+  readonly property var listedQuotes: quotes.map(function(quote) {
+    const on = !picksChanged ? quote.inRotation
+      : !quote.switchable || (quote.kept && selectedAuthors.indexOf(quote.author) !== -1)
+    return Object.assign({}, quote, { on: on })
+  })
+  readonly property int rotatingCount: listedQuotes.filter(function(quote) { return quote.on }).length
   // Newest custom quotes first, then the Stoics' book in its own order.
   readonly property var shownQuotes: {
     const needle = quoteFilter.trim().toLowerCase()
-    const mine = quotes.filter(function(quote) { return quote.custom }).reverse()
-    const book = quotes.filter(function(quote) { return !quote.custom })
+    const mine = listedQuotes.filter(function(quote) { return quote.custom }).reverse()
+    const book = listedQuotes.filter(function(quote) { return !quote.custom })
     const source = quoteSource === "mine" ? mine : quoteSource === "stoics" ? book : mine.concat(book)
     return source.filter(function(quote) {
-      if (quoteState === "on" && !quote.inRotation) return false
-      if (quoteState === "off" && quote.inRotation) return false
+      if (quoteState === "on" && !quote.on) return false
+      if (quoteState === "off" && quote.on) return false
       return needle === "" || (quote.text + " " + quote.name + " " + quote.citation).toLowerCase().indexOf(needle) !== -1
     })
   }
@@ -404,7 +415,7 @@ Item {
           PanelSeparator { foreground: Commons.Color.popups.text }
 
           PanelSectionHeader {
-            text: "All quotes · " + root.quotes.length + ", " + root.rotatingCount + " in rotation"
+            text: "All quotes · " + root.quotes.length + ", " + root.rotatingCount + " in rotation" + (root.picksChanged ? " after Save" : "")
             foreground: Commons.Color.popups.text
           }
 
@@ -475,7 +486,7 @@ Item {
                 anchors.right: quoteSwitch.left
                 anchors.rightMargin: Style.space(10)
                 spacing: Style.space(2)
-                opacity: quoteRow.modelData.inRotation ? 1 : 0.45
+                opacity: quoteRow.modelData.on ? 1 : 0.45
                 Text {
                   width: parent.width
                   text: "“" + quoteRow.modelData.text + "”"
@@ -488,7 +499,7 @@ Item {
                   width: parent.width
                   text: "— " + quoteRow.modelData.name + ", " + quoteRow.modelData.citation
                     + (quoteRow.modelData.custom ? " · yours" : "")
-                    + (quoteRow.modelData.inRotation ? "" : quoteRow.modelData.kept ? " · Stoic not picked" : " · off")
+                    + (quoteRow.modelData.on ? "" : quoteRow.modelData.kept ? " · Stoic not picked" : " · off")
                   color: Qt.darker(Commons.Color.popups.text, 1.4)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
