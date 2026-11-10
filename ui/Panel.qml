@@ -40,7 +40,18 @@ Item {
   property var roster: []
   property string summary: ""
   property int customQuotes: 0
-  property var customList: []
+  property var quotes: []
+  property string quoteFilter: ""
+  readonly property int rotatingCount: quotes.filter(function(quote) { return quote.inRotation }).length
+  // Newest custom quotes first, then the Stoics' book in its own order.
+  readonly property var shownQuotes: {
+    const needle = quoteFilter.trim().toLowerCase()
+    const mine = quotes.filter(function(quote) { return quote.custom }).reverse()
+    const book = quotes.filter(function(quote) { return !quote.custom })
+    return mine.concat(book).filter(function(quote) {
+      return needle === "" || (quote.text + " " + quote.name + " " + quote.citation).toLowerCase().indexOf(needle) !== -1
+    })
+  }
   property string busyLabel: ""
   readonly property bool busy: busyLabel !== ""
   property string error: ""
@@ -125,7 +136,7 @@ Item {
     busyLabel = ""
     if (run.exitCode !== 0) error = run.stderr.trim() !== "" ? run.stderr.trim() : fallback
     else error = adoptState(run.stdout) ? "" : "Could not read the omastoic state."
-    if (run === applyRun && error === "") notice = run.addedQuote ? "Saved. Your quote is at the top of the list above and in rotation." : "Saved."
+    if (run === applyRun && error === "") notice = run.addedQuote ? "Saved. Your quote is at the top of the quote list and in rotation." : "Saved."
   }
 
   function clearNotice() {
@@ -151,7 +162,7 @@ Item {
     roster = parsed.authors instanceof Array ? parsed.authors : []
     summary = String(parsed.summary || "")
     customQuotes = Number(parsed.customQuotes) || 0
-    customList = parsed.customList instanceof Array ? parsed.customList : []
+    quotes = parsed.quotes instanceof Array ? parsed.quotes : []
     interval = Number(settings.interval) || 60
     newCitation = ""
     newText = ""
@@ -340,24 +351,31 @@ Item {
           PanelSeparator { foreground: Commons.Color.popups.text }
 
           PanelSectionHeader {
-            text: "Your own quote" + (root.customQuotes > 0 ? " · " + root.customQuotes + " added" : "")
+            text: "All quotes · " + root.quotes.length + ", " + root.rotatingCount + " in rotation"
             foreground: Commons.Color.popups.text
           }
 
-          // Your quotes as `panel state` reports them, newest first, so a save is visible here.
-          ListView {
-            id: customView
+          TextField {
+            id: filterField
             width: parent.width
-            visible: root.customList.length > 0
-            height: Math.min(contentHeight, Style.space(150))
+            placeholderText: "Search quotes, authors or citations"
+            foreground: Commons.Color.popups.text
+            onTextChanged: root.quoteFilter = text
+          }
+
+          ListView {
+            id: quoteView
+            width: parent.width
+            height: Style.space(240)
             clip: true
-            spacing: Style.space(8)
+            spacing: Style.space(10)
             boundsBehavior: Flickable.StopAtBounds
-            model: root.customList.slice().reverse()
+            model: root.shownQuotes
             delegate: Column {
               required property var modelData
-              width: customView.width
+              width: quoteView.width
               spacing: Style.space(2)
+              opacity: modelData.inRotation ? 1 : 0.45
               Text {
                 width: parent.width
                 text: "“" + modelData.text + "”"
@@ -369,6 +387,8 @@ Item {
               Text {
                 width: parent.width
                 text: "— " + modelData.name + ", " + modelData.citation
+                  + (modelData.custom ? " · yours" : "")
+                  + (modelData.inRotation ? "" : " · not in rotation")
                 color: Qt.darker(Commons.Color.popups.text, 1.4)
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
@@ -379,12 +399,19 @@ Item {
 
           Text {
             width: parent.width
-            visible: root.customList.length === 0
-            text: "No quotes of your own yet. Add one below."
+            visible: root.shownQuotes.length === 0
+            text: root.quotes.length ? "No quote matches that search." : "No quotes loaded yet."
             color: Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
+          }
+
+          PanelSeparator { foreground: Commons.Color.popups.text }
+
+          PanelSectionHeader {
+            text: "Your own quote" + (root.customQuotes > 0 ? " · " + root.customQuotes + " added" : "")
+            foreground: Commons.Color.popups.text
           }
 
           TextField {

@@ -1038,8 +1038,10 @@ async function panelState(): Promise<string> {
   const roster = await authors();
   const settings = await config();
   const custom = await indexedCustom();
-  const catalog = [...choicesOf(await bundledBook()), ...choicesOf(custom.quotes)];
+  const bundled = await bundledBook();
+  const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   const selected = settings.authors?.length ? settings.authors : [...roster.keys()];
+  const rotating = new Set<Quote>(inRotation(bundled, custom.quotes, settings).quotes);
   return JSON.stringify(
     {
       settings,
@@ -1052,12 +1054,15 @@ async function panelState(): Promise<string> {
         selected: selected.includes(author.slug),
       })),
       customQuotes: custom.quotes.length,
-      customList: custom.quotes.map((quote) => ({
+      // Every quote, the Stoics' book first and then yours, marked when in rotation.
+      quotes: [...bundled, ...custom.quotes].map((quote) => ({
         id: quote.id,
         author: quote.author,
         name: roster.get(quote.author)?.name ?? quote.author,
         citation: quote.citation,
         text: quote.text,
+        custom: quote.id.startsWith("c"),
+        inRotation: rotating.has(quote),
       })),
       customQuotesError: custom.error ?? "",
       configPath: SETTINGS_FILE,
