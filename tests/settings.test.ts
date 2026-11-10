@@ -10,7 +10,7 @@ import {
   DEFAULT_INTERVAL,
   normalizeSettings,
 } from "../src/settings.ts";
-import { indexBundled, type Quote } from "../src/canvas.ts";
+import { indexBundled, indexCustom, type Quote } from "../src/canvas.ts";
 
 const roster = ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"];
 
@@ -120,7 +120,10 @@ test("rotation keeps custom lines and falls back when a filter matches nothing",
   // Your own line by someone outside the roster survives the author list.
   const outsider = [{ author: "tomas-sowell", citation: "Basic Economics", text: "outside" }];
   expect(inRotation(bundled, outsider, { authors: ["marcus"] }).quotes.map((quote) => quote.text)).toContain("outside");
-  expect(inRotation(bundled, [{ ...custom[0], author: "seneca" }], { authors: ["marcus"] }).quotes.map((quote) => quote.author)).not.toContain("seneca");
+  // Your own lines follow their switch, not the Stoic picks; mine-only drops the book.
+  expect(inRotation(bundled, [{ ...custom[0], author: "seneca" }], { authors: ["marcus"] }).quotes.map((quote) => quote.text)).toContain("added");
+  expect(inRotation(bundled, custom, { mineOnly: true }).quotes.map((quote) => quote.text)).toEqual(["added"]);
+  expect(inRotation(bundled, indexCustom(custom), { mineOnly: true, quotes: { marcus: ["q01", "c00"] } })).toMatchObject({ ignoredAuthors: true });
   expect(inRotation(bundled, [], { authors: ["seneca"], quotes: { seneca: [] } })).toEqual({
     quotes: bundled,
     ignoredSelection: false,

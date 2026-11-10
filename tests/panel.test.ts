@@ -163,6 +163,27 @@ test("panel apply switches single quotes off and on, like config --quotes", asyn
   } finally { s.cleanup(); }
 });
 
+test("panel apply saves mine only, and picking Stoics again clears it", async () => {
+  const s = sandbox();
+  try {
+    await s.cli(["panel", "apply", JSON.stringify({ addQuote: { author: "tomas-sowell", citation: "Basic Economics", text: "Trade-offs." } })]);
+    const only = await s.cli(["panel", "apply", JSON.stringify({ mineOnly: true })]);
+    expect(only.code).toBe(0);
+    const state = stateOf(only);
+    expect(state.mineOnly).toBe(true);
+    expect(state.authors.every((author: { selected: boolean }) => !author.selected)).toBe(true);
+    expect(state.quotes.filter((quote: { inRotation: boolean }) => quote.inRotation).map((quote: { custom: boolean }) => quote.custom)).toEqual([true]);
+    expect(saved(s).mineOnly).toBe(true);
+
+    const back = await s.cli(["panel", "apply", JSON.stringify({ authors: ["seneca"], mineOnly: false })]);
+    expect(stateOf(back).mineOnly).toBe(false);
+    expect(saved(s).mineOnly).toBeUndefined();
+    // Your own quote keeps rotating beside the Stoic you picked.
+    expect(stateOf(back).quotes.find((quote: { custom: boolean }) => quote.custom).inRotation).toBe(true);
+    expect((await s.cli(["panel", "apply", JSON.stringify({ mineOnly: "yes" })])).code).toBe(1);
+  } finally { s.cleanup(); }
+});
+
 test("panel apply reads the same JSON from stdin", async () => {
   const s = sandbox();
   try {

@@ -121,7 +121,7 @@ ShellRoot {
         panel.selectedAuthors = ["marcus", "seneca"]
         console.log("unpicked:", panel.picksChanged, panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
         panel.quoteState = "any"
-        // A partial pick turns "all" on; "all" turned off picks nobody, and nobody blocks Save.
+        // A partial pick turns "all" on; "all" turned off picks nobody, which saves as mine only.
         panel.toggleAll()
         console.log("toggled on:", panel.selectedAuthors.join(","), panel.allPicked)
         panel.toggleAll()
@@ -196,10 +196,10 @@ if (import.meta.main) {
       "stoics: q01,q02",
       "off: q02",
       "on: c01,q01",
-      "picked: true q02",
+      "picked: true c01,q02",
       "unpicked: false c01,q01",
       "toggled on: marcus,seneca,zeno true",
-      "toggled off: 0 true",
+      "toggled off: 0 false",
       "half quote: false Meditations IX.1 Your quote needs quote text",
       "name author: marcus",
       "other author: tomas-sowell",

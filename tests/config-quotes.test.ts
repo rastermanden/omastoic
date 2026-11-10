@@ -59,9 +59,12 @@ test("config selects bundled quotes, lists them, and still adds custom lines", a
 
     const one = await s.cli(["config", "--authors", "epictetus", "--quotes", "epictetus=q49"]);
     expect(one.code).toBe(0);
-    const epictetus = await s.cli(["show", "--cols", "92", "--rows", "25"]);
-    expect(epictetus.stdout).toContain("I must die");
-    expect(epictetus.stdout).not.toContain("fetter my leg");
+    // Epictetus' one line, plus your own line, which follows its own switch.
+    const shows: string[] = [];
+    for (let i = 0; i < 16; i++) shows.push((await s.cli(["show", "--cols", "92", "--rows", "25"])).stdout);
+    expect(shows.some((canvas) => canvas.includes("I must die"))).toBe(true);
+    expect(shows.every((canvas) => canvas.includes("I must die") || canvas.includes("A custom sentence for the saver."))).toBe(true);
+    expect(shows.some((canvas) => canvas.includes("fetter my leg"))).toBe(false);
 
     const rejected = await s.cli(["config", "--quotes", "marcus=q99"]);
     expect(rejected.code).toBe(1);

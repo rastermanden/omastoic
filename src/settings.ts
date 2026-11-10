@@ -6,6 +6,8 @@ export type Settings = {
   authors?: string[];
   /** Quote ids kept for that Stoic. A missing author means every bundled and custom line. */
   quotes?: Record<string, string[]>;
+  /** Only your own quotes rotate; no Stoic's book. */
+  mineOnly?: boolean;
 };
 
 export const DEFAULT_INTERVAL = 60;
@@ -76,6 +78,7 @@ export function normalizeSettings(
     const quotes = quoteAllowList(value.quotes, roster, catalog, dropUnknownCustom);
     if (quotes) result.quotes = quotes;
   }
+  if (value.mineOnly === true) result.mineOnly = true;
   return result;
 }
 export const MIN_INTERVAL = 1;
@@ -180,6 +183,7 @@ export function compactSettings(
     const quotes = quoteAllowList(settings.quotes, roster, catalog, dropUnknownCustom);
     if (quotes) out.quotes = quotes;
   }
+  if (settings.mineOnly) out.mineOnly = true;
   return out;
 }
 
@@ -211,24 +215,34 @@ export function inRotation(
     ...bundled.filter((quote) => quoteKept(quote.id, settings.quotes?.[quote.author])),
     ...keptCustom,
   ];
+  // Mine only: your own kept lines, or the whole book when none are left.
+  if (settings.mineOnly) {
+    return keptCustom.length
+      ? { quotes: keptCustom, ignoredSelection: false, ignoredAuthors: false }
+      : { quotes: [...bundled], ignoredSelection: false, ignoredAuthors: true };
+  }
   const ignoredSelection = picked.length === 0 && bundled.length + custom.length > 0;
   const pool = ignoredSelection ? [...bundled, ...keptCustom] : picked;
   if (!settings.authors?.length) return { quotes: pool, ignoredSelection, ignoredAuthors: false };
-  // Your own lines by someone outside the bundled roster have no Stoic to pick,
-  // so the author list never filters them out.
-  const stoics = new Set(bundled.map((quote) => quote.author));
+  // Your own lines follow their own switch, never the Stoic picks.
+  const mine = new Set<Quote>(keptCustom);
   const wanted = new Set(settings.authors);
-  const filtered = pool.filter((quote) => wanted.has(quote.author) || !stoics.has(quote.author));
-  if (filtered.length) return { quotes: filtered, ignoredSelection, ignoredAuthors: false };
+  const filtered = pool.filter((quote) => wanted.has(quote.author) || mine.has(quote));
+  if (filtered.some((quote) => !mine.has(quote))) return { quotes: filtered, ignoredSelection, ignoredAuthors: false };
   return { quotes: [...bundled, ...keptCustom], ignoredSelection, ignoredAuthors: true };
 }
 
 export function describeSettings(settings: Settings, names: Map<string, { name: string }>, catalog: QuoteChoice[] = []): string {
   const seconds = settings.interval ?? DEFAULT_INTERVAL;
+  if (settings.mineOnly) {
+    const mine = catalog.filter((row) => row.id.startsWith("c"));
+    const kept = mine.filter((row) => quoteKept(row.id, settings.quotes?.[row.author])).length;
+    return `your own quotes only · ${kept} of ${mine.length} quotes · every ${seconds}s`;
+  }
   const who = settings.authors?.length
     ? settings.authors.map((slug) => names.get(slug)?.name ?? slug).join(", ")
     : "all six";
-  const active = catalog.filter((row) => !settings.authors?.length || settings.authors.includes(row.author) || (names.size > 0 && !names.has(row.author)));
+  const active = catalog.filter((row) => !settings.authors?.length || settings.authors.includes(row.author) || row.id.startsWith("c"));
   const restricted = !!settings.quotes && active.some((row) => Object.hasOwn(settings.quotes ?? {}, row.author));
   if (!restricted) return `${who} · every ${seconds}s`;
   const kept = active.filter((row) => quoteKept(row.id, settings.quotes?.[row.author])).length;

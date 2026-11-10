@@ -50,12 +50,13 @@ Item {
   // The list follows the Stoics picked above before Save: with the picks as
   // saved it shows the CLI's own rotation; with changed picks it shows what
   // Save would put in rotation.
-  readonly property var savedAuthors: settings.authors instanceof Array && settings.authors.length ? settings.authors : allSlugs
+  readonly property var savedAuthors: settings.mineOnly ? [] : settings.authors instanceof Array && settings.authors.length ? settings.authors : allSlugs
   readonly property bool picksChanged: selectedAuthors.length !== savedAuthors.length
     || selectedAuthors.some(function(slug) { return savedAuthors.indexOf(slug) === -1 })
   readonly property var listedQuotes: quotes.map(function(quote) {
     const on = !picksChanged ? quote.inRotation
-      : !quote.switchable || (quote.kept && selectedAuthors.indexOf(quote.author) !== -1)
+      : quote.custom || !quote.switchable ? quote.kept
+      : quote.kept && selectedAuthors.indexOf(quote.author) !== -1
     return Object.assign({}, quote, { on: on })
   })
   readonly property int rotatingCount: listedQuotes.filter(function(quote) { return quote.on }).length
@@ -101,7 +102,8 @@ Item {
   // "all": the CLI reads an empty list as every Stoic, so the panel never sends one.
   readonly property string blocker: {
     var missing = []
-    if (selectedAuthors.length === 0) return "Pick at least one Stoic, or turn on all of them."
+    if (selectedAuthors.length === 0 && !quotes.some(function(quote) { return quote.custom && quote.kept }))
+      return "Pick a Stoic, or switch on one of your own quotes to rotate only yours."
     if (quoteStarted && !quoteReady) {
       if (authorSlug === "") missing.push("author")
       if (newCitation.trim() === "") missing.push("citation")
@@ -192,7 +194,7 @@ Item {
     if (roster.length && newAuthor.trim() === "")
       newAuthor = roster[0].slug
 
-    setAuthors(saved.length ? saved.slice() : allSlugs)
+    setAuthors(parsed.mineOnly ? [] : saved.length ? saved.slice() : allSlugs)
     secondsField.field.value = interval
     authorField.text = newAuthor
     citationField.text = ""
@@ -243,7 +245,10 @@ Item {
 
   function save() {
     if (busy || blocker !== "") return
-    var payload = { interval: interval, authors: selectedAuthors }
+    // Nobody picked means only your own quotes; an empty list would mean every Stoic.
+    var payload = selectedAuthors.length
+      ? { interval: interval, authors: selectedAuthors, mineOnly: false }
+      : { interval: interval, mineOnly: true }
     if (quoteReady) {
       payload.addQuote = { author: authorSlug, citation: newCitation, text: newText }
     }
@@ -397,7 +402,7 @@ Item {
             options: root.roster.map(function(author) {
               return { value: author.slug, label: author.name, description: author.dates }
             })
-            noSelectionText: "None picked"
+            noSelectionText: "None: only your own quotes"
             onChanged: function(values) { root.selectedAuthors = values; root.clearNotice() }
           }
 

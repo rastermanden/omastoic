@@ -919,6 +919,7 @@ async function configure(rest: string[]): Promise<number> {
       const picked = await pickAuthorList(roster, current.authors ?? [], io);
       if (picked == null) return 0;
       next.authors = picked;
+      delete next.mineOnly;
       const editing = picked.length ? picked : slugs;
       next.quotes = { ...(current.quotes ?? {}) };
       for (const slug of editing) {
@@ -956,6 +957,7 @@ async function configure(rest: string[]): Promise<number> {
         return 1;
       }
       next.authors = parsed;
+      delete next.mineOnly;
     }
     if (intervalFlag != null) {
       const parsed = parseInterval(intervalFlag);
@@ -1040,13 +1042,14 @@ async function panelState(): Promise<string> {
   const custom = await indexedCustom();
   const bundled = await bundledBook();
   const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
-  const selected = settings.authors?.length ? settings.authors : [...roster.keys()];
+  const selected = settings.mineOnly ? [] : settings.authors?.length ? settings.authors : [...roster.keys()];
   const rotating = new Set<Quote>(inRotation(bundled, custom.quotes, settings).quotes);
   return JSON.stringify(
     {
       settings,
       summary: describeSettings(settings, roster, catalog),
-      allAuthors: !settings.authors?.length,
+      allAuthors: !settings.authors?.length && !settings.mineOnly,
+      mineOnly: !!settings.mineOnly,
       authors: [...roster.values()].map((author) => ({
         slug: author.slug,
         name: author.name,
@@ -1154,6 +1157,17 @@ async function panelApply(raw: string): Promise<number> {
       return 1;
     }
     next.authors = wanted;
+    delete next.mineOnly;
+    settingsTouched = true;
+  }
+
+  if (Object.hasOwn(value, "mineOnly")) {
+    if (typeof value.mineOnly !== "boolean") {
+      console.error("omastoic: panel mineOnly must be true or false");
+      return 1;
+    }
+    if (value.mineOnly) next.mineOnly = true;
+    else delete next.mineOnly;
     settingsTouched = true;
   }
 
