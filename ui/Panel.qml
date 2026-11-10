@@ -42,13 +42,17 @@ Item {
   property int customQuotes: 0
   property var quotes: []
   property string quoteFilter: ""
+  // Which quotes the list shows: "all", "stoics" or "mine".
+  property string quoteSource: "all"
+  readonly property int mineCount: quotes.filter(function(quote) { return quote.custom }).length
   readonly property int rotatingCount: quotes.filter(function(quote) { return quote.inRotation }).length
   // Newest custom quotes first, then the Stoics' book in its own order.
   readonly property var shownQuotes: {
     const needle = quoteFilter.trim().toLowerCase()
     const mine = quotes.filter(function(quote) { return quote.custom }).reverse()
     const book = quotes.filter(function(quote) { return !quote.custom })
-    return mine.concat(book).filter(function(quote) {
+    const source = quoteSource === "mine" ? mine : quoteSource === "stoics" ? book : mine.concat(book)
+    return source.filter(function(quote) {
       return needle === "" || (quote.text + " " + quote.name + " " + quote.citation).toLowerCase().indexOf(needle) !== -1
     })
   }
@@ -400,6 +404,20 @@ Item {
             foreground: Commons.Color.popups.text
           }
 
+          ButtonGroup {
+            id: sourceTags
+            value: root.quoteSource
+            options: [
+              { value: "all", label: "All " + root.quotes.length },
+              { value: "stoics", label: "Stoics " + (root.quotes.length - root.mineCount) },
+              { value: "mine", label: "Mine " + root.mineCount }
+            ]
+            foreground: Commons.Color.popups.text
+            background: Commons.Color.popups.background
+            fontSize: Style.font.bodySmall
+            onChanged: function(value) { root.quoteSource = value }
+          }
+
           TextField {
             id: filterField
             width: parent.width
@@ -465,7 +483,9 @@ Item {
           Text {
             width: parent.width
             visible: root.shownQuotes.length === 0
-            text: root.quotes.length ? "No quote matches that search." : "No quotes loaded yet."
+            text: !root.quotes.length ? "No quotes loaded yet."
+              : root.quoteSource === "mine" && root.mineCount === 0 ? "No quotes of your own yet. Add one below."
+              : "No quote matches that search."
             color: Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall

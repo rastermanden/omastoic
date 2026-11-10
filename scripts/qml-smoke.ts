@@ -104,6 +104,11 @@ ShellRoot {
         panel.quoteFilter = "zeno"
         console.log("filtered:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
         panel.quoteFilter = ""
+        panel.quoteSource = "mine"
+        console.log("mine:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
+        panel.quoteSource = "stoics"
+        console.log("stoics:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
+        panel.quoteSource = "all"
         // A partial pick turns "all" on; "all" turned off picks nobody, and nobody blocks Save.
         panel.toggleAll()
         console.log("toggled on:", panel.selectedAuthors.join(","), panel.allPicked)
@@ -175,6 +180,8 @@ if (import.meta.main) {
       "summary:",
       "loaded: 90 marcus,seneca 1 error= list=c01,q01,q02 rotating=2",
       "filtered: q02",
+      "mine: c01",
+      "stoics: q01,q02",
       "toggled on: marcus,seneca,zeno true",
       "toggled off: 0 true",
       "half quote: false Meditations IX.1 Your quote needs quote text",
