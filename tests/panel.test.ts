@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sandbox } from "./sandbox.ts";
 
@@ -181,6 +181,39 @@ test("panel apply saves mine only, and picking Stoics again clears it", async ()
     // Your own quote keeps rotating beside the Stoic you picked.
     expect(stateOf(back).quotes.find((quote: { custom: boolean }) => quote.custom).inRotation).toBe(true);
     expect((await s.cli(["panel", "apply", JSON.stringify({ mineOnly: "yes" })])).code).toBe(1);
+  } finally { s.cleanup(); }
+});
+
+test("panel apply edits and deletes your quotes, keeping comments and picks", async () => {
+  const s = sandbox();
+  try {
+    const file = quotesPath(s);
+    mkdirSync(join(s.config, "omastoic"), { recursive: true });
+    writeFileSync(file, "# mine\nmarcus\tA\tone\nseneca\tB\ttwo\n# note\nmarcus\tC\tthree\n");
+    writeFileSync(settingsPath(s), JSON.stringify({ quotes: { marcus: ["q01", "c01", "c03"] } }));
+
+    const edited = await s.cli(["panel", "apply", JSON.stringify({ editQuote: { id: "c02", author: "seneca", citation: "B2", text: "two, edited" } })]);
+    expect(edited.code).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe("# mine\nmarcus\tA\tone\nseneca\tB2\ttwo, edited\n# note\nmarcus\tC\tthree\n");
+
+    const deleted = await s.cli(["panel", "apply", JSON.stringify({ deleteQuote: { id: "c01" } })]);
+    expect(deleted.code).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe("# mine\nseneca\tB2\ttwo, edited\n# note\nmarcus\tC\tthree\n");
+    // Marcus kept c03 ("three"); it is c02 now, and still kept.
+    expect(saved(s).quotes.marcus).toEqual(["q01", "c02"]);
+    const three = stateOf(deleted).quotes.find((quote: { text: string }) => quote.text === "three");
+    expect(three).toMatchObject({ id: "c02", kept: true });
+
+    const before = readFileSync(file, "utf8");
+    for (const payload of [
+      { deleteQuote: { id: "c09" } },
+      { deleteQuote: { id: "q01" } },
+      { editQuote: { id: "c01", author: "marcus", citation: "", text: "x" } },
+      { editQuote: { id: "c01", author: "marcus", citation: "C", text: "three" } },
+    ]) {
+      expect((await s.cli(["panel", "apply", JSON.stringify(payload)])).code).toBe(1);
+    }
+    expect(readFileSync(file, "utf8")).toBe(before);
   } finally { s.cleanup(); }
 });
 

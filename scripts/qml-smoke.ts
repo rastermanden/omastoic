@@ -130,6 +130,16 @@ ShellRoot {
         panel.newCitation = "Basic Economics"
         panel.newText = "There are no solutions, only trade-offs."
         panel.addQuote()
+        // Your quote opens for editing; Delete asks once before it sends.
+        panel.startEdit(panel.mine[0])
+        panel.editText = "Your line, edited."
+        panel.editAuthor = "Seneca"
+        console.log("editing:", panel.editingId, panel.editSlug, panel.editReady)
+        panel.saveEdit()
+        panel.startEdit(panel.mine[0])
+        panel.deleteEdit()
+        console.log("confirm:", panel.confirmDelete)
+        panel.deleteEdit()
         panel.changeSeconds(45)
         // Start waits for every queued save, then runs preview once.
         panel.startScreensaver()
@@ -186,6 +196,8 @@ if (import.meta.main) {
       "slug: marcus",
       "slug: tomas-sowell Needs a citation and the quote.",
       "flipped: false",
+      "editing: c01 seneca true",
+      "confirm: true",
       "preview queued: true true",
       "done: false 0 false mine true false false",
     ]) {
@@ -201,6 +213,8 @@ if (import.meta.main) {
       { keep: { q01: false } },
       { keep: { c01: false } },
       { addQuote: { author: "tomas-sowell", citation: "Basic Economics", text: "There are no solutions, only trade-offs." } },
+      { editQuote: { id: "c01", author: "seneca", citation: "Meditations IX.1", text: "Your line, edited." } },
+      { deleteQuote: { id: "c01" } },
       { interval: 45 },
     ].map((payload) => JSON.stringify(payload));
     if (JSON.stringify(sent) !== JSON.stringify(expected)) {

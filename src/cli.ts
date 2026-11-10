@@ -849,6 +849,64 @@ async function appendQuotes(lines: string[], quiet = false): Promise<number> {
   return 0;
 }
 
+/**
+ * Replace or drop your quote number `index` (0-based, as c01 is 0) in quotes.tsv,
+ * keeping comments and every other line exactly as they are.
+ */
+async function rewriteCustom(index: number, replacement: Quote | null): Promise<string | null> {
+  const path = join(USER_CONFIG, "quotes.tsv");
+  const existing = await Bun.file(path).text().catch(() => "");
+  let have: Quote[];
+  try {
+    have = existing ? parseQuotes(existing) : [];
+  } catch (error) {
+    return (error as Error).message;
+  }
+  if (index < 0 || index >= have.length) return "there is no such quote of yours";
+  if (replacement) {
+    const key = quoteRow(replacement);
+    if (have.some((quote, i) => i !== index && quoteRow(quote) === key)) return `that quote is already in ${path}`;
+  }
+  const lines = existing.replace(/\r\n/g, "\n").split("\n");
+  let seen = -1;
+  const out: string[] = [];
+  for (const line of lines) {
+    const data = line.trim() !== "" && !line.startsWith("#") && line.split("\t").length >= 3;
+    if (data) seen++;
+    if (data && seen === index) {
+      if (replacement) out.push(quoteRow(replacement));
+      continue;
+    }
+    out.push(line);
+  }
+  const next = out.join("\n");
+  if (Buffer.byteLength(next) > 1024 * 1024) return "custom quote file exceeds 1 MiB";
+  atomicWrite(path, next.endsWith("\n") ? next : `${next}\n`);
+  return null;
+}
+
+/** Keep per-author picks pointing at the same lines after your quote `index` moved or went. */
+function renumberCustom(settings: Settings, index: number, removed: boolean, from?: string, to?: string): Settings {
+  if (!settings.quotes) return settings;
+  const id = `c${String(index + 1).padStart(2, "0")}`;
+  const quotes: Record<string, string[]> = {};
+  for (const [author, ids] of Object.entries(settings.quotes)) {
+    const hadCustom = ids.some((kept) => kept.startsWith("c") && kept !== "c00");
+    let next = ids.flatMap((kept) => {
+      if (!kept.startsWith("c") || kept === "c00") return [kept];
+      const n = Number(kept.slice(1)) - 1;
+      if (n === index) return removed || (from && to && from !== to && author === from) ? [] : [kept];
+      if (removed && n > index) return [`c${String(n).padStart(2, "0")}`];
+      return [kept];
+    });
+    // A quote that changed author and was kept stays kept under its new author.
+    if (!removed && to && from !== to && author === to && next.some((kept) => kept.startsWith("c") && kept !== "c00") && !next.includes(id)) next.push(id);
+    if (hadCustom && !next.some((kept) => kept.startsWith("c"))) next = [...next, "c00"];
+    quotes[author] = next;
+  }
+  return { ...settings, quotes };
+}
+
 function formatQuoteList(bundled: BundledQuote[], custom: BundledQuote[], settings: Settings): string {
   const lines = ["bundled:"];
   const row = (quote: BundledQuote) => {
@@ -1229,6 +1287,40 @@ async function panelApply(raw: string): Promise<number> {
       mkdirSync(USER_ART, { recursive: true });
       atomicWrite(file, `${made}\n`);
     }
+  }
+
+  // Change or drop one of your quotes: { id: "c02", author, citation, text } or { id: "c02" }.
+  for (const key of ["editQuote", "deleteQuote"] as const) {
+    if (!Object.hasOwn(value, key)) continue;
+    const ask = value[key] && typeof value[key] === "object" && !Array.isArray(value[key]) ? (value[key] as Record<string, unknown>) : {};
+    const id = typeof ask.id === "string" ? ask.id : "";
+    const index = /^c\d{2,}$/.test(id) ? Number(id.slice(1)) - 1 : -1;
+    const before = custom.quotes[index];
+    if (!before) {
+      console.error(`omastoic: you have no quote ${id || "(no id)"}`);
+      return 1;
+    }
+    let replacement: Quote | null = null;
+    if (key === "editQuote") {
+      const quote = panelQuote(ask);
+      if ("error" in quote) {
+        console.error(`omastoic: ${quote.error.replace("addQuote", "editQuote")}`);
+        return 1;
+      }
+      replacement = quote.quote;
+    }
+    const failure = await rewriteCustom(index, replacement);
+    if (failure) {
+      console.error(`omastoic: ${failure}`);
+      return 1;
+    }
+    next = renumberCustom(next, index, key === "deleteQuote", before.author, replacement?.author);
+    const customNow = indexCustom(await customQuotes());
+    catalog = [...choicesOf(bundled), ...choicesOf(customNow)];
+    await saveSettings(next, slugs, catalog, true);
+    await restartDaemon();
+    console.log(await panelState());
+    return 0;
   }
 
   let added: Quote | null = null;

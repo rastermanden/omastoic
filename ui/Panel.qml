@@ -108,13 +108,56 @@ Item {
   }
   // The quote file keys authors by slug: "Tomas Sowell" becomes tomas-sowell,
   // and a Stoic's full or short name becomes that Stoic's slug.
-  readonly property string authorSlug: {
-    const typed = newAuthor.trim().toLowerCase()
+  readonly property string authorSlug: slugFor(newAuthor)
+  function slugFor(raw) {
+    const typed = String(raw || "").trim().toLowerCase()
     const stoic = roster.find(function(author) {
       const name = String(author.name).toLowerCase()
       return name === typed || name.split(" ")[0] === typed || author.slug === typed
     })
     return stoic ? stoic.slug : slugOf(typed)
+  }
+  function isStoic(slug) { return roster.some(function(author) { return author.slug === slug }) }
+
+  // Editing one of your quotes in place: click it, change it, Save or Delete.
+  property string editingId: ""
+  property string editText: ""
+  property string editAuthor: ""
+  property string editCitation: ""
+  property bool confirmDelete: false
+  readonly property string editSlug: slugFor(editAuthor)
+  readonly property bool editReady: editText.trim() !== "" && editCitation.trim() !== "" && editSlug !== ""
+
+  function startEdit(quote) {
+    editingId = quote.id
+    editText = quote.text
+    editAuthor = quote.name
+    editCitation = quote.citation
+    confirmDelete = false
+  }
+
+  function stopEdit() {
+    editingId = ""
+    confirmDelete = false
+  }
+
+  function saveEdit() {
+    if (!editReady || editingId === "") return
+    send({
+      kind: "apply",
+      payload: { editQuote: { id: editingId, author: editSlug, citation: editCitation.trim(), text: editText.trim() } },
+      done: "Quote saved",
+      closesEdit: true,
+    })
+  }
+
+  function deleteEdit() {
+    if (editingId === "") return
+    if (!confirmDelete) {
+      confirmDelete = true
+      return
+    }
+    send({ kind: "apply", payload: { deleteQuote: { id: editingId } }, done: "Quote deleted", closesEdit: true })
   }
   function slugOf(typed) { return typed.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64) }
   readonly property string addBlocker: {
@@ -212,6 +255,7 @@ Item {
     } else if (job.kind !== "state") {
       notice = job.done || "Saved"
       noticeTimer.restart()
+      if (job.closesEdit) stopEdit()
       if (job.added) {
         adding = false
         newCitation = ""
@@ -428,7 +472,7 @@ Item {
       anchors.fill: parent
       focus: true
 
-      Keys.onEscapePressed: root.adding ? root.adding = false : root.dismiss()
+      Keys.onEscapePressed: root.editingId !== "" ? root.stopEdit() : root.adding ? root.adding = false : root.dismiss()
 
       Rectangle {
         id: card
@@ -743,8 +787,9 @@ Item {
               id: quoteRow
               required property var modelData
               readonly property bool open: !!root.expanded[modelData.id]
+              readonly property bool editing: root.editingId === modelData.id
               width: quoteView.width
-              height: rowBody.implicitHeight + Style.space(12)
+              height: (editing ? editor.implicitHeight : rowBody.implicitHeight) + Style.space(12)
               radius: Style.cornerRadius
               color: rowMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
 
@@ -753,7 +798,12 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                // Yours open for editing; the Stoics' open to their full text.
                 onClicked: {
+                  if (quoteRow.modelData.custom) {
+                    if (!quoteRow.editing) root.startEdit(quoteRow.modelData)
+                    return
+                  }
                   const next = Object.assign({}, root.expanded)
                   next[quoteRow.modelData.id] = !quoteRow.open
                   root.expanded = next
@@ -766,13 +816,14 @@ Item {
                 anchors.rightMargin: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
                 checked: quoteRow.modelData.kept
-                visible: quoteRow.modelData.switchable
+                visible: quoteRow.modelData.switchable && !quoteRow.editing
                 foreground: Commons.Color.popups.text
                 onToggled: root.keep(quoteRow.modelData.id, !quoteRow.modelData.kept)
               }
 
               Column {
                 id: rowBody
+                visible: !quoteRow.editing
                 anchors.left: parent.left
                 anchors.right: quoteSwitch.left
                 anchors.leftMargin: Style.space(6)
@@ -825,30 +876,105 @@ Item {
                         : " · " + root.shortName(quoteRow.modelData) + " not picked")
                   }
                 }
+              }
 
-                // Your own authors' portraits, set from here with Omarchy's image grid.
+              Column {
+                id: editor
+                visible: quoteRow.editing
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(8)
+
+                TextField {
+                  width: parent.width
+                  text: quoteRow.editing ? root.editText : ""
+                  placeholderText: "The quote"
+                  foreground: Commons.Color.popups.text
+                  onTextEdited: { root.editText = text; root.confirmDelete = false }
+                  onAccepted: root.saveEdit()
+                }
+
                 Row {
-                  visible: quoteRow.open && quoteRow.modelData.custom && !quoteRow.modelData.switchable
+                  width: parent.width
+                  spacing: Style.space(8)
+
+                  TextField {
+                    width: (parent.width - parent.spacing) / 2
+                    text: quoteRow.editing ? root.editAuthor : ""
+                    placeholderText: "Author"
+                    foreground: Commons.Color.popups.text
+                    onTextEdited: { root.editAuthor = text; root.confirmDelete = false }
+                    onAccepted: root.saveEdit()
+                  }
+
+                  TextField {
+                    width: (parent.width - parent.spacing) / 2
+                    text: quoteRow.editing ? root.editCitation : ""
+                    placeholderText: "Source"
+                    foreground: Commons.Color.popups.text
+                    onTextEdited: { root.editCitation = text; root.confirmDelete = false }
+                    onAccepted: root.saveEdit()
+                  }
+                }
+
+                Flow {
+                  width: parent.width
                   spacing: Style.space(8)
 
                   Button {
-                    text: !!quoteRow.modelData.portrait ? "Change picture…" : "Add picture…"
-                    tooltipText: "The portrait for every quote by " + quoteRow.modelData.name
+                    text: "Save"
+                    bordered: true
+                    enabled: root.editReady
+                    foreground: Commons.Color.popups.text
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.saveEdit()
+                  }
+
+                  Button {
+                    text: "Cancel"
+                    bordered: true
+                    foreground: Commons.Color.popups.text
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.stopEdit()
+                  }
+
+                  // A picture is the author's portrait, for every quote by them.
+                  Button {
+                    visible: root.editSlug !== "" && !root.isStoic(root.editSlug)
+                    text: root.hasPortrait(root.editSlug) ? "Change picture…" : "Add picture…"
+                    tooltipText: "The portrait for every quote by this author"
                     bordered: true
                     enabled: !root.picking
                     foreground: Commons.Color.popups.text
                     fontSize: Style.font.bodySmall
-                    onClicked: root.chooseImage(quoteRow.modelData.author)
+                    onClicked: root.chooseImage(root.editSlug)
                   }
 
                   Button {
-                    visible: !!quoteRow.modelData.portrait
+                    visible: root.editSlug !== "" && !root.isStoic(root.editSlug) && root.hasPortrait(root.editSlug)
                     text: "Remove picture"
                     bordered: true
                     foreground: Commons.Color.popups.text
                     fontSize: Style.font.bodySmall
-                    onClicked: root.removePortrait(quoteRow.modelData.author)
+                    onClicked: root.removePortrait(root.editSlug)
                   }
+
+                  Button {
+                    text: root.confirmDelete ? "Really delete?" : "Delete"
+                    bordered: true
+                    foreground: root.confirmDelete ? Commons.Color.urgent : Commons.Color.popups.text
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.deleteEdit()
+                  }
+                }
+
+                Caption {
+                  width: parent.width
+                  text: root.isStoic(root.editSlug) ? "Shown with " + root.editAuthor.trim() + "'s portrait. Esc or Cancel keeps it as it was."
+                    : root.hasPortrait(root.editSlug) ? "Esc or Cancel keeps it as it was."
+                    : "No portrait for this author yet: Add picture gives them one."
                 }
               }
             }
