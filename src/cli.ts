@@ -1208,10 +1208,31 @@ async function panelApply(raw: string): Promise<number> {
     added = quote.quote;
   }
 
+  // An optional picture for the quote's author, made before anything is saved.
+  let art: string | null = null;
+  const request = value.addQuote && typeof value.addQuote === "object" ? (value.addQuote as Record<string, unknown>) : {};
+  if (added && typeof request.image === "string" && request.image.trim()) {
+    const image = request.image.trim().replace(/^~(?=\/|$)/, HOME);
+    try {
+      art = await makePortrait(image, { drawing: request.drawing === true });
+    } catch (error) {
+      console.error(`omastoic: ${(error as Error).message}`);
+      return 1;
+    }
+    if (!art.trim()) {
+      console.error("omastoic: that picture came out blank; try it as a drawing, or another picture");
+      return 1;
+    }
+  }
+
   let selectionTouched = false;
   if (added) {
     const code = await appendQuotes([quoteRow(added)], true);
     if (code !== 0) return code;
+    if (art) {
+      mkdirSync(USER_ART, { recursive: true });
+      atomicWrite(join(USER_ART, `${added.author}.txt`), `${art}\n`);
+    }
     const customNow = indexCustom(await customQuotes());
     catalog = [...choicesOf(bundled), ...choicesOf(customNow)];
     const remembered = rememberAddedQuote(next, customNow, added);

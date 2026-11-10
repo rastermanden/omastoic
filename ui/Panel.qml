@@ -85,6 +85,16 @@ Item {
   property string newAuthor: ""
   property string newCitation: ""
   property string newText: ""
+  // An optional picture for the author's portrait, and whether it is line art.
+  property string newImage: ""
+  property bool newDrawing: false
+  property bool picking: false
+
+  function chooseImage() {
+    if (picking) return
+    picking = true
+    pickProcess.running = true
+  }
   // The quote file keys authors by slug: "Tomas Sowell" becomes tomas-sowell,
   // and a Stoic's full or short name becomes that Stoic's slug.
   readonly property string authorSlug: {
@@ -197,6 +207,8 @@ Item {
         newText = ""
         citationField.text = ""
         textField.text = ""
+        imageField.text = ""
+        newDrawing = false
         listFilter = "mine"
         quoteView.positionViewAtBeginning()
       }
@@ -284,8 +296,10 @@ Item {
     if (addBlocker !== "" || adding === false) return
     send({
       kind: "apply",
-      payload: { addQuote: { author: authorSlug, citation: newCitation.trim(), text: newText.trim() } },
-      done: "Added. It is in rotation.",
+      payload: { addQuote: newImage.trim()
+        ? { author: authorSlug, citation: newCitation.trim(), text: newText.trim(), image: newImage.trim(), drawing: newDrawing }
+        : { author: authorSlug, citation: newCitation.trim(), text: newText.trim() } },
+      done: newImage.trim() ? "Added, with a portrait." : "Added. It is in rotation.",
       added: true,
     })
   }
@@ -298,6 +312,25 @@ Item {
     property string stdout: ""
     property string stderr: ""
     property int streamsLeft: 0
+  }
+
+  // Omarchy's own image grid over the usual picture folders; it prints the pick.
+  Process {
+    id: pickProcess
+    command: ["bash", "-c", 'dirs=(); for d in "$HOME/Pictures" "$HOME/Pictures/Screenshots" "$HOME/Downloads" "$HOME/Desktop"; do [[ -d $d ]] && dirs+=("$d"); done; ((${#dirs[@]})) || exit 3; exec omarchy-menu-images --show-labels --filterable "${dirs[@]}"']
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        const chosen = String(text || "").trim()
+        if (chosen !== "") imageField.text = chosen
+      }
+    }
+    onExited: function(exitCode) {
+      root.picking = false
+      if (exitCode === 3) root.error = "No Pictures, Downloads or Desktop folder to choose from. Type the picture's path instead."
+      else if (exitCode !== 0) root.error = "Omarchy's image picker did not open. Type the picture's path instead."
+      Qt.callLater(function() { if (root.opened) imageField.forceActiveFocus() })
+    }
   }
 
   Process {
@@ -358,7 +391,8 @@ Item {
   PanelWindow {
     id: window
 
-    visible: root.opened
+    // Hidden, not closed, while Omarchy's image picker is up, so the form keeps what was typed.
+    visible: root.opened && !root.picking
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
@@ -605,6 +639,43 @@ Item {
                 }
               }
 
+              // The author's portrait: any picture, chosen in Omarchy's image grid or typed.
+              Row {
+                width: parent.width
+                spacing: Style.space(8)
+
+                TextField {
+                  id: imageField
+                  width: parent.width - chooseButton.width - drawingButton.width - parent.spacing * 2
+                  placeholderText: root.hasPortrait(root.authorSlug) ? "New picture for the portrait (optional)" : "Picture for a portrait (optional)"
+                  foreground: Commons.Color.popups.text
+                  onTextChanged: root.newImage = text
+                  onAccepted: root.addQuote()
+                }
+
+                Button {
+                  id: chooseButton
+                  text: "Choose…"
+                  tooltipText: "Pick from Pictures, Downloads or Desktop"
+                  bordered: true
+                  enabled: !root.picking
+                  foreground: Commons.Color.popups.text
+                  fontSize: Style.font.bodySmall
+                  onClicked: root.chooseImage()
+                }
+
+                Button {
+                  id: drawingButton
+                  text: "Drawing"
+                  tooltipText: "Line art: sharp strokes instead of photo shading"
+                  bordered: true
+                  selected: root.newDrawing
+                  foreground: Commons.Color.popups.text
+                  fontSize: Style.font.bodySmall
+                  onClicked: root.newDrawing = !root.newDrawing
+                }
+              }
+
               Item {
                 width: parent.width
                 height: Math.max(addHint.implicitHeight, addConfirm.height)
@@ -616,8 +687,11 @@ Item {
                   anchors.rightMargin: Style.space(8)
                   anchors.verticalCenter: parent.verticalCenter
                   text: root.addBlocker !== "" ? root.addBlocker
-                    : "Saved as “" + root.authorSlug + "”. Enter adds it."
-                      + (root.hasPortrait(root.authorSlug) ? "" : " For a portrait: omastoic portrait " + root.authorSlug + " <image>")
+                    : "Saved as “" + root.authorSlug + "”. "
+                      + (root.newImage.trim() !== "" ? (root.hasPortrait(root.authorSlug) ? "The picture replaces the portrait. " : "The picture becomes the portrait. ")
+                        : root.hasPortrait(root.authorSlug) ? "Uses the portrait already there. "
+                        : "No picture: the quote shows without a portrait. ")
+                      + "Enter adds it."
                 }
 
                 Button {
@@ -742,8 +816,8 @@ Item {
                 Caption {
                   width: parent.width
                   visible: quoteRow.open && !quoteRow.modelData.portrait
-                  text: "No portrait for " + quoteRow.modelData.name + " yet. In a terminal: omastoic portrait "
-                    + quoteRow.modelData.author + " ~/Pictures/photo.jpg (add --drawing for line art)."
+                  text: "No portrait for " + quoteRow.modelData.name + " yet. Add a quote by them with a picture,"
+                    + " or in a terminal: omastoic portrait " + quoteRow.modelData.author + " <picture>"
                 }
               }
             }

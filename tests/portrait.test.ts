@@ -48,3 +48,23 @@ test.skipIf(!Bun.which("magick"))("portrait makes, shows and removes your own au
     expect((await s.cli(["portrait"])).code).toBe(1);
   } finally { s.cleanup(); }
 });
+
+test.skipIf(!Bun.which("magick"))("panel apply adds a quote with a picture, or neither", async () => {
+  const s = sandbox();
+  try {
+    const image = join(s.home, "face.png");
+    Bun.spawnSync(["magick", "-size", "200x240", "radial-gradient:white-black", image]);
+    const quote = { author: "tomas-sowell", citation: "Basic Economics", text: "There are no solutions, only trade-offs." };
+
+    const bad = await s.cli(["panel", "apply", JSON.stringify({ addQuote: { ...quote, image: join(s.home, "missing.png") } })]);
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toContain("no image at");
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+
+    const good = await s.cli(["panel", "apply", JSON.stringify({ addQuote: { ...quote, image } })]);
+    expect(good.code).toBe(0);
+    expect(readFileSync(join(s.config, "omastoic/art/tomas-sowell.txt"), "utf8")).toMatch(/[\u2801-\u28ff]/);
+    const added = JSON.parse(good.stdout).quotes.find((row: { custom: boolean }) => row.custom);
+    expect(added).toMatchObject({ author: "tomas-sowell", portrait: true });
+  } finally { s.cleanup(); }
+});
