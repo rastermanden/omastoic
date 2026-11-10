@@ -134,6 +134,35 @@ test("panel apply refuses an incomplete or duplicate quote and leaves the file a
   } finally { s.cleanup(); }
 });
 
+test("panel apply switches single quotes off and on, like config --quotes", async () => {
+  const s = sandbox();
+  try {
+    const off = await s.cli(["panel", "apply", JSON.stringify({ keep: { q02: false } })]);
+    expect(off.code).toBe(0);
+    const row = stateOf(off).quotes.find((quote: { id: string }) => quote.id === "q02");
+    expect(row).toMatchObject({ author: "marcus", kept: false, inRotation: false, switchable: true });
+    const marcus = (saved(s).quotes as Record<string, string[]>).marcus;
+    expect(marcus).not.toContain("q02");
+    expect(marcus).toContain("q01");
+
+    const config = sandbox();
+    try {
+      await config.cli(["config", "--quotes", `marcus=${marcus.join(",")}`]);
+      expect(saved(s)).toEqual(saved(config));
+    } finally { config.cleanup(); }
+
+    const on = await s.cli(["panel", "apply", JSON.stringify({ keep: { q02: true } })]);
+    expect(on.code).toBe(0);
+    expect(saved(s).quotes).toBeUndefined();
+
+    const before = readFileSync(settingsPath(s), "utf8");
+    for (const keep of [{ zz: false }, { q02: "off" }, ["q02"]]) {
+      expect((await s.cli(["panel", "apply", JSON.stringify({ keep })])).code).toBe(1);
+    }
+    expect(readFileSync(settingsPath(s), "utf8")).toBe(before);
+  } finally { s.cleanup(); }
+});
+
 test("panel apply reads the same JSON from stdin", async () => {
   const s = sandbox();
   try {

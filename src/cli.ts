@@ -1062,6 +1062,9 @@ async function panelState(): Promise<string> {
         citation: quote.citation,
         text: quote.text,
         custom: quote.id.startsWith("c"),
+        // Stoics' quotes can be switched off one by one; quotes by anyone else always rotate.
+        switchable: roster.has(quote.author),
+        kept: !roster.has(quote.author) || quoteKept(quote.id, settings.quotes?.[quote.author]),
         inRotation: rotating.has(quote),
       })),
       customQuotesError: custom.error ?? "",
@@ -1085,6 +1088,25 @@ function panelQuote(raw: unknown): { quote: Quote } | { error: string } {
   } catch (error) {
     return { error: (error as Error).message };
   }
+}
+
+/** Switch one quote in or out of its author's allow-list; all kept means no list. */
+function keepQuote(settings: Settings, rows: BundledQuote[], id: string, on: boolean): Settings {
+  const author = rows[0].author;
+  const list = settings.quotes?.[author];
+  const kept = new Set(rows.filter((quote) => quoteKept(quote.id, list)).map((quote) => quote.id));
+  if (on) kept.add(id);
+  else kept.delete(id);
+  const quotes = { ...settings.quotes };
+  if (rows.every((quote) => kept.has(quote.id))) {
+    delete quotes[author];
+  } else {
+    const ids = rows.filter((quote) => kept.has(quote.id)).map((quote) => quote.id);
+    // A list naming no custom id keeps every custom line, so say none explicitly.
+    if (rows.some((quote) => quote.id.startsWith("c")) && !ids.some((quote) => quote.startsWith("c"))) ids.push("c00");
+    quotes[author] = ids;
+  }
+  return { ...settings, quotes: Object.keys(quotes).length ? quotes : undefined };
 }
 
 /** One JSON object from the panel: the fields `config` owns, plus one quote to add. */
@@ -1132,6 +1154,24 @@ async function panelApply(raw: string): Promise<number> {
       return 1;
     }
     next.authors = wanted;
+    settingsTouched = true;
+  }
+
+  if (Object.hasOwn(value, "keep")) {
+    const keep = value.keep;
+    if (!keep || typeof keep !== "object" || Array.isArray(keep) || !Object.values(keep).every((on) => typeof on === "boolean")) {
+      console.error('omastoic: panel keep must map quote ids to true or false, like {"q01": false}');
+      return 1;
+    }
+    const rows = [...bundled, ...custom.quotes];
+    for (const [id, on] of Object.entries(keep as Record<string, boolean>)) {
+      const row = rows.find((quote) => quote.id === id);
+      if (!row || !slugs.includes(row.author)) {
+        console.error(`omastoic: no Stoic quote ${id} to switch ${on ? "on" : "off"}`);
+        return 1;
+      }
+      next = keepQuote(next, rows.filter((quote) => quote.author === row.author), id, on);
+    }
     settingsTouched = true;
   }
 

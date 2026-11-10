@@ -25,9 +25,9 @@ export const STATE_JSON = {
   ],
   customQuotes: 1,
   quotes: [
-    { id: "q01", author: "marcus", name: "Marcus Aurelius", citation: "Meditations II.5", text: "A bundled line.", custom: false, inRotation: true },
-    { id: "q02", author: "zeno", name: "Zeno of Citium", citation: "DL VII", text: "Not picked.", custom: false, inRotation: false },
-    { id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Meditations IX.1", text: "Your line.", custom: true, inRotation: true },
+    { id: "q01", author: "marcus", name: "Marcus Aurelius", citation: "Meditations II.5", text: "A bundled line.", custom: false, switchable: true, kept: true, inRotation: true },
+    { id: "q02", author: "zeno", name: "Zeno of Citium", citation: "DL VII", text: "Not picked.", custom: false, switchable: true, kept: true, inRotation: false },
+    { id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Meditations IX.1", text: "Your line.", custom: true, switchable: true, kept: true, inRotation: true },
   ],
   customQuotesError: "",
   configPath: "/dev/null",
@@ -128,7 +128,17 @@ ShellRoot {
     }
     Timer {
       interval: 3200; running: true; repeat: false
-      onTriggered: console.log("saved:", panel.interval, panel.selectedAuthors.join(","), panel.error, panel.notice)
+      onTriggered: {
+        console.log("saved:", panel.interval, panel.selectedAuthors.join(","), panel.error, panel.notice)
+        // A switch saves one quote at once and leaves unsaved edits alone.
+        panel.interval = 45
+        panel.keep("q01", false)
+        console.log("switched:", panel.quotes[0].kept, panel.busy)
+      }
+    }
+    Timer {
+      interval: 4400; running: true; repeat: false
+      onTriggered: console.log("after switch:", panel.interval, panel.busy, panel.notice === "")
     }
   }
 }
@@ -170,6 +180,8 @@ if (import.meta.main) {
       "half quote: false Meditations IX.1 Your quote needs quote text",
       "name author: marcus",
       "other author: tomas-sowell",
+      "switched: false true",
+      "after switch: 45 false true",
       "saved: 30 marcus,seneca,zeno  Saved. Your quote is at the top of the quote list and in rotation.",
     ]) {
       if (!result.log.includes(needle)) {
@@ -177,7 +189,12 @@ if (import.meta.main) {
         process.exit(1);
       }
     }
-    const payload = JSON.parse(result.payload || "null");
+    const [saved, switched] = result.payload.split("\n");
+    if (JSON.stringify(JSON.parse(switched || "null")) !== '{"keep":{"q01":false}}') {
+      console.error("qml smoke: unexpected switch payload");
+      process.exit(1);
+    }
+    const payload = JSON.parse(saved || "null");
     const header = readFileSync(join(root, "manifest.json"), "utf8");
     if (payload?.interval !== 30 || payload?.authors?.length !== 3 || payload?.addQuote?.citation !== "Meditations IX.1" || payload?.addQuote?.author !== "tomas-sowell") {
       console.error("qml smoke: unexpected apply payload");

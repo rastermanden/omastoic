@@ -135,7 +135,11 @@ Item {
     if (!run.exited || run.streamsLeft > 0) return
     busyLabel = ""
     if (run.exitCode !== 0) error = run.stderr.trim() !== "" ? run.stderr.trim() : fallback
-    else error = adoptState(run.stdout) ? "" : "Could not read the omastoic state."
+    else error = (run.quotesOnly ? adoptQuotes(run.stdout) : adoptState(run.stdout)) ? "" : "Could not read the omastoic state."
+    if (run.quotesOnly) {
+      if (run.exitCode !== 0) flip(run.keptId, !run.keptOn)
+      return
+    }
     if (run === applyRun && error === "") notice = run.addedQuote ? "Saved. Your quote is at the top of the quote list and in rotation." : "Saved."
   }
 
@@ -177,6 +181,43 @@ Item {
     return true
   }
 
+  // A switch saves at once and refreshes only the quote list and summary, so
+  // unsaved edits elsewhere in the panel stay as typed.
+  function adoptQuotes(text) {
+    var parsed
+    try {
+      parsed = JSON.parse(String(text || ""))
+    } catch (failure) {
+      return false
+    }
+    if (!parsed || !(parsed.quotes instanceof Array)) return false
+    quotes = parsed.quotes
+    summary = String(parsed.summary || "")
+    return true
+  }
+
+  function flip(id, on) {
+    quotes = quotes.map(function(quote) { return quote.id === id ? Object.assign({}, quote, { kept: on }) : quote })
+  }
+
+  function keep(id, on) {
+    if (busy) return
+    const change = {}
+    change[id] = on
+    // Flip the row now; the echoed state confirms it, or a failure flips it back.
+    flip(id, on)
+    busyLabel = "Saving…"
+    error = ""
+    notice = ""
+    resetRun(applyRun)
+    applyRun.addedQuote = false
+    applyRun.quotesOnly = true
+    applyRun.keptId = id
+    applyRun.keptOn = on
+    applyProcess.command = [command, "panel", "apply", JSON.stringify({ keep: change })]
+    applyProcess.running = true
+  }
+
   function toggleAll() {
     setAuthors(allPicked ? [] : allSlugs)
   }
@@ -191,6 +232,7 @@ Item {
     error = ""
     notice = ""
     resetRun(applyRun)
+    applyRun.quotesOnly = false
     applyRun.addedQuote = quoteReady
     applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
     applyProcess.running = true
@@ -208,6 +250,9 @@ Item {
   QtObject {
     id: applyRun
     property bool addedQuote: false
+    property bool quotesOnly: false
+    property string keptId: ""
+    property bool keptOn: false
     property bool exited: false
     property int exitCode: 0
     property string stdout: ""
@@ -371,28 +416,48 @@ Item {
             spacing: Style.space(10)
             boundsBehavior: Flickable.StopAtBounds
             model: root.shownQuotes
-            delegate: Column {
+            delegate: Item {
+              id: quoteRow
               required property var modelData
               width: quoteView.width
-              spacing: Style.space(2)
-              opacity: modelData.inRotation ? 1 : 0.45
-              Text {
-                width: parent.width
-                text: "“" + modelData.text + "”"
-                color: Commons.Color.popups.text
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
+              height: Math.max(quoteSwitch.height, quoteText.height)
+
+              ToggleSwitch {
+                id: quoteSwitch
+                anchors.right: parent.right
+                anchors.top: parent.top
+                checked: quoteRow.modelData.kept
+                busy: root.busy
+                visible: quoteRow.modelData.switchable
+                foreground: Commons.Color.popups.text
+                onToggled: root.keep(quoteRow.modelData.id, !quoteRow.modelData.kept)
               }
-              Text {
-                width: parent.width
-                text: "— " + modelData.name + ", " + modelData.citation
-                  + (modelData.custom ? " · yours" : "")
-                  + (modelData.inRotation ? "" : " · not in rotation")
-                color: Qt.darker(Commons.Color.popups.text, 1.4)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
+
+              Column {
+                id: quoteText
+                anchors.left: parent.left
+                anchors.right: quoteSwitch.left
+                anchors.rightMargin: Style.space(10)
+                spacing: Style.space(2)
+                opacity: quoteRow.modelData.inRotation ? 1 : 0.45
+                Text {
+                  width: parent.width
+                  text: "“" + quoteRow.modelData.text + "”"
+                  color: Commons.Color.popups.text
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  wrapMode: Text.WordWrap
+                }
+                Text {
+                  width: parent.width
+                  text: "— " + quoteRow.modelData.name + ", " + quoteRow.modelData.citation
+                    + (quoteRow.modelData.custom ? " · yours" : "")
+                    + (quoteRow.modelData.inRotation ? "" : quoteRow.modelData.kept ? " · Stoic not picked" : " · off")
+                  color: Qt.darker(Commons.Color.popups.text, 1.4)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                }
               }
             }
           }
