@@ -53,7 +53,13 @@ with its own idea of the format.
    bar-widget popup base and needs a live bar instance plus an anchor item, and a
    summoned overlay has neither.
 
-4. **Save refuses what the CLI would misread.** An empty pick means "every
+4. **Every change saves at once.** Stoic chips, the Mine chip, each quote's
+   switch, the seconds field (after it stops changing) and the add form each
+   send one `panel apply`; writes queue one at a time, the row flips first and
+   the state the CLI echoes back is what stays on screen. No Stoic picked is
+   saved as `mineOnly`, never as an empty list (which means every Stoic).
+
+   Earlier note, kept for history: **Save refuses what the CLI would misread.** An empty pick means "every
    Stoic" to the CLI, so the panel never sends one: with the toggle off and
    nobody picked, Save is disabled and a hint says why. A quote with a citation
    or text but a missing field also disables Save and keeps what was typed. CLI

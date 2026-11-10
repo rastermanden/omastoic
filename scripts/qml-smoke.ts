@@ -81,18 +81,20 @@ export function fixture(): string {
   return dir;
 }
 
-// Loads the panel, waits for the state, edits it, saves, then reports.
+// Loads the panel, waits for the state, makes each kind of change, then reports.
+// Every change saves at once; the fake CLI logs one payload per line, in order.
 const HARNESS = `import QtQuick
 import Quickshell
 import "ui"
 
 ShellRoot {
   Item {
+    id: harness
     Panel {
       id: panel
-      onSummaryChanged: console.log("summary:", panel.summary)
-      onErrorChanged: console.log("error:", panel.error)
+      onErrorChanged: if (panel.error !== "") console.log("error:", panel.error)
     }
+    function ids() { return panel.shownQuotes.map(function(quote) { return quote.id }).join(",") }
     Timer {
       interval: 500; running: true; repeat: false
       onTriggered: panel.open("")
@@ -100,62 +102,33 @@ ShellRoot {
     Timer {
       interval: 1800; running: true; repeat: false
       onTriggered: {
-        console.log("loaded:", panel.interval, panel.selectedAuthors.join(","), panel.customQuotes, "error=" + panel.error, "list=" + panel.shownQuotes.map(function(quote) { return quote.id }).join(","), "rotating=" + panel.rotatingCount)
-        panel.quoteFilter = "zeno"
-        console.log("filtered:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
-        panel.quoteFilter = ""
-        panel.quoteSource = "mine"
-        console.log("mine:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
-        panel.quoteSource = "stoics"
-        console.log("stoics:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
-        panel.quoteSource = "all"
-        panel.quoteState = "off"
-        console.log("off:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
-        panel.quoteState = "on"
-        console.log("on:", panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
-        panel.quoteState = "any"
-        // Unsaved picks move the list: drop Marcus, add Zeno.
-        panel.selectedAuthors = ["seneca", "zeno"]
-        panel.quoteState = "on"
-        console.log("picked:", panel.picksChanged, panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
-        panel.selectedAuthors = ["marcus", "seneca"]
-        console.log("unpicked:", panel.picksChanged, panel.shownQuotes.map(function(quote) { return quote.id }).join(","))
-        panel.quoteState = "any"
-        // A partial pick turns "all" on; "all" turned off picks nobody, which saves as mine only.
-        panel.toggleAll()
-        console.log("toggled on:", panel.selectedAuthors.join(","), panel.allPicked)
-        panel.toggleAll()
-        console.log("toggled off:", panel.selectedAuthors.length, panel.blocker !== "")
-        // A half-filled quote blocks Save and survives it.
-        panel.selectedAuthors = ["marcus"]
-        panel.newCitation = "Meditations IX.1"
-        panel.save()
-        console.log("half quote:", panel.busy, panel.newCitation, panel.blocker)
-        // Names become slugs; a Stoic's full name becomes that Stoic's slug.
-        panel.newAuthor = "Marcus Aurelius"
-        console.log("name author:", panel.authorSlug)
-        panel.newAuthor = "Tomas Sowell"
-        console.log("other author:", panel.authorSlug)
-        panel.interval = 30
-        panel.selectedAuthors = ["marcus", "seneca", "zeno"]
-        panel.newCitation = "Meditations IX.1"
-        panel.newText = "A line the panel added."
-        panel.save()
-      }
-    }
-    Timer {
-      interval: 3200; running: true; repeat: false
-      onTriggered: {
-        console.log("saved:", panel.interval, panel.selectedAuthors.join(","), panel.error, panel.notice)
-        // A switch saves one quote at once and leaves unsaved edits alone.
-        panel.interval = 45
+        console.log("loaded:", panel.picked.join(","), panel.rotatingCount, harness.ids(), panel.mineOn)
+        panel.listFilter = "on"; console.log("on:", harness.ids())
+        panel.listFilter = "off"; console.log("off:", harness.ids())
+        panel.listFilter = "mine"; console.log("mine:", harness.ids())
+        panel.listFilter = "all"
+        panel.search = "zeno"; console.log("search:", harness.ids())
+        panel.search = ""
+        // Names become slugs; a Stoic's short or full name becomes that Stoic's slug.
+        panel.newAuthor = "Seneca"; console.log("slug:", panel.authorSlug)
+        panel.newAuthor = "Marcus Aurelius"; console.log("slug:", panel.authorSlug)
+        panel.newAuthor = "Tomas Sowell"; console.log("slug:", panel.authorSlug, panel.addBlocker)
+        // Each change queues one save.
+        panel.toggleStoic("seneca")
+        panel.setPicked([])
         panel.keep("q01", false)
-        console.log("switched:", panel.quotes[0].kept, panel.busy)
+        console.log("flipped:", panel.quotes[0].kept)
+        panel.toggleMine()
+        panel.adding = true
+        panel.newCitation = "Basic Economics"
+        panel.newText = "There are no solutions, only trade-offs."
+        panel.addQuote()
+        panel.changeSeconds(45)
       }
     }
     Timer {
-      interval: 4400; running: true; repeat: false
-      onTriggered: console.log("after switch:", panel.interval, panel.busy, panel.notice === "")
+      interval: 4600; running: true; repeat: false
+      onTriggered: console.log("done:", panel.busy, panel.queue.length, panel.adding, panel.listFilter, panel.error === "")
     }
   }
 }
@@ -189,40 +162,36 @@ if (import.meta.main) {
   } else {
     console.log(result.log.trim());
     for (const needle of [
-      "summary:",
-      "loaded: 90 marcus,seneca 1 error= list=c01,q01,q02 rotating=2",
-      "filtered: q02",
-      "mine: c01",
-      "stoics: q01,q02",
-      "off: q02",
+      "loaded: marcus,seneca 2 c01,q01,q02 true",
       "on: c01,q01",
-      "picked: true c01,q02",
-      "unpicked: false c01,q01",
-      "toggled on: marcus,seneca,zeno true",
-      "toggled off: 0 false",
-      "half quote: false Meditations IX.1 Your quote needs quote text",
-      "name author: marcus",
-      "other author: tomas-sowell",
-      "switched: false true",
-      "after switch: 45 false true",
-      "saved: 30 marcus,seneca,zeno  Saved. Your quote is at the top of the quote list and in rotation.",
+      "off: q02",
+      "mine: c01",
+      "search: q02",
+      "slug: seneca",
+      "slug: marcus",
+      "slug: tomas-sowell Needs a citation and the quote.",
+      "flipped: false",
+      "done: false 0 false mine true",
     ]) {
       if (!result.log.includes(needle)) {
         console.error(`qml smoke: missing ${JSON.stringify(needle)}`);
         process.exit(1);
       }
     }
-    const [saved, switched] = result.payload.split("\n");
-    if (JSON.stringify(JSON.parse(switched || "null")) !== '{"keep":{"q01":false}}') {
-      console.error("qml smoke: unexpected switch payload");
+    const sent = result.payload.split("\n").map((line) => JSON.stringify(JSON.parse(line)));
+    const expected = [
+      { authors: ["marcus"], mineOnly: false },
+      { mineOnly: true },
+      { keep: { q01: false } },
+      { keep: { c01: false } },
+      { addQuote: { author: "tomas-sowell", citation: "Basic Economics", text: "There are no solutions, only trade-offs." } },
+      { interval: 45 },
+    ].map((payload) => JSON.stringify(payload));
+    if (JSON.stringify(sent) !== JSON.stringify(expected)) {
+      console.error(`qml smoke: unexpected payloads\n${sent.join("\n")}`);
       process.exit(1);
     }
-    const payload = JSON.parse(saved || "null");
     const header = readFileSync(join(root, "manifest.json"), "utf8");
-    if (payload?.interval !== 30 || payload?.authors?.length !== 3 || payload?.addQuote?.citation !== "Meditations IX.1" || payload?.addQuote?.author !== "tomas-sowell") {
-      console.error("qml smoke: unexpected apply payload");
-      process.exit(1);
-    }
     console.log(`qml smoke: the panel runs, renders and saves (${JSON.parse(header).id})`);
   }
 }

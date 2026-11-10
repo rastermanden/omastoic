@@ -6,14 +6,17 @@ import qs.Commons
 import qs.Ui
 import qs.Commons as Commons
 
-// Settings panel for the forms `omastoic config` already owns: which Stoics are
-// in rotation, seconds per quote, and one of your own quotes.
+// Settings panel for what `omastoic config` already owns: which Stoics are in
+// rotation, seconds per quote, each quote's switch, and your own quotes.
 //
 // The host mounts this as the plugin's `panel` entry point and injects `shell`
 // and `manifest`; `omarchy-shell shell toggle <id>` (or `omastoic ui`) reaches
 // open()/close(). Nothing here reads or writes ~/.config/omastoic: every read is
 // `omastoic panel state` and every write is `omastoic panel apply <json>`, so the
 // CLI keeps its one validator, one lock and one daemon restart.
+//
+// Every change saves at once. Writes queue one at a time, the row flips before
+// the CLI answers, and the state the CLI echoes back is what stays on screen.
 Item {
   id: root
 
@@ -24,10 +27,9 @@ Item {
 
   // The plugin's own CLI wrapper lives at <plugin>/bin/omastoic, one level up
   // from this file. The host keeps `__sourceDir` on the manifest it hands a
-  // third-party plugin ("keep __sourceDir: third-party plugins find their
-  // bundled scripts through it"), so the panel does not have to guess the
-  // install path. A bare `Panel` outside the host (the smoke harness) falls
-  // back to the file's own location.
+  // third-party plugin, so the panel does not have to guess the install path.
+  // A bare `Panel` outside the host (the smoke harness) falls back to the
+  // file's own location.
   readonly property string command: {
     var dir = manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
     if (dir !== "") return dir.replace(/\/+$/, "") + "/bin/omastoic"
@@ -38,85 +40,75 @@ Item {
   // Saved state as `panel state` reports it.
   property var settings: ({})
   property var roster: []
-  property string summary: ""
-  property int customQuotes: 0
   property var quotes: []
-  property string quoteFilter: ""
-  // Which quotes the list shows: "all", "stoics" or "mine".
-  property string quoteSource: "all"
-  // Which rotation state the list shows: "any", "on" (in rotation) or "off".
-  property string quoteState: "any"
-  readonly property int mineCount: quotes.filter(function(quote) { return quote.custom }).length
-  // The list follows the Stoics picked above before Save: with the picks as
-  // saved it shows the CLI's own rotation; with changed picks it shows what
-  // Save would put in rotation.
-  readonly property var savedAuthors: settings.mineOnly ? [] : settings.authors instanceof Array && settings.authors.length ? settings.authors : allSlugs
-  readonly property bool picksChanged: selectedAuthors.length !== savedAuthors.length
-    || selectedAuthors.some(function(slug) { return savedAuthors.indexOf(slug) === -1 })
-  readonly property var listedQuotes: quotes.map(function(quote) {
-    const on = !picksChanged ? quote.inRotation
-      : quote.custom || !quote.switchable ? quote.kept
-      : quote.kept && selectedAuthors.indexOf(quote.author) !== -1
-    return Object.assign({}, quote, { on: on })
-  })
-  readonly property int rotatingCount: listedQuotes.filter(function(quote) { return quote.on }).length
-  // Newest custom quotes first, then the Stoics' book in its own order.
-  readonly property var shownQuotes: {
-    const needle = quoteFilter.trim().toLowerCase()
-    const mine = listedQuotes.filter(function(quote) { return quote.custom }).reverse()
-    const book = listedQuotes.filter(function(quote) { return !quote.custom })
-    const source = quoteSource === "mine" ? mine : quoteSource === "stoics" ? book : mine.concat(book)
-    return source.filter(function(quote) {
-      if (quoteState === "on" && !quote.on) return false
-      if (quoteState === "off" && quote.on) return false
-      return needle === "" || (quote.text + " " + quote.name + " " + quote.citation).toLowerCase().indexOf(needle) !== -1
-    })
-  }
+  property string summary: ""
+  property bool loaded: false
+
+  // Status line: "Loading…"/"Saving…" while the CLI runs, "Saved" for a moment after.
   property string busyLabel: ""
   readonly property bool busy: busyLabel !== ""
   property string error: ""
   property string notice: ""
 
-  // Edits, written only when Save is pressed.
-  property var selectedAuthors: []
-  property int interval: 60
-  property string newAuthor: "marcus"
+  // Stoics as the chips show them: none picked means only your own quotes.
+  readonly property var picked: settings.mineOnly ? []
+    : settings.authors instanceof Array && settings.authors.length ? settings.authors
+    : roster.map(function(author) { return author.slug })
+  readonly property var mine: quotes.filter(function(quote) { return quote.custom })
+  readonly property var mineSwitchable: mine.filter(function(quote) { return quote.switchable })
+  readonly property bool mineOn: mine.some(function(quote) { return quote.kept })
+  readonly property int rotatingCount: quotes.filter(function(quote) { return quote.inRotation }).length
+
+  // The list: "all", "on", "off" or "mine", plus the search box.
+  property string listFilter: "all"
+  property string search: ""
+  property var expanded: ({})
+  readonly property var shownQuotes: {
+    const needle = search.trim().toLowerCase()
+    const ordered = mine.slice().reverse().concat(quotes.filter(function(quote) { return !quote.custom }))
+    return ordered.filter(function(quote) {
+      if (listFilter === "on" && !quote.inRotation) return false
+      if (listFilter === "off" && quote.inRotation) return false
+      if (listFilter === "mine" && !quote.custom) return false
+      return needle === "" || (quote.text + " " + quote.name + " " + quote.citation).toLowerCase().indexOf(needle) !== -1
+    })
+  }
+
+  // The add form, closed until "+ Add quote".
+  property bool adding: false
+  property string newAuthor: ""
   property string newCitation: ""
   property string newText: ""
-
-  readonly property bool quoteStarted: newCitation.trim() !== "" || newText.trim() !== ""
-  // The quote file keys authors by slug; a name like "Tomas Sowell" becomes tomas-sowell.
-  // A Stoic's full name maps to that Stoic's slug.
+  // The quote file keys authors by slug: "Tomas Sowell" becomes tomas-sowell,
+  // and a Stoic's full or short name becomes that Stoic's slug.
   readonly property string authorSlug: {
     const typed = newAuthor.trim().toLowerCase()
-    const stoic = roster.find(function(author) { return String(author.name).toLowerCase() === typed })
+    const stoic = roster.find(function(author) {
+      const name = String(author.name).toLowerCase()
+      return name === typed || name.split(" ")[0] === typed || author.slug === typed
+    })
     return stoic ? stoic.slug : slugOf(typed)
   }
   function slugOf(typed) { return typed.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64) }
-  readonly property bool quoteReady: authorSlug !== "" && newCitation.trim() !== "" && newText.trim() !== ""
-
-  readonly property var allSlugs: roster.map(function(author) { return author.slug })
-  readonly property bool allPicked: roster.length > 0 && allSlugs.every(function(slug) { return selectedAuthors.indexOf(slug) !== -1 })
-
-  // Why Save would be refused, or "" when it can go. An empty pick is not
-  // "all": the CLI reads an empty list as every Stoic, so the panel never sends one.
-  readonly property string blocker: {
-    var missing = []
-    if (selectedAuthors.length === 0 && !quotes.some(function(quote) { return quote.custom && quote.kept }))
-      return "Pick a Stoic, or switch on one of your own quotes to rotate only yours."
-    if (quoteStarted && !quoteReady) {
-      if (authorSlug === "") missing.push("author")
-      if (newCitation.trim() === "") missing.push("citation")
-      if (newText.trim() === "") missing.push("quote text")
-      return "Your quote needs " + missing.join(" and ") + ", or clear it to save without one."
-    }
-    return ""
+  readonly property string addBlocker: {
+    const missing = []
+    if (authorSlug === "") missing.push("an author")
+    if (newCitation.trim() === "") missing.push("a citation")
+    if (newText.trim() === "") missing.push("the quote")
+    if (!missing.length) return ""
+    return "Needs " + (missing.length === 1 ? missing[0] : missing.slice(0, -1).join(", ") + " and " + missing[missing.length - 1]) + "."
   }
 
-  function setAuthors(list) {
-    selectedAuthors = list
-    stoicsPicker.values = list
+  // One line that matches the tags below it.
+  readonly property string headline: {
+    if (!loaded) return ""
+    const who = picked.length === 0 ? "Only your own quotes"
+      : picked.length === roster.length ? "All six Stoics"
+      : roster.filter(function(author) { return picked.indexOf(author.slug) !== -1 }).map(shortName).join(", ")
+    return who + " · " + rotatingCount + " of " + quotes.length + " quotes in rotation · every " + (Number(settings.interval) || 60) + "s"
   }
+
+  function shortName(author) { return String(author.name).split(" ")[0] }
 
   function open(payloadJson) {
     opened = true
@@ -126,6 +118,7 @@ Item {
 
   function close() {
     opened = false
+    adding = false
   }
 
   function dismiss() {
@@ -133,47 +126,76 @@ Item {
     else close()
   }
 
+  // --- writes -------------------------------------------------------------------
+
+  property var queue: []
+
   function reload() {
-    if (busy) return
-    busyLabel = "Loading…"
+    send({ kind: "state" })
+  }
+
+  function send(job) {
+    queue = queue.concat([job])
+    if (!stateProcess.running && !applyProcess.running) runNext()
+  }
+
+  function runNext() {
+    if (!queue.length) return
+    const job = queue[0]
+    queue = queue.slice(1)
     error = ""
-    resetRun(stateRun)
-    stateProcess.running = true
+    resetRun(run)
+    run.job = job
+    if (job.kind === "state") {
+      busyLabel = loaded ? "Refreshing…" : "Loading…"
+      stateProcess.running = true
+    } else {
+      busyLabel = "Saving…"
+      applyProcess.command = [command, "panel", "apply", JSON.stringify(job.payload)]
+      applyProcess.running = true
+    }
   }
 
   // A run is done once it has exited and both streams have been read;
   // Quickshell does not promise the order. Only a failed run shows its stderr:
   // a successful one may still warn there (an unreadable settings file, say).
-  function resetRun(run) {
-    run.exited = false
-    run.exitCode = 0
-    run.stdout = ""
-    run.stderr = ""
-    run.streamsLeft = 2
+  function resetRun(r) {
+    r.exited = false
+    r.exitCode = 0
+    r.stdout = ""
+    r.stderr = ""
+    r.streamsLeft = 2
   }
 
-  function settleRun(run, fallback) {
+  function settle() {
     if (!run.exited || run.streamsLeft > 0) return
+    const job = run.job
     busyLabel = ""
-    if (run.exitCode !== 0) error = run.stderr.trim() !== "" ? run.stderr.trim() : fallback
-    else error = (run.quotesOnly ? adoptQuotes(run.stdout) : adoptState(run.stdout)) ? "" : "Could not read the omastoic state."
-    if (run.quotesOnly) {
-      if (run.exitCode !== 0) flip(run.keptId, !run.keptOn)
-      return
+    if (run.exitCode !== 0) {
+      error = run.stderr.trim() !== "" ? run.stderr.trim() : "omastoic could not " + (job.kind === "state" ? "read" : "save") + " the settings."
+      // Drop the optimistic flip: show what is really saved.
+      queue = []
+      if (job.kind !== "state") Qt.callLater(reload)
+    } else if (!adoptState(run.stdout)) {
+      error = "Could not read the omastoic state."
+    } else if (job.kind !== "state") {
+      notice = job.done || "Saved"
+      noticeTimer.restart()
+      if (job.added) {
+        adding = false
+        newCitation = ""
+        newText = ""
+        citationField.text = ""
+        textField.text = ""
+        listFilter = "mine"
+        quoteView.positionViewAtBeginning()
+      }
     }
-    if (run === applyRun && error === "") notice = run.addedQuote ? "Saved. Your quote is at the top of the quote list and in rotation." : "Saved."
+    runNext()
   }
 
-  function clearNotice() {
-    if (!busy) notice = ""
-  }
-
-  // One saved state, rendered. Called for `panel state` and for the state that
-  // `panel apply` echoes back, so the panel never shows an unsaved value.
-  //
-  // The kit's inputs keep their own copy of the value and drop an incoming
-  // binding the first time the user edits them, so the saved state is pushed
-  // into them imperatively instead of bound.
+  // One saved state, rendered. The kit's inputs keep their own copy of the
+  // value, so saved values are pushed into them instead of bound.
   function adoptState(text) {
     var parsed
     try {
@@ -181,102 +203,65 @@ Item {
     } catch (failure) {
       return false
     }
-    if (!parsed || typeof parsed !== "object") return false
-    var saved = parsed.settings && parsed.settings.authors instanceof Array ? parsed.settings.authors : []
-    settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
+    if (!parsed || typeof parsed !== "object" || !(parsed.quotes instanceof Array)) return false
+    settings = parsed.settings && typeof parsed.settings === "object" ? Object.assign({}, parsed.settings, { mineOnly: !!parsed.mineOnly }) : ({})
     roster = parsed.authors instanceof Array ? parsed.authors : []
-    summary = String(parsed.summary || "")
-    customQuotes = Number(parsed.customQuotes) || 0
-    quotes = parsed.quotes instanceof Array ? parsed.quotes : []
-    interval = Number(settings.interval) || 60
-    newCitation = ""
-    newText = ""
-    if (roster.length && newAuthor.trim() === "")
-      newAuthor = roster[0].slug
-
-    setAuthors(parsed.mineOnly ? [] : saved.length ? saved.slice() : allSlugs)
-    secondsField.field.value = interval
-    authorField.text = newAuthor
-    citationField.text = ""
-    textField.text = ""
-    return true
-  }
-
-  // A switch saves at once and refreshes only the quote list and summary, so
-  // unsaved edits elsewhere in the panel stay as typed.
-  function adoptQuotes(text) {
-    var parsed
-    try {
-      parsed = JSON.parse(String(text || ""))
-    } catch (failure) {
-      return false
-    }
-    if (!parsed || !(parsed.quotes instanceof Array)) return false
     quotes = parsed.quotes
     summary = String(parsed.summary || "")
+    if (!intervalTimer.running) secondsField.field.value = Number(settings.interval) || 60
+    loaded = true
     return true
   }
 
-  function flip(id, on) {
-    quotes = quotes.map(function(quote) { return quote.id === id ? Object.assign({}, quote, { kept: on }) : quote })
+  function flip(ids, on) {
+    quotes = quotes.map(function(quote) {
+      return ids.indexOf(quote.id) !== -1 ? Object.assign({}, quote, { kept: on, inRotation: on && quote.inRotation }) : quote
+    })
   }
 
   function keep(id, on) {
-    if (busy) return
     const change = {}
     change[id] = on
-    // Flip the row now; the echoed state confirms it, or a failure flips it back.
-    flip(id, on)
-    busyLabel = "Saving…"
-    error = ""
-    notice = ""
-    resetRun(applyRun)
-    applyRun.addedQuote = false
-    applyRun.quotesOnly = true
-    applyRun.keptId = id
-    applyRun.keptOn = on
-    applyProcess.command = [command, "panel", "apply", JSON.stringify({ keep: change })]
-    applyProcess.running = true
+    flip([id], on)
+    send({ kind: "apply", payload: { keep: change }, done: on ? "Switched on" : "Switched off" })
   }
 
-  function toggleAll() {
-    setAuthors(allPicked ? [] : allSlugs)
+  function toggleStoic(slug) {
+    const next = picked.indexOf(slug) === -1 ? picked.concat([slug]) : picked.filter(function(s) { return s !== slug })
+    setPicked(next)
   }
 
-  function save() {
-    if (busy || blocker !== "") return
+  function setPicked(next) {
     // Nobody picked means only your own quotes; an empty list would mean every Stoic.
-    var payload = selectedAuthors.length
-      ? { interval: interval, authors: selectedAuthors, mineOnly: false }
-      : { interval: interval, mineOnly: true }
-    if (quoteReady) {
-      payload.addQuote = { author: authorSlug, citation: newCitation, text: newText }
-    }
-    busyLabel = "Saving…"
-    error = ""
-    notice = ""
-    resetRun(applyRun)
-    applyRun.quotesOnly = false
-    applyRun.addedQuote = quoteReady
-    applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
-    applyProcess.running = true
+    settings = Object.assign({}, settings, { authors: next, mineOnly: next.length === 0 })
+    send({
+      kind: "apply",
+      payload: next.length ? { authors: next, mineOnly: false } : { mineOnly: true },
+      done: next.length ? "Saved" : "Only your own quotes now",
+    })
+  }
+
+  function toggleMine() {
+    const on = !mineOn
+    const change = {}
+    mineSwitchable.forEach(function(quote) { change[quote.id] = on })
+    flip(Object.keys(change), on)
+    send({ kind: "apply", payload: { keep: change }, done: on ? "Your quotes are on" : "Your quotes are off" })
+  }
+
+  function addQuote() {
+    if (addBlocker !== "" || adding === false) return
+    send({
+      kind: "apply",
+      payload: { addQuote: { author: authorSlug, citation: newCitation.trim(), text: newText.trim() } },
+      done: "Added. It is in rotation.",
+      added: true,
+    })
   }
 
   QtObject {
-    id: stateRun
-    property bool exited: false
-    property int exitCode: 0
-    property string stdout: ""
-    property string stderr: ""
-    property int streamsLeft: 0
-  }
-
-  QtObject {
-    id: applyRun
-    property bool addedQuote: false
-    property bool quotesOnly: false
-    property string keptId: ""
-    property bool keptOn: false
+    id: run
+    property var job: null
     property bool exited: false
     property int exitCode: 0
     property string stdout: ""
@@ -289,34 +274,54 @@ Item {
     command: [root.command, "panel", "state"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: { stateRun.stdout = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "omastoic panel state failed.") }
+      onStreamFinished: { run.stdout = String(text || ""); run.streamsLeft--; root.settle() }
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: { stateRun.stderr = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "omastoic panel state failed.") }
+      onStreamFinished: { run.stderr = String(text || ""); run.streamsLeft--; root.settle() }
     }
-    onExited: function(exitCode) {
-      stateRun.exitCode = exitCode
-      stateRun.exited = true
-      root.settleRun(stateRun, "omastoic panel state failed.")
-    }
+    onExited: function(exitCode) { run.exitCode = exitCode; run.exited = true; root.settle() }
   }
 
   Process {
     id: applyProcess
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: { applyRun.stdout = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "omastoic panel apply failed.") }
+      onStreamFinished: { run.stdout = String(text || ""); run.streamsLeft--; root.settle() }
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: { applyRun.stderr = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "omastoic panel apply failed.") }
+      onStreamFinished: { run.stderr = String(text || ""); run.streamsLeft--; root.settle() }
     }
-    onExited: function(exitCode) {
-      applyRun.exitCode = exitCode
-      applyRun.exited = true
-      root.settleRun(applyRun, "omastoic panel apply failed.")
-    }
+    onExited: function(exitCode) { run.exitCode = exitCode; run.exited = true; root.settle() }
+  }
+
+  // Seconds save once the number stops changing.
+  property int pendingSeconds: 60
+  function changeSeconds(value) {
+    pendingSeconds = value
+    intervalTimer.restart()
+  }
+
+  Timer {
+    id: intervalTimer
+    interval: 700
+    onTriggered: root.send({ kind: "apply", payload: { interval: root.pendingSeconds }, done: "Every " + root.pendingSeconds + "s" })
+  }
+
+  Timer {
+    id: noticeTimer
+    interval: 1800
+    onTriggered: root.notice = ""
+  }
+
+  // --- view ---------------------------------------------------------------------
+
+  component Caption: Text {
+    color: Qt.darker(Commons.Color.popups.text, 1.4)
+    font.family: Style.font.family
+    font.pixelSize: Style.font.bodySmall
+    wrapMode: Text.WordWrap
   }
 
   PanelWindow {
@@ -345,14 +350,15 @@ Item {
       anchors.fill: parent
       focus: true
 
-      Keys.onEscapePressed: root.dismiss()
+      Keys.onEscapePressed: root.adding ? root.adding = false : root.dismiss()
 
       Rectangle {
         id: card
 
+        readonly property real pad: Style.spacing.popupPadding
         anchors.centerIn: parent
-        width: Math.min(Style.space(460), keyCatcher.width - Style.space(48))
-        height: content.implicitHeight + Style.spacing.popupPadding * 2
+        width: Math.min(Style.space(520), keyCatcher.width - Style.space(48))
+        height: Math.min(content.implicitHeight + pad * 2, keyCatcher.height - Style.space(48))
         radius: Style.cornerRadius
         color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
@@ -364,238 +370,38 @@ Item {
         Column {
           id: content
 
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.top: parent.top
-          anchors.margins: Style.spacing.popupPadding
+          anchors.fill: parent
+          anchors.margins: card.pad
           spacing: Style.space(12)
 
-          PanelHero {
+          // Header: title, one-line status, and the summary that never truncates.
+          Item {
             width: parent.width
-            title: "Stoics"
-            meta: root.summary
-            detail: root.busy ? root.busyLabel : "Screensaver settings"
-            foreground: Commons.Color.popups.text
-          }
+            height: Math.max(titleText.implicitHeight, statusText.implicitHeight)
 
-          PanelSeparator { foreground: Commons.Color.popups.text }
+            Text {
+              id: titleText
+              text: "Stoics"
+              color: Commons.Color.popups.text
+              font.family: Style.font.family
+              font.pixelSize: Style.font.title
+              font.bold: true
+            }
 
-          PanelSectionHeader {
-            text: "In rotation"
-            foreground: Commons.Color.popups.text
-          }
-
-          Toggle {
-            width: parent.width
-            label: root.roster.length ? "All " + root.roster.length + " Stoics" : "All Stoics"
-            description: "Off keeps only the Stoics picked below."
-            checked: root.allPicked
-            foreground: Commons.Color.popups.text
-            onClicked: root.toggleAll()
-          }
-
-          MultiSelect {
-            id: stoicsPicker
-            width: parent.width
-            label: "Stoics"
-            values: root.selectedAuthors
-            options: root.roster.map(function(author) {
-              return { value: author.slug, label: author.name, description: author.dates }
-            })
-            noSelectionText: "None: only your own quotes"
-            onChanged: function(values) { root.selectedAuthors = values; root.clearNotice() }
-          }
-
-          NumberField {
-            id: secondsField
-            label: "Seconds per quote"
-            value: root.interval
-            from: 1
-            to: 3600
-            stepSize: 5
-            foreground: Commons.Color.popups.text
-            onModified: function(value) { root.interval = value }
-          }
-
-          PanelSeparator { foreground: Commons.Color.popups.text }
-
-          PanelSectionHeader {
-            text: "All quotes · " + root.quotes.length + ", " + root.rotatingCount + " in rotation" + (root.picksChanged ? " after Save" : "")
-            foreground: Commons.Color.popups.text
-          }
-
-          ButtonGroup {
-            id: sourceTags
-            value: root.quoteSource
-            options: [
-              { value: "all", label: "All " + root.quotes.length },
-              { value: "stoics", label: "Stoics " + (root.quotes.length - root.mineCount) },
-              { value: "mine", label: "Mine " + root.mineCount }
-            ]
-            foreground: Commons.Color.popups.text
-            background: Commons.Color.popups.background
-            fontSize: Style.font.bodySmall
-            onChanged: function(value) { root.quoteSource = value }
-          }
-
-          ButtonGroup {
-            id: stateTags
-            value: root.quoteState
-            options: [
-              { value: "any", label: "On and off" },
-              { value: "on", label: "On " + root.rotatingCount },
-              { value: "off", label: "Off " + (root.quotes.length - root.rotatingCount) }
-            ]
-            foreground: Commons.Color.popups.text
-            background: Commons.Color.popups.background
-            fontSize: Style.font.bodySmall
-            onChanged: function(value) { root.quoteState = value }
-          }
-
-          TextField {
-            id: filterField
-            width: parent.width
-            placeholderText: "Search quotes, authors or citations"
-            foreground: Commons.Color.popups.text
-            onTextChanged: root.quoteFilter = text
-          }
-
-          ListView {
-            id: quoteView
-            width: parent.width
-            height: Style.space(240)
-            clip: true
-            spacing: Style.space(10)
-            boundsBehavior: Flickable.StopAtBounds
-            model: root.shownQuotes
-            delegate: Item {
-              id: quoteRow
-              required property var modelData
-              width: quoteView.width
-              height: Math.max(quoteSwitch.height, quoteText.height)
-
-              ToggleSwitch {
-                id: quoteSwitch
-                anchors.right: parent.right
-                anchors.top: parent.top
-                checked: quoteRow.modelData.kept
-                busy: root.busy
-                visible: quoteRow.modelData.switchable
-                foreground: Commons.Color.popups.text
-                onToggled: root.keep(quoteRow.modelData.id, !quoteRow.modelData.kept)
-              }
-
-              Column {
-                id: quoteText
-                anchors.left: parent.left
-                anchors.right: quoteSwitch.left
-                anchors.rightMargin: Style.space(10)
-                spacing: Style.space(2)
-                opacity: quoteRow.modelData.on ? 1 : 0.45
-                Text {
-                  width: parent.width
-                  text: "“" + quoteRow.modelData.text + "”"
-                  color: Commons.Color.popups.text
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.bodySmall
-                  wrapMode: Text.WordWrap
-                }
-                Text {
-                  width: parent.width
-                  text: "— " + quoteRow.modelData.name + ", " + quoteRow.modelData.citation
-                    + (quoteRow.modelData.custom ? " · yours" : "")
-                    + (quoteRow.modelData.on ? "" : quoteRow.modelData.kept ? " · Stoic not picked" : " · off")
-                  color: Qt.darker(Commons.Color.popups.text, 1.4)
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideRight
-                }
-              }
+            Text {
+              id: statusText
+              anchors.right: parent.right
+              anchors.verticalCenter: titleText.verticalCenter
+              text: root.busy ? root.busyLabel : root.notice !== "" ? "✓ " + root.notice : ""
+              color: root.notice !== "" && !root.busy ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
             }
           }
 
-          Text {
+          Caption {
             width: parent.width
-            visible: root.shownQuotes.length === 0
-            text: !root.quotes.length ? "No quotes loaded yet."
-              : root.quoteSource === "mine" && root.mineCount === 0 ? "No quotes of your own yet. Add one below."
-              : "No quote matches these filters."
-            color: Qt.darker(Commons.Color.popups.text, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          PanelSeparator { foreground: Commons.Color.popups.text }
-
-          PanelSectionHeader {
-            text: "Your own quote" + (root.customQuotes > 0 ? " · " + root.customQuotes + " added" : "")
-            foreground: Commons.Color.popups.text
-          }
-
-          TextField {
-            id: authorField
-            width: parent.width
-            placeholderText: "Author, for example marcus or Tomas Sowell"
-            text: "marcus"
-            foreground: Commons.Color.popups.text
-            onTextChanged: { root.newAuthor = text; root.clearNotice() }
-          }
-
-          TextField {
-            id: citationField
-            width: parent.width
-            placeholderText: "Citation, for example Meditations IX.1"
-            foreground: Commons.Color.popups.text
-            onTextChanged: { root.newCitation = text; root.clearNotice() }
-          }
-
-          TextField {
-            id: textField
-            width: parent.width
-            placeholderText: "The line itself"
-            foreground: Commons.Color.popups.text
-            onTextChanged: { root.newText = text; root.clearNotice() }
-          }
-
-          Row {
-            spacing: Style.space(10)
-
-            Button {
-              text: "Save"
-              bordered: true
-              enabled: !root.busy && root.blocker === ""
-              foreground: Commons.Color.popups.text
-              onClicked: root.save()
-            }
-
-            Button {
-              text: "Reload"
-              bordered: true
-              enabled: !root.busy
-              foreground: Commons.Color.popups.text
-              onClicked: root.reload()
-            }
-          }
-
-          Text {
-            width: parent.width
-            visible: root.error === "" && root.notice !== ""
-            text: root.notice
-            color: Commons.Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          Text {
-            width: parent.width
-            visible: root.error === "" && root.notice === "" && root.blocker !== ""
-            text: root.blocker
-            color: Qt.darker(Commons.Color.popups.text, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
+            text: root.headline
           }
 
           Text {
@@ -606,6 +412,294 @@ Item {
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
+          }
+
+          PanelSeparator { foreground: Commons.Color.popups.text }
+
+          // Rotation: one chip per Stoic, one for your own quotes, then seconds.
+          PanelSectionHeader {
+            text: "In rotation"
+            foreground: Commons.Color.popups.text
+          }
+
+          Flow {
+            id: chips
+            width: parent.width
+            spacing: Style.space(6)
+
+            Repeater {
+              model: root.roster
+              delegate: Button {
+                required property var modelData
+                text: root.shortName(modelData)
+                tooltipText: modelData.name + " · " + modelData.dates
+                bordered: true
+                selected: root.picked.indexOf(modelData.slug) !== -1
+                foreground: Commons.Color.popups.text
+                fontSize: Style.font.bodySmall
+                horizontalPadding: Style.space(8)
+                onClicked: root.toggleStoic(modelData.slug)
+              }
+            }
+
+            Button {
+              text: "Mine " + root.mine.length
+              tooltipText: root.mineSwitchable.length ? "Switch all your own quotes on or off" : "Add a quote first"
+              bordered: true
+              selected: root.mineOn
+              enabled: root.mineSwitchable.length > 0
+              foreground: Commons.Color.popups.text
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(8)
+              onClicked: root.toggleMine()
+            }
+          }
+
+          Caption {
+            width: parent.width
+            visible: root.loaded
+            text: root.picked.length === 0
+              ? (root.mineOn ? "No Stoics: only your own quotes rotate." : "Nothing is on, so the whole book rotates.")
+              : root.picked.length === root.roster.length ? "All six Stoics, plus your own quotes that are on."
+              : "Click a name to add or drop that Stoic."
+          }
+
+          NumberField {
+            id: secondsField
+            label: "Seconds per quote"
+            value: 60
+            from: 1
+            to: 3600
+            stepSize: 5
+            foreground: Commons.Color.popups.text
+            onModified: function(value) { root.changeSeconds(value) }
+          }
+
+          PanelSeparator { foreground: Commons.Color.popups.text }
+
+          // Quotes: filter tags, add button, search, list.
+          Item {
+            width: parent.width
+            height: Math.max(filterTags.height, addButton.height)
+
+            ButtonGroup {
+              id: filterTags
+              value: root.listFilter
+              options: [
+                { value: "all", label: "All " + root.quotes.length },
+                { value: "on", label: "On " + root.rotatingCount },
+                { value: "off", label: "Off " + (root.quotes.length - root.rotatingCount) },
+                { value: "mine", label: "Mine " + root.mine.length }
+              ]
+              spacing: Style.space(6)
+              foreground: Commons.Color.popups.text
+              background: Commons.Color.popups.background
+              fontSize: Style.font.bodySmall
+              onChanged: function(value) { root.listFilter = value }
+            }
+
+            Button {
+              id: addButton
+              anchors.right: parent.right
+              text: root.adding ? "Cancel" : "+ Add quote"
+              bordered: true
+              foreground: Commons.Color.popups.text
+              fontSize: Style.font.bodySmall
+              onClicked: {
+                root.adding = !root.adding
+                if (root.adding) Qt.callLater(function() { authorField.forceActiveFocus() })
+              }
+            }
+          }
+
+          // The add form, right above the list it lands in.
+          Rectangle {
+            width: parent.width
+            visible: root.adding
+            height: visible ? addForm.implicitHeight + Style.space(20) : 0
+            radius: Style.cornerRadius
+            color: "transparent"
+            border.width: Math.max(1, Style.space(1))
+            border.color: Commons.Color.popups.border
+
+            Column {
+              id: addForm
+              anchors.fill: parent
+              anchors.margins: Style.space(10)
+              spacing: Style.space(8)
+
+              TextField {
+                id: textField
+                width: parent.width
+                placeholderText: "The quote"
+                foreground: Commons.Color.popups.text
+                onTextChanged: root.newText = text
+                onAccepted: root.addQuote()
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(8)
+
+                TextField {
+                  id: authorField
+                  width: (parent.width - parent.spacing) / 2
+                  placeholderText: "Author, e.g. Seneca or Tomas Sowell"
+                  foreground: Commons.Color.popups.text
+                  onTextChanged: root.newAuthor = text
+                  onAccepted: root.addQuote()
+                }
+
+                TextField {
+                  id: citationField
+                  width: (parent.width - parent.spacing) / 2
+                  placeholderText: "Source, e.g. Letters 1"
+                  foreground: Commons.Color.popups.text
+                  onTextChanged: root.newCitation = text
+                  onAccepted: root.addQuote()
+                }
+              }
+
+              Item {
+                width: parent.width
+                height: Math.max(addHint.implicitHeight, addConfirm.height)
+
+                Caption {
+                  id: addHint
+                  anchors.left: parent.left
+                  anchors.right: addConfirm.left
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.addBlocker !== "" ? root.addBlocker
+                    : "Saved as “" + root.authorSlug + "”. Enter adds it."
+                }
+
+                Button {
+                  id: addConfirm
+                  anchors.right: parent.right
+                  text: "Add"
+                  bordered: true
+                  enabled: root.addBlocker === ""
+                  foreground: Commons.Color.popups.text
+                  fontSize: Style.font.bodySmall
+                  onClicked: root.addQuote()
+                }
+              }
+            }
+          }
+
+          TextField {
+            id: searchField
+            width: parent.width
+            placeholderText: "Search quotes, authors or sources"
+            foreground: Commons.Color.popups.text
+            onTextChanged: root.search = text
+          }
+
+          ListView {
+            id: quoteView
+            width: parent.width
+            // Grows with the list, up to about half the screen.
+            height: Math.min(contentHeight, Math.max(Style.space(160), keyCatcher.height * 0.45))
+            clip: true
+            spacing: Style.space(4)
+            boundsBehavior: Flickable.StopAtBounds
+            model: root.shownQuotes
+
+            delegate: Rectangle {
+              id: quoteRow
+              required property var modelData
+              readonly property bool open: !!root.expanded[modelData.id]
+              width: quoteView.width
+              height: rowBody.implicitHeight + Style.space(12)
+              radius: Style.cornerRadius
+              color: rowMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
+
+              MouseArea {
+                id: rowMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  const next = Object.assign({}, root.expanded)
+                  next[quoteRow.modelData.id] = !quoteRow.open
+                  root.expanded = next
+                }
+              }
+
+              ToggleSwitch {
+                id: quoteSwitch
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                checked: quoteRow.modelData.kept
+                visible: quoteRow.modelData.switchable
+                foreground: Commons.Color.popups.text
+                onToggled: root.keep(quoteRow.modelData.id, !quoteRow.modelData.kept)
+              }
+
+              Column {
+                id: rowBody
+                anchors.left: parent.left
+                anchors.right: quoteSwitch.left
+                anchors.leftMargin: Style.space(6)
+                anchors.rightMargin: Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(3)
+                opacity: quoteRow.modelData.inRotation ? 1 : 0.5
+
+                Text {
+                  width: parent.width
+                  text: "“" + quoteRow.modelData.text + "”"
+                  color: Commons.Color.popups.text
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                  maximumLineCount: quoteRow.open ? 1000 : 2
+                  elide: Text.ElideRight
+                }
+
+                Row {
+                  width: parent.width
+                  spacing: Style.space(6)
+
+                  Rectangle {
+                    visible: quoteRow.modelData.custom
+                    width: badge.implicitWidth + Style.space(8)
+                    height: badge.implicitHeight + Style.space(2)
+                    radius: Style.cornerRadius
+                    color: "transparent"
+                    border.width: Math.max(1, Style.space(1))
+                    border.color: Commons.Color.accent
+                    Text {
+                      id: badge
+                      anchors.centerIn: parent
+                      text: "yours"
+                      color: Commons.Color.accent
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+
+                  Caption {
+                    width: parent.width - (quoteRow.modelData.custom ? badge.implicitWidth + Style.space(14) : 0)
+                    wrapMode: Text.NoWrap
+                    elide: Text.ElideRight
+                    text: quoteRow.modelData.name + " · " + quoteRow.modelData.citation
+                      + (quoteRow.modelData.inRotation ? ""
+                        : !quoteRow.modelData.kept ? " · off"
+                        : " · " + root.shortName(quoteRow.modelData) + " not picked")
+                  }
+                }
+              }
+            }
+          }
+
+          Caption {
+            width: parent.width
+            visible: root.loaded && root.shownQuotes.length === 0
+            text: root.listFilter === "mine" && root.mine.length === 0 ? "No quotes of your own yet. Use + Add quote."
+              : "No quote matches."
           }
         }
       }
