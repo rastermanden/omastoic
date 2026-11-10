@@ -47,6 +47,9 @@ case "\${1:-}:\${2:-}" in
 ${stateJson}
 JSON
     ;;
+  preview:)
+    echo preview >> "${join(dir, "preview.log")}"
+    ;;
   panel:apply)
     printf '%s\\n' "\${3:-}" >> "$log"
     cat <<'JSON'
@@ -128,18 +131,21 @@ ShellRoot {
         panel.newText = "There are no solutions, only trade-offs."
         panel.addQuote()
         panel.changeSeconds(45)
+        // Start waits for every queued save, then runs preview once.
+        panel.startScreensaver()
+        console.log("preview queued:", panel.previewWanted, panel.opened)
       }
     }
     Timer {
       interval: 4600; running: true; repeat: false
-      onTriggered: console.log("done:", panel.busy, panel.queue.length, panel.adding, panel.listFilter, panel.error === "")
+      onTriggered: console.log("done:", panel.busy, panel.queue.length, panel.adding, panel.listFilter, panel.error === "", panel.previewWanted, panel.opened)
     }
   }
 }
 `;
 
 /** Run the harness and return its log plus the payload the panel sent. */
-export function smoke(timeoutMs = 8000): { skipped?: string; log: string; payload: string } {
+export function smoke(timeoutMs = 8000): { skipped?: string; log: string; payload: string; previews?: number } {
   if (!Bun.which("quickshell")) return { skipped: "quickshell is not installed", log: "", payload: "" };
   if (!process.env.WAYLAND_DISPLAY) return { skipped: "no Wayland session", log: "", payload: "" };
   const dir = fixture();
@@ -153,7 +159,11 @@ export function smoke(timeoutMs = 8000): { skipped?: string; log: string; payloa
     try {
       payload = readFileSync(join(dir, "apply.log"), "utf8").trim();
     } catch { /* the panel never saved */ }
-    return { log, payload };
+    let previews = 0;
+    try {
+      previews = readFileSync(join(dir, "preview.log"), "utf8").trim().split("\n").length;
+    } catch { /* never previewed */ }
+    return { log, payload, previews };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -176,7 +186,8 @@ if (import.meta.main) {
       "slug: marcus",
       "slug: tomas-sowell Needs a citation and the quote.",
       "flipped: false",
-      "done: false 0 false mine true",
+      "preview queued: true true",
+      "done: false 0 false mine true false false",
     ]) {
       if (!result.log.includes(needle)) {
         console.error(`qml smoke: missing ${JSON.stringify(needle)}`);
@@ -194,6 +205,10 @@ if (import.meta.main) {
     ].map((payload) => JSON.stringify(payload));
     if (JSON.stringify(sent) !== JSON.stringify(expected)) {
       console.error(`qml smoke: unexpected payloads\n${sent.join("\n")}`);
+      process.exit(1);
+    }
+    if (result.previews !== 1) {
+      console.error(`qml smoke: expected one preview run after the saves, saw ${result.previews}`);
       process.exit(1);
     }
     const header = readFileSync(join(root, "manifest.json"), "utf8");

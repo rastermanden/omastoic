@@ -198,6 +198,7 @@ Item {
       }
     }
     runNext()
+    maybePreview()
   }
 
   // One saved state, rendered. The kit's inputs keep their own copy of the
@@ -230,6 +231,26 @@ Item {
     change[id] = on
     flip([id], on)
     send({ kind: "apply", payload: { keep: change }, done: on ? "Switched on" : "Switched off" })
+  }
+
+  // Test the result: let pending saves land, close the panel, start the saver.
+  property bool previewWanted: false
+  function startScreensaver() {
+    if (intervalTimer.running) {
+      intervalTimer.stop()
+      intervalTimer.triggered()
+    }
+    previewWanted = true
+    busyLabel = busy ? busyLabel : "Starting…"
+    maybePreview()
+  }
+
+  function maybePreview() {
+    if (!previewWanted || queue.length || stateProcess.running || applyProcess.running) return
+    previewWanted = false
+    busyLabel = ""
+    dismiss()
+    Quickshell.execDetached([command, "preview"])
   }
 
   function toggleStoic(slug) {
@@ -383,7 +404,7 @@ Item {
           // Header: title, one-line status, and the summary that never truncates.
           Item {
             width: parent.width
-            height: Math.max(titleText.implicitHeight, statusText.implicitHeight)
+            height: Math.max(titleText.implicitHeight, previewButton.height)
 
             Text {
               id: titleText
@@ -394,9 +415,23 @@ Item {
               font.bold: true
             }
 
+            Button {
+              id: previewButton
+              anchors.right: parent.right
+              anchors.verticalCenter: titleText.verticalCenter
+              text: "▶ Start screensaver"
+              tooltipText: "Save, close this panel and show the Stoics now"
+              bordered: true
+              enabled: root.loaded && !root.previewWanted
+              foreground: Commons.Color.popups.text
+              fontSize: Style.font.bodySmall
+              onClicked: root.startScreensaver()
+            }
+
             Text {
               id: statusText
-              anchors.right: parent.right
+              anchors.right: previewButton.left
+              anchors.rightMargin: Style.space(10)
               anchors.verticalCenter: titleText.verticalCenter
               text: root.busy ? root.busyLabel : root.notice !== "" ? "✓ " + root.notice : ""
               color: root.notice !== "" && !root.busy ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
