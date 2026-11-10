@@ -106,12 +106,11 @@ ShellRoot {
         panel.newCitation = "Meditations IX.1"
         panel.save()
         console.log("half quote:", panel.busy, panel.newCitation, panel.blocker)
-        // A display name is not a slug; Save stays blocked and suggests one.
+        // Names become slugs; a Stoic's full name becomes that Stoic's slug.
+        panel.newAuthor = "Marcus Aurelius"
+        console.log("name author:", panel.authorSlug)
         panel.newAuthor = "Tomas Sowell"
-        panel.newText = "A line the panel added."
-        panel.save()
-        console.log("name author:", panel.busy, panel.blocker)
-        panel.newAuthor = "marcus"
+        console.log("other author:", panel.authorSlug)
         panel.interval = 30
         panel.selectedAuthors = ["marcus", "seneca", "zeno"]
         panel.newCitation = "Meditations IX.1"
@@ -121,7 +120,7 @@ ShellRoot {
     }
     Timer {
       interval: 3200; running: true; repeat: false
-      onTriggered: console.log("saved:", panel.interval, panel.selectedAuthors.join(","), panel.error)
+      onTriggered: console.log("saved:", panel.interval, panel.selectedAuthors.join(","), panel.error, panel.notice)
     }
   }
 }
@@ -160,8 +159,9 @@ if (import.meta.main) {
       "toggled on: marcus,seneca,zeno true",
       "toggled off: 0 true",
       "half quote: false Meditations IX.1 Your quote needs quote text",
-      "name author: false The author must be a slug: lowercase letters, digits, - or _, for example tomas-sowell.",
-      "saved: 30 marcus,seneca,zeno ",
+      "name author: marcus",
+      "other author: tomas-sowell",
+      "saved: 30 marcus,seneca,zeno  Saved. Your quote is in rotation.",
     ]) {
       if (!result.log.includes(needle)) {
         console.error(`qml smoke: missing ${JSON.stringify(needle)}`);
@@ -170,7 +170,7 @@ if (import.meta.main) {
     }
     const payload = JSON.parse(result.payload || "null");
     const header = readFileSync(join(root, "manifest.json"), "utf8");
-    if (payload?.interval !== 30 || payload?.authors?.length !== 3 || payload?.addQuote?.citation !== "Meditations IX.1") {
+    if (payload?.interval !== 30 || payload?.authors?.length !== 3 || payload?.addQuote?.citation !== "Meditations IX.1" || payload?.addQuote?.author !== "tomas-sowell") {
       console.error("qml smoke: unexpected apply payload");
       process.exit(1);
     }

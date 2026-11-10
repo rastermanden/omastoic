@@ -117,6 +117,10 @@ test("rotation keeps custom lines and falls back when a filter matches nothing",
   const indexed = [{ ...custom[0], id: "c01" }];
   expect(inRotation(bundled, indexed, { quotes: { marcus: ["q02"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third", "added"]);
   expect(inRotation(bundled, indexed, { quotes: { marcus: ["q02", "c00"] } }).quotes.map((quote) => quote.text)).toEqual(["second", "third"]);
+  // Your own line by someone outside the roster survives the author list.
+  const outsider = [{ author: "tomas-sowell", citation: "Basic Economics", text: "outside" }];
+  expect(inRotation(bundled, outsider, { authors: ["marcus"] }).quotes.map((quote) => quote.text)).toContain("outside");
+  expect(inRotation(bundled, [{ ...custom[0], author: "seneca" }], { authors: ["marcus"] }).quotes.map((quote) => quote.author)).not.toContain("seneca");
   expect(inRotation(bundled, [], { authors: ["seneca"], quotes: { seneca: [] } })).toEqual({
     quotes: bundled,
     ignoredSelection: false,

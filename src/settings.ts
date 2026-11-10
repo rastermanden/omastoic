@@ -198,7 +198,8 @@ export function quoteKept(id: string, ids: string[] | undefined): boolean {
  * `quoteKept`. An allow-list that matches nothing is ignored and the author
  * list is applied to the bundled book. An author list that matches nothing
  * falls back to the bundled book plus custom lines still kept. Explicitly
- * cleared custom lines stay out of both.
+ * cleared custom lines stay out of both. Custom lines by an author outside the
+ * bundled book pass the author list.
  */
 export function inRotation(
   bundled: BundledQuote[],
@@ -213,8 +214,11 @@ export function inRotation(
   const ignoredSelection = picked.length === 0 && bundled.length + custom.length > 0;
   const pool = ignoredSelection ? [...bundled, ...keptCustom] : picked;
   if (!settings.authors?.length) return { quotes: pool, ignoredSelection, ignoredAuthors: false };
+  // Your own lines by someone outside the bundled roster have no Stoic to pick,
+  // so the author list never filters them out.
+  const stoics = new Set(bundled.map((quote) => quote.author));
   const wanted = new Set(settings.authors);
-  const filtered = pool.filter((quote) => wanted.has(quote.author));
+  const filtered = pool.filter((quote) => wanted.has(quote.author) || !stoics.has(quote.author));
   if (filtered.length) return { quotes: filtered, ignoredSelection, ignoredAuthors: false };
   return { quotes: [...bundled, ...keptCustom], ignoredSelection, ignoredAuthors: true };
 }
@@ -224,7 +228,7 @@ export function describeSettings(settings: Settings, names: Map<string, { name: 
   const who = settings.authors?.length
     ? settings.authors.map((slug) => names.get(slug)?.name ?? slug).join(", ")
     : "all six";
-  const active = catalog.filter((row) => !settings.authors?.length || settings.authors.includes(row.author));
+  const active = catalog.filter((row) => !settings.authors?.length || settings.authors.includes(row.author) || (names.size > 0 && !names.has(row.author)));
   const restricted = !!settings.quotes && active.some((row) => Object.hasOwn(settings.quotes ?? {}, row.author));
   if (!restricted) return `${who} · every ${seconds}s`;
   const kept = active.filter((row) => quoteKept(row.id, settings.quotes?.[row.author])).length;

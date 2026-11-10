@@ -43,6 +43,7 @@ Item {
   property string busyLabel: ""
   readonly property bool busy: busyLabel !== ""
   property string error: ""
+  property string notice: ""
 
   // Edits, written only when Save is pressed.
   property var selectedAuthors: []
@@ -52,7 +53,15 @@ Item {
   property string newText: ""
 
   readonly property bool quoteStarted: newCitation.trim() !== "" || newText.trim() !== ""
-  readonly property bool quoteReady: newAuthor.trim() !== "" && newCitation.trim() !== "" && newText.trim() !== ""
+  // The quote file keys authors by slug; a name like "Tomas Sowell" becomes tomas-sowell.
+  // A Stoic's full name maps to that Stoic's slug.
+  readonly property string authorSlug: {
+    const typed = newAuthor.trim().toLowerCase()
+    const stoic = roster.find(function(author) { return String(author.name).toLowerCase() === typed })
+    return stoic ? stoic.slug : slugOf(typed)
+  }
+  function slugOf(typed) { return typed.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64) }
+  readonly property bool quoteReady: authorSlug !== "" && newCitation.trim() !== "" && newText.trim() !== ""
 
   readonly property var allSlugs: roster.map(function(author) { return author.slug })
   readonly property bool allPicked: roster.length > 0 && allSlugs.every(function(slug) { return selectedAuthors.indexOf(slug) !== -1 })
@@ -63,14 +72,10 @@ Item {
     var missing = []
     if (selectedAuthors.length === 0) return "Pick at least one Stoic, or turn on all of them."
     if (quoteStarted && !quoteReady) {
-      if (newAuthor.trim() === "") missing.push("author")
+      if (authorSlug === "") missing.push("author")
       if (newCitation.trim() === "") missing.push("citation")
       if (newText.trim() === "") missing.push("quote text")
       return "Your quote needs " + missing.join(" and ") + ", or clear it to save without one."
-    }
-    if (quoteStarted && !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(newAuthor.trim())) {
-      const suggestion = newAuthor.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|-+$/g, "").slice(0, 64)
-      return "The author must be a slug: lowercase letters, digits, - or _" + (suggestion ? ", for example " + suggestion : "") + "."
     }
     return ""
   }
@@ -119,6 +124,11 @@ Item {
     busyLabel = ""
     if (run.exitCode !== 0) error = run.stderr.trim() !== "" ? run.stderr.trim() : fallback
     else error = adoptState(run.stdout) ? "" : "Could not read the omastoic state."
+    if (run === applyRun && error === "") notice = run.addedQuote ? "Saved. Your quote is in rotation." : "Saved."
+  }
+
+  function clearNotice() {
+    if (!busy) notice = ""
   }
 
   // One saved state, rendered. Called for `panel state` and for the state that
@@ -143,7 +153,7 @@ Item {
     interval = Number(settings.interval) || 60
     newCitation = ""
     newText = ""
-    if (roster.length && !roster.some(function(author) { return author.slug === root.newAuthor }))
+    if (roster.length && newAuthor.trim() === "")
       newAuthor = roster[0].slug
 
     setAuthors(saved.length ? saved.slice() : allSlugs)
@@ -162,11 +172,13 @@ Item {
     if (busy || blocker !== "") return
     var payload = { interval: interval, authors: selectedAuthors }
     if (quoteReady) {
-      payload.addQuote = { author: newAuthor, citation: newCitation, text: newText }
+      payload.addQuote = { author: authorSlug, citation: newCitation, text: newText }
     }
     busyLabel = "Saving…"
     error = ""
+    notice = ""
     resetRun(applyRun)
+    applyRun.addedQuote = quoteReady
     applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
     applyProcess.running = true
   }
@@ -182,6 +194,7 @@ Item {
 
   QtObject {
     id: applyRun
+    property bool addedQuote: false
     property bool exited: false
     property int exitCode: 0
     property string stdout: ""
@@ -308,7 +321,7 @@ Item {
               return { value: author.slug, label: author.name, description: author.dates }
             })
             noSelectionText: "None picked"
-            onChanged: function(values) { root.selectedAuthors = values }
+            onChanged: function(values) { root.selectedAuthors = values; root.clearNotice() }
           }
 
           NumberField {
@@ -332,10 +345,10 @@ Item {
           TextField {
             id: authorField
             width: parent.width
-            placeholderText: "Author slug, for example marcus"
+            placeholderText: "Author, for example marcus or Tomas Sowell"
             text: "marcus"
             foreground: Commons.Color.popups.text
-            onTextChanged: root.newAuthor = text
+            onTextChanged: { root.newAuthor = text; root.clearNotice() }
           }
 
           TextField {
@@ -343,7 +356,7 @@ Item {
             width: parent.width
             placeholderText: "Citation, for example Meditations IX.1"
             foreground: Commons.Color.popups.text
-            onTextChanged: root.newCitation = text
+            onTextChanged: { root.newCitation = text; root.clearNotice() }
           }
 
           TextField {
@@ -351,7 +364,7 @@ Item {
             width: parent.width
             placeholderText: "The line itself"
             foreground: Commons.Color.popups.text
-            onTextChanged: root.newText = text
+            onTextChanged: { root.newText = text; root.clearNotice() }
           }
 
           Row {
@@ -376,7 +389,17 @@ Item {
 
           Text {
             width: parent.width
-            visible: root.error === "" && root.blocker !== ""
+            visible: root.error === "" && root.notice !== ""
+            text: root.notice
+            color: Commons.Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            width: parent.width
+            visible: root.error === "" && root.notice === "" && root.blocker !== ""
             text: root.blocker
             color: Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
