@@ -68,6 +68,10 @@ Item {
       if (newText.trim() === "") missing.push("quote text")
       return "Your quote needs " + missing.join(" and ") + ", or clear it to save without one."
     }
+    if (quoteStarted && !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(newAuthor.trim())) {
+      const suggestion = newAuthor.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|-+$/g, "").slice(0, 64)
+      return "The author must be a slug: lowercase letters, digits, - or _" + (suggestion ? ", for example " + suggestion : "") + "."
+    }
     return ""
   }
 

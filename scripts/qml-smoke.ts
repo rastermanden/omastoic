@@ -106,6 +106,12 @@ ShellRoot {
         panel.newCitation = "Meditations IX.1"
         panel.save()
         console.log("half quote:", panel.busy, panel.newCitation, panel.blocker)
+        // A display name is not a slug; Save stays blocked and suggests one.
+        panel.newAuthor = "Tomas Sowell"
+        panel.newText = "A line the panel added."
+        panel.save()
+        console.log("name author:", panel.busy, panel.blocker)
+        panel.newAuthor = "marcus"
         panel.interval = 30
         panel.selectedAuthors = ["marcus", "seneca", "zeno"]
         panel.newCitation = "Meditations IX.1"
@@ -154,6 +160,7 @@ if (import.meta.main) {
       "toggled on: marcus,seneca,zeno true",
       "toggled off: 0 true",
       "half quote: false Meditations IX.1 Your quote needs quote text",
+      "name author: false The author must be a slug: lowercase letters, digits, - or _, for example tomas-sowell.",
       "saved: 30 marcus,seneca,zeno ",
     ]) {
       if (!result.log.includes(needle)) {
