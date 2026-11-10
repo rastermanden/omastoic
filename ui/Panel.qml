@@ -118,7 +118,7 @@ Item {
   // One line that matches the tags below it.
   readonly property string headline: {
     if (!loaded) return ""
-    const who = picked.length === 0 ? "Only your own quotes"
+    const who = picked.length === 0 ? "Only mine"
       : picked.length === roster.length ? "All six Stoics"
       : roster.filter(function(author) { return picked.indexOf(author.slug) !== -1 }).map(shortName).join(", ")
     return who + " · " + rotatingCount + " of " + quotes.length + " quotes in rotation · every " + (Number(settings.interval) || 60) + "s"
@@ -280,7 +280,7 @@ Item {
     send({
       kind: "apply",
       payload: next.length ? { authors: next, mineOnly: false } : { mineOnly: true },
-      done: next.length ? "Saved" : "Only your own quotes now",
+      done: next.length ? "Saved" : "Only mine now",
     })
   }
 
@@ -523,7 +523,7 @@ Item {
 
             Button {
               text: "Mine " + root.mine.length
-              tooltipText: root.mineSwitchable.length ? "Switch all your own quotes on or off" : "Add a quote first"
+              tooltipText: root.mineSwitchable.length ? "Switch all of mine on or off" : "Add a quote first"
               bordered: true
               selected: root.mineOn
               enabled: root.mineSwitchable.length > 0
@@ -538,8 +538,8 @@ Item {
             width: parent.width
             visible: root.loaded
             text: root.picked.length === 0
-              ? (root.mineOn ? "No Stoics: only your own quotes rotate." : "Nothing is on, so the whole book rotates.")
-              : root.picked.length === root.roster.length ? "All six Stoics, plus your own quotes that are on."
+              ? (root.mineOn ? "No Stoics: only mine rotate." : "Nothing is on, so the whole book rotates.")
+              : root.picked.length === root.roster.length ? "All six Stoics, plus mine that are on."
               : "Click a name to add or drop that Stoic. The list shows only the picked ones."
           }
 
@@ -794,7 +794,7 @@ Item {
                     Text {
                       id: badge
                       anchors.centerIn: parent
-                      text: "yours"
+                      text: "mine"
                       color: Commons.Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
@@ -826,8 +826,8 @@ Item {
           Caption {
             width: parent.width
             visible: root.loaded && root.shownQuotes.length === 0
-            text: root.listFilter === "mine" && root.mine.length === 0 ? "No quotes of your own yet. Use + Add quote."
-              : root.picked.length === 0 && root.mine.length === 0 ? "No Stoics picked. Click a name above, or add a quote of your own."
+            text: root.listFilter === "mine" && root.mine.length === 0 ? "None of mine yet. Use + Add quote."
+              : root.picked.length === 0 && root.mine.length === 0 ? "No Stoics picked. Click a name above, or use + Add quote."
               : "No quote matches."
           }
         }
