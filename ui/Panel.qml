@@ -40,7 +40,8 @@ Item {
   property var roster: []
   property string summary: ""
   property int customQuotes: 0
-  property bool busy: false
+  property string busyLabel: ""
+  readonly property bool busy: busyLabel !== ""
   property string error: ""
 
   // Edits, written only when Save is pressed.
@@ -50,9 +51,25 @@ Item {
   property string newCitation: ""
   property string newText: ""
 
-  readonly property bool quoteReady: newAuthor !== "" && newCitation !== "" && newText !== ""
+  readonly property bool quoteStarted: newCitation.trim() !== "" || newText.trim() !== ""
+  readonly property bool quoteReady: newAuthor.trim() !== "" && newCitation.trim() !== "" && newText.trim() !== ""
 
   readonly property var allSlugs: roster.map(function(author) { return author.slug })
+  readonly property bool allPicked: roster.length > 0 && allSlugs.every(function(slug) { return selectedAuthors.indexOf(slug) !== -1 })
+
+  // Why Save would be refused, or "" when it can go. An empty pick is not
+  // "all": the CLI reads an empty list as every Stoic, so the panel never sends one.
+  readonly property string blocker: {
+    var missing = []
+    if (selectedAuthors.length === 0) return "Pick at least one Stoic, or turn on all of them."
+    if (quoteStarted && !quoteReady) {
+      if (newAuthor.trim() === "") missing.push("author")
+      if (newCitation.trim() === "") missing.push("citation")
+      if (newText.trim() === "") missing.push("quote text")
+      return "Your quote needs " + missing.join(" and ") + ", or clear it to save without one."
+    }
+    return ""
+  }
 
   function setAuthors(list) {
     selectedAuthors = list
@@ -75,10 +92,29 @@ Item {
   }
 
   function reload() {
-    if (stateProcess.running) return
-    busy = true
+    if (busy) return
+    busyLabel = "Loading…"
     error = ""
+    resetRun(stateRun)
     stateProcess.running = true
+  }
+
+  // A run is done once it has exited and both streams have been read;
+  // Quickshell does not promise the order. Only a failed run shows its stderr:
+  // a successful one may still warn there (an unreadable settings file, say).
+  function resetRun(run) {
+    run.exited = false
+    run.exitCode = 0
+    run.stdout = ""
+    run.stderr = ""
+    run.streamsLeft = 2
+  }
+
+  function settleRun(run, fallback) {
+    if (!run.exited || run.streamsLeft > 0) return
+    busyLabel = ""
+    if (run.exitCode !== 0) error = run.stderr.trim() !== "" ? run.stderr.trim() : fallback
+    else error = adoptState(run.stdout) ? "" : "Could not read the omastoic state."
   }
 
   // One saved state, rendered. Called for `panel state` and for the state that
@@ -92,13 +128,9 @@ Item {
     try {
       parsed = JSON.parse(String(text || ""))
     } catch (failure) {
-      error = "Could not read the omastoic state."
-      return
+      return false
     }
-    if (!parsed || typeof parsed !== "object") {
-      error = "Could not read the omastoic state."
-      return
-    }
+    if (!parsed || typeof parsed !== "object") return false
     var saved = parsed.settings && parsed.settings.authors instanceof Array ? parsed.settings.authors : []
     settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
     roster = parsed.authors instanceof Array ? parsed.authors : []
@@ -115,22 +147,42 @@ Item {
     authorField.text = newAuthor
     citationField.text = ""
     textField.text = ""
+    return true
   }
 
   function toggleAll() {
-    setAuthors(selectedAuthors.length ? [] : allSlugs)
+    setAuthors(allPicked ? [] : allSlugs)
   }
 
   function save() {
-    if (busy) return
+    if (busy || blocker !== "") return
     var payload = { interval: interval, authors: selectedAuthors }
     if (quoteReady) {
       payload.addQuote = { author: newAuthor, citation: newCitation, text: newText }
     }
-    busy = true
+    busyLabel = "Saving…"
     error = ""
+    resetRun(applyRun)
     applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
     applyProcess.running = true
+  }
+
+  QtObject {
+    id: stateRun
+    property bool exited: false
+    property int exitCode: 0
+    property string stdout: ""
+    property string stderr: ""
+    property int streamsLeft: 0
+  }
+
+  QtObject {
+    id: applyRun
+    property bool exited: false
+    property int exitCode: 0
+    property string stdout: ""
+    property string stderr: ""
+    property int streamsLeft: 0
   }
 
   Process {
@@ -138,15 +190,16 @@ Item {
     command: [root.command, "panel", "state"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.adoptState(text)
+      onStreamFinished: { stateRun.stdout = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "omastoic panel state failed.") }
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: if (String(text || "").trim() !== "") root.error = String(text).trim()
+      onStreamFinished: { stateRun.stderr = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "omastoic panel state failed.") }
     }
     onExited: function(exitCode) {
-      root.busy = false
-      if (exitCode !== 0 && root.error === "") root.error = "omastoic panel state failed."
+      stateRun.exitCode = exitCode
+      stateRun.exited = true
+      root.settleRun(stateRun, "omastoic panel state failed.")
     }
   }
 
@@ -154,16 +207,16 @@ Item {
     id: applyProcess
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: if (String(text || "").trim() !== "") root.adoptState(text)
+      onStreamFinished: { applyRun.stdout = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "omastoic panel apply failed.") }
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: if (String(text || "").trim() !== "") root.error = String(text).trim()
+      onStreamFinished: { applyRun.stderr = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "omastoic panel apply failed.") }
     }
     onExited: function(exitCode) {
-      root.busy = false
-      if (exitCode === 0) root.error = ""
-      else if (root.error === "") root.error = "omastoic panel apply failed."
+      applyRun.exitCode = exitCode
+      applyRun.exited = true
+      root.settleRun(applyRun, "omastoic panel apply failed.")
     }
   }
 
@@ -222,7 +275,7 @@ Item {
             width: parent.width
             title: "Stoics"
             meta: root.summary
-            detail: root.busy ? "Saving…" : "Screensaver settings"
+            detail: root.busy ? root.busyLabel : "Screensaver settings"
             foreground: Commons.Color.popups.text
           }
 
@@ -235,9 +288,9 @@ Item {
 
           Toggle {
             width: parent.width
-            label: "All six Stoics"
+            label: root.roster.length ? "All " + root.roster.length + " Stoics" : "All Stoics"
             description: "Off keeps only the Stoics picked below."
-            checked: root.selectedAuthors.length === root.roster.length && root.roster.length > 0
+            checked: root.allPicked
             foreground: Commons.Color.popups.text
             onClicked: root.toggleAll()
           }
@@ -250,7 +303,7 @@ Item {
             options: root.roster.map(function(author) {
               return { value: author.slug, label: author.name, description: author.dates }
             })
-            noSelectionText: "All six"
+            noSelectionText: "None picked"
             onChanged: function(values) { root.selectedAuthors = values }
           }
 
@@ -303,7 +356,7 @@ Item {
             Button {
               text: "Save"
               bordered: true
-              enabled: !root.busy
+              enabled: !root.busy && root.blocker === ""
               foreground: Commons.Color.popups.text
               onClicked: root.save()
             }
@@ -315,6 +368,16 @@ Item {
               foreground: Commons.Color.popups.text
               onClicked: root.reload()
             }
+          }
+
+          Text {
+            width: parent.width
+            visible: root.error === "" && root.blocker !== ""
+            text: root.blocker
+            color: Qt.darker(Commons.Color.popups.text, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
           }
 
           Text {

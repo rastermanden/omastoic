@@ -37,7 +37,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lock and one daemon restart. It reuses the host kit's `MultiSelect`, `Toggle`,
   `NumberField`, `TextField`, `Button`, `PanelHero` and `PanelSectionHeader`.
   Opening is left to the user: `omarchy-shell shell toggle
-  io.github.rastermanden.omastoic`, or a keybind on `omastoic ui`.
+  io.github.rastermanden.omastoic`, or a keybind on `omastoic ui`, which says
+  what to do when `omarchy-shell` is missing. Save stays disabled, with a hint,
+  while no Stoic is picked or a quote is only half filled in, and keeps what was
+  typed; CLI warnings show as errors only when the command failed.
 - `omastoic config` asks for the Stoics with a small built-in terminal
   checklist: space or `x` toggles the focused row, `1`–`6` toggle the roster in
   its listed order, arrows or `j`/`k` move, `a` selects all, `n` none, Enter

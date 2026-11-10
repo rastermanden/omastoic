@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sandbox } from "./sandbox.ts";
 
@@ -176,5 +176,11 @@ test("omastoic ui toggles the panel through the running shell", async () => {
     const failed = await s.cli(["ui"]);
     expect(failed.code).toBe(1);
     expect(failed.stderr).toContain("is omarchy-shell running?");
+
+    rmSync(join(s.bin, "omarchy-shell"));
+    const missing = await s.cli(["ui"], { PATH: s.bin });
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("is omarchy-shell running?");
+    expect(missing.stderr).not.toContain("Executable not found");
   } finally { s.cleanup(); }
 });
