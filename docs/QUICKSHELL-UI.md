@@ -32,7 +32,11 @@ with its own idea of the format.
    The panel lives in `ui/` rather than at the plugin root because the host
    would not load it from there: every attempt answered with Qt's
    `File name case mismatch` (`Panel.qml[-1:-1]`), for that path only and
-   whatever the file contained. The same file one directory down loads, so the
+   whatever the file contained — a bare `Item {}` and a renamed file failed the
+   same way, while the identical file in another plugin directory loaded. The
+   message comes from Qt's type loader (`QQmlTypeLoader::loadThread`); a
+   standalone Quickshell with the same file and path did not reproduce it, so
+   the exact cause is not known. The same file one directory down loads, so the
    entry point stays in `ui/`.
 
    `bin/omastoic` is found through the manifest's `__sourceDir` — the host keeps
@@ -41,7 +45,7 @@ with its own idea of the format.
    (the smoke harness) falls back to the file's own directory.
 
 3. **Host components reused** from `/usr/share/omarchy/shell`:
-   `qs.Ui.MultiSelect` (the Stoic roster), `qs.Ui.Toggle` (all six on/off),
+   `qs.Ui.MultiSelect` (the Stoic roster), `qs.Ui.Toggle` (every Stoic on/off),
    `qs.Ui.NumberField` (seconds per quote), `qs.Ui.TextField` (author,
    citation, quote text), `qs.Ui.Button`, `qs.Ui.PanelHero`,
    `qs.Ui.PanelSectionHeader`, and `qs.Commons.Style` / `Commons.Color` for
@@ -49,7 +53,14 @@ with its own idea of the format.
    bar-widget popup base and needs a live bar instance plus an anchor item, and a
    summoned overlay has neither.
 
-4. **Opening.** `omastoic ui` runs `omarchy-shell shell toggle <plugin id>`, so a
+4. **Save refuses what the CLI would misread.** An empty pick means "every
+   Stoic" to the CLI, so the panel never sends one: with the toggle off and
+   nobody picked, Save is disabled and a hint says why. A quote with a citation
+   or text but a missing field also disables Save and keeps what was typed. CLI
+   stderr is shown only when the command failed; a successful run may still
+   warn there.
+
+5. **Opening.** `omastoic ui` runs `omarchy-shell shell toggle <plugin id>`, so a
    Hyprland keybind or a terminal can open and close the panel. The same works
    with `omarchy-shell shell toggle io.github.rastermanden.omastoic` directly.
 
@@ -68,7 +79,6 @@ with its own idea of the format.
       against the host kit and a fake CLI, so open/read/edit/save is exercised
       end to end (`bun scripts/qml-smoke.ts`; opt-in, it needs a Wayland
       session).
-- [x] `STATUS.md`: what works, how to open it, what is missing.
 
 ## Loading it in the host shell
 
@@ -86,8 +96,14 @@ A plugin reload on its own re-creates the panel's `Loader`, which closes an open
 panel and picks up a *new* entry-point URL, but it does not recompile a file
 whose URL the engine already knows.
 
-## Non-goals
+## Non-goals and limits
 
-Per-quote checklists and the full author/quote pickers stay in `omastoic config`
-in a terminal. Editing or removing an existing custom quote is out of scope for
-the first version; the panel only adds.
+- Per-quote checklists and the full author/quote pickers stay in
+  `omastoic config` in a terminal.
+- Editing or removing an existing custom quote is out of scope for the first
+  version; the panel only adds.
+- No bar-widget entry point and no installed keybind: the panel opens by
+  command. Bind `omastoic ui` in `~/.config/hypr/bindings.conf` for a key.
+- Strings are English literals; the host kit's `I18n` is not used yet.
+- `check-qml.ts` lints against `$OMARCHY_TEST_ROOT` or `/usr/share/omarchy`
+  only; another Omarchy version may name the same components differently.
