@@ -117,7 +117,7 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
   if (/[\x00-\x1f\x7f-\x9f]/u.test(quote.text + quote.citation + quote.author + (author?.name ?? "") + (author?.dates ?? ""))) throw new Error("canvas contains terminal control characters");
   const fits = (lines: string[]) => lines.length <= rows && lines.every((l) => cellWidth(l) <= cols);
   const finish = (lines: string[]) => lines.map((l) => l.trimEnd()).join("\n");
-  const name = (author?.name ?? quote.author).toUpperCase();
+  const name = (author?.name ?? displayName(quote.author)).toUpperCase();
   const dates = author?.dates ?? "";
 
   if (art && art.length) {
@@ -160,6 +160,24 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
   const notice = [...wrap("Resize to read quote", cols), ...wrap(quote.citation, cols)];
   if (fits(notice)) return finish(notice);
   throw new Error(`grid ${cols}x${rows} too small to show citation: ${quote.citation}`);
+}
+
+/** A readable name for an author who is not on the roster: tomas-sowell -> Tomas Sowell. */
+export function displayName(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/** The first portrait found for an author across `dirs`, in order. */
+export async function findArt(dirs: string[], slug: string): Promise<string[] | null> {
+  for (const dir of dirs) {
+    const art = await loadArt(dir, slug);
+    if (art) return art;
+  }
+  return null;
 }
 
 /** Read the art for an author, or null when there is no portrait for them. */

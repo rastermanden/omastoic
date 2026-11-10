@@ -114,6 +114,10 @@ Item {
     return who + " · " + rotatingCount + " of " + quotes.length + " quotes in rotation · every " + (Number(settings.interval) || 60) + "s"
   }
 
+  function hasPortrait(slug) {
+    return quotes.some(function(quote) { return quote.author === slug && quote.portrait })
+  }
+
   function shortName(author) { return String(author.name).split(" ")[0] }
 
   function open(payloadJson) {
@@ -613,6 +617,7 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   text: root.addBlocker !== "" ? root.addBlocker
                     : "Saved as “" + root.authorSlug + "”. Enter adds it."
+                      + (root.hasPortrait(root.authorSlug) ? "" : " For a portrait: omastoic portrait " + root.authorSlug + " <image>")
                 }
 
                 Button {
@@ -727,10 +732,18 @@ Item {
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
                     text: quoteRow.modelData.name + " · " + quoteRow.modelData.citation
+                      + (quoteRow.modelData.portrait ? "" : " · no portrait")
                       + (quoteRow.modelData.inRotation ? ""
                         : !quoteRow.modelData.kept ? " · off"
                         : " · " + root.shortName(quoteRow.modelData) + " not picked")
                   }
+                }
+
+                Caption {
+                  width: parent.width
+                  visible: quoteRow.open && !quoteRow.modelData.portrait
+                  text: "No portrait for " + quoteRow.modelData.name + " yet. In a terminal: omastoic portrait "
+                    + quoteRow.modelData.author + " ~/Pictures/photo.jpg (add --drawing for line art)."
                 }
               }
             }

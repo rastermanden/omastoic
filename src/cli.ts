@@ -14,7 +14,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
+import { compose, displayName, findArt, indexBundled, indexCustom, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
@@ -23,6 +23,7 @@ import { pickQuotes, type QuoteRow } from "./quote-picker.ts";
 import { askConfirm, askLine, askText } from "./line-prompt.ts";
 import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
+import { makePortrait } from "./portrait.ts";
 import {
   applyQuoteFlags,
   compactSettings,
@@ -46,6 +47,9 @@ const BRANDING = join(CONFIG_HOME, "omarchy/branding/screensaver.txt");
 const BACKUP = join(CONFIG_HOME, "omarchy/branding/screensaver.txt.pre-omastoic");
 const MENU = join(CONFIG_HOME, "omarchy/extensions/omarchy-menu.jsonc");
 const USER_CONFIG = join(CONFIG_HOME, "omastoic");
+// Your own portraits come first, so one can stand in for a bundled Stoic.
+const USER_ART = join(USER_CONFIG, "art");
+const ART_DIRS = [USER_ART, join(ROOT, "art")];
 const STATE = join(STATE_HOME, "omastoic");
 const WRITTEN = join(STATE, "written.sha");
 const UNIT = join(CONFIG_HOME, "systemd/user/omastoic.service");
@@ -256,7 +260,7 @@ async function render(size?: { cols: number; rows: number }, remember = true): P
   if (remember) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
 
   const grid = size ?? (await screensaverSize());
-  const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
+  const art = await findArt(ART_DIRS, chosen.quote.author);
   return compose(chosen.quote, (await authors()).get(chosen.quote.author), {
     cols: grid.cols,
     rows: grid.rows,
@@ -1044,6 +1048,10 @@ async function panelState(): Promise<string> {
   const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   const selected = settings.mineOnly ? [] : settings.authors?.length ? settings.authors : [...roster.keys()];
   const rotating = new Set<Quote>(inRotation(bundled, custom.quotes, settings).quotes);
+  const portraits = new Map<string, boolean>();
+  for (const quote of [...bundled, ...custom.quotes]) {
+    if (!portraits.has(quote.author)) portraits.set(quote.author, !!(await findArt(ART_DIRS, quote.author)));
+  }
   return JSON.stringify(
     {
       settings,
@@ -1061,7 +1069,7 @@ async function panelState(): Promise<string> {
       quotes: [...bundled, ...custom.quotes].map((quote) => ({
         id: quote.id,
         author: quote.author,
-        name: roster.get(quote.author)?.name ?? quote.author,
+        name: roster.get(quote.author)?.name ?? displayName(quote.author),
         citation: quote.citation,
         text: quote.text,
         custom: quote.id.startsWith("c"),
@@ -1069,6 +1077,7 @@ async function panelState(): Promise<string> {
         switchable: roster.has(quote.author),
         kept: !roster.has(quote.author) || quoteKept(quote.id, settings.quotes?.[quote.author]),
         inRotation: rotating.has(quote),
+        portrait: portraits.get(quote.author) ?? false,
       })),
       customQuotesError: custom.error ?? "",
       configPath: SETTINGS_FILE,
@@ -1218,6 +1227,68 @@ async function panelApply(raw: string): Promise<number> {
   return 0;
 }
 
+/** An author as typed: a slug, a Stoic's full or first name, or any name. */
+async function authorSlug(typed: string): Promise<string> {
+  const lower = typed.trim().toLowerCase();
+  for (const author of (await authors()).values()) {
+    if (author.slug === lower || author.name.toLowerCase() === lower || author.name.toLowerCase().split(" ")[0] === lower) return author.slug;
+  }
+  return lower.replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64);
+}
+
+async function portrait(rest: string[]): Promise<number> {
+  const usage = "usage: omastoic portrait <author> <image> [--drawing] [--threshold 45] [--crop WxH+X+Y] | omastoic portrait <author> --remove";
+  const valued = new Set(["--threshold", "--crop"]);
+  const words = rest.filter((word, i) => !word.startsWith("--") && !valued.has(rest[i - 1] ?? ""));
+  if (!words[0]) {
+    console.error(usage);
+    return 1;
+  }
+  const slug = await authorSlug(words[0]);
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) {
+    console.error(`omastoic: ${JSON.stringify(words[0])} is not an author name`);
+    return 1;
+  }
+  const file = join(USER_ART, `${slug}.txt`);
+  if (rest.includes("--remove")) {
+    if (!existsSync(file)) {
+      console.log(`→ no portrait of your own for ${slug}`);
+      return 0;
+    }
+    rmSync(file);
+    const bundled = await findArt([join(ROOT, "art")], slug);
+    console.log(`→ removed ${file}${bundled ? "; the bundled portrait is back" : ""}`);
+    return 0;
+  }
+  if (!words[1]) {
+    console.error(usage);
+    return 1;
+  }
+  const thresholdFlag = stringFlag(rest, "threshold");
+  const threshold = thresholdFlag == null ? undefined : Number(thresholdFlag);
+  if (threshold != null && !(Number.isFinite(threshold) && threshold > 0 && threshold < 100)) {
+    console.error("omastoic: --threshold expects a percent between 1 and 99");
+    return 1;
+  }
+  let art: string;
+  try {
+    art = await makePortrait(words[1], { drawing: rest.includes("--drawing"), threshold, crop: stringFlag(rest, "crop") });
+  } catch (error) {
+    console.error(`omastoic: ${(error as Error).message}`);
+    return 1;
+  }
+  if (!art.trim()) {
+    console.error("omastoic: the image came out blank; try --drawing, another --threshold, or a tighter --crop");
+    return 1;
+  }
+  mkdirSync(USER_ART, { recursive: true });
+  atomicWrite(file, `${art}\n`);
+  console.log(art);
+  console.log(`\n→ saved ${file}`);
+  console.log(`  quotes by ${slug} now show it. Not right? Try --drawing, --threshold, or --crop WxH+X+Y.`);
+  return 0;
+}
+
 async function status(): Promise<number> {
   const quotes = await quoteBook();
   const byAuthor = new Map<string, number>();
@@ -1226,8 +1297,8 @@ async function status(): Promise<number> {
   const names = await authors();
   console.log(`${quotes.length} quotes:`);
   for (const [slug, count] of [...byAuthor].sort((a, b) => b[1] - a[1])) {
-    const art = (await loadArt(join(ROOT, "art"), slug)) ? "portrait" : "no portrait";
-    console.log(`  ${(names.get(slug)?.name ?? slug).padEnd(18)} ${String(count).padStart(3)}  ${art}`);
+    const art = (await findArt(ART_DIRS, slug)) ? "portrait" : "no portrait";
+    console.log(`  ${(names.get(slug)?.name ?? displayName(slug)).padEnd(18)} ${String(count).padStart(3)}  ${art}`);
   }
 
   const size = await screensaverSize();
@@ -1334,6 +1405,8 @@ async function main(): Promise<number> {
       console.error("usage: omastoic panel state | omastoic panel apply '<json>'");
       return 1;
     }
+    case "portrait":
+      return portrait(rest);
     case "ui": {
       const shell = Bun.which("omarchy-shell");
       const toggled = shell ? Bun.spawnSync([shell, "shell", "toggle", PLUGIN_ID], { stdout: "ignore", stderr: "ignore" }) : null;
@@ -1354,6 +1427,9 @@ async function main(): Promise<number> {
   omastoic config      choose Stoics, their quotes, and seconds, or add a quote
                        (--plain asks for numbers instead of keys)
   omastoic ui          open the settings panel in the Omarchy shell
+  omastoic portrait <author> <image> [--drawing] [--threshold 45] [--crop WxH+X+Y]
+                       make a braille portrait for an author's quotes
+  omastoic portrait <author> --remove   drop your portrait for that author
   omastoic status      who has the screensaver, and what is in the quote book
   omastoic uninstall   take the service, menu row and plugin back out
 

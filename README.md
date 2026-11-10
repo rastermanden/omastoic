@@ -23,6 +23,22 @@ native launcher and refuses installation, rather than promising rotation that
 cannot work. Native integration, runtime removal and historical portrait
 replacement are separate follow-ups, not features of this release.
 
+## Your own portraits
+
+A quote by someone outside the six Stoics shows the text and the author's name.
+To give that author a face, turn any picture into a braille portrait:
+
+```bash
+omastoic portrait "Tomas Sowell" ~/Pictures/sowell.jpg          # a photo
+omastoic portrait "Tomas Sowell" ~/Pictures/sketch.png --drawing  # line art
+omastoic portrait tomas-sowell --remove
+```
+
+Portraits are saved in `~/.config/omastoic/art/` and are used before the
+bundled ones, so one can also stand in for a Stoic. The picture is cropped
+around its centre; pass `--crop WxH+X+Y` to frame the head yourself, and
+`--threshold` (drawings) to admit more or less ink.
+
 ## Install and update
 
 ```bash
