@@ -1198,6 +1198,39 @@ async function panelApply(raw: string): Promise<number> {
     settingsTouched = true;
   }
 
+  // Set or drop the portrait of an author outside the roster: { author, image, drawing } or { author, remove: true }.
+  if (Object.hasOwn(value, "portrait")) {
+    const ask = value.portrait && typeof value.portrait === "object" && !Array.isArray(value.portrait) ? (value.portrait as Record<string, unknown>) : null;
+    const author = typeof ask?.author === "string" ? ask.author : "";
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(author)) {
+      console.error("omastoic: panel portrait needs an author slug");
+      return 1;
+    }
+    const file = join(USER_ART, `${author}.txt`);
+    if (ask?.remove === true) {
+      rmSync(file, { force: true });
+    } else {
+      const image = typeof ask?.image === "string" ? ask.image.trim().replace(/^~(?=\/|$)/, HOME) : "";
+      if (!image) {
+        console.error("omastoic: panel portrait needs an image, or remove: true");
+        return 1;
+      }
+      let made: string;
+      try {
+        made = await makePortrait(image, { drawing: ask?.drawing === true });
+      } catch (error) {
+        console.error(`omastoic: ${(error as Error).message}`);
+        return 1;
+      }
+      if (!made.trim()) {
+        console.error("omastoic: that picture came out blank; try it as a drawing, or another picture");
+        return 1;
+      }
+      mkdirSync(USER_ART, { recursive: true });
+      atomicWrite(file, `${made}\n`);
+    }
+  }
+
   let added: Quote | null = null;
   if (Object.hasOwn(value, "addQuote")) {
     const quote = panelQuote(value.addQuote);

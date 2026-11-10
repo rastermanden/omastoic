@@ -68,3 +68,27 @@ test.skipIf(!Bun.which("magick"))("panel apply adds a quote with a picture, or n
     expect(added).toMatchObject({ author: "tomas-sowell", portrait: true });
   } finally { s.cleanup(); }
 });
+
+test.skipIf(!Bun.which("magick"))("panel apply sets and removes a portrait for an existing author", async () => {
+  const s = sandbox();
+  try {
+    const image = join(s.home, "face.png");
+    Bun.spawnSync(["magick", "-size", "200x240", "radial-gradient:white-black", image]);
+    await s.cli(["panel", "apply", JSON.stringify({ addQuote: { author: "tomas-sowell", citation: "Basic Economics", text: "Trade-offs." } })]);
+    const file = join(s.config, "omastoic/art/tomas-sowell.txt");
+
+    const set = await s.cli(["panel", "apply", JSON.stringify({ portrait: { author: "tomas-sowell", image, drawing: false } })]);
+    expect(set.code).toBe(0);
+    expect(existsSync(file)).toBe(true);
+    expect(JSON.parse(set.stdout).quotes.find((row: { custom: boolean }) => row.custom).portrait).toBe(true);
+
+    const removed = await s.cli(["panel", "apply", JSON.stringify({ portrait: { author: "tomas-sowell", remove: true } })]);
+    expect(removed.code).toBe(0);
+    expect(existsSync(file)).toBe(false);
+
+    for (const portrait of [{ author: "Tomas Sowell", image }, { author: "tomas-sowell" }, { author: "tomas-sowell", image: join(s.home, "none.png") }]) {
+      expect((await s.cli(["panel", "apply", JSON.stringify({ portrait })])).code).toBe(1);
+    }
+    expect(existsSync(file)).toBe(false);
+  } finally { s.cleanup(); }
+});

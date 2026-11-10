@@ -89,11 +89,22 @@ Item {
   property string newImage: ""
   property bool newDrawing: false
   property bool picking: false
+  // Where a picked picture goes: "" for the add form, or an author's slug.
+  property string pickFor: ""
 
-  function chooseImage() {
+  function chooseImage(author) {
     if (picking) return
+    pickFor = author || ""
     picking = true
     pickProcess.running = true
+  }
+
+  function setPortrait(author, image) {
+    send({ kind: "apply", payload: { portrait: { author: author, image: image } }, done: "Portrait saved" })
+  }
+
+  function removePortrait(author) {
+    send({ kind: "apply", payload: { portrait: { author: author, remove: true } }, done: "Portrait removed" })
   }
   // The quote file keys authors by slug: "Tomas Sowell" becomes tomas-sowell,
   // and a Stoic's full or short name becomes that Stoic's slug.
@@ -118,7 +129,7 @@ Item {
   // One line that matches the tags below it.
   readonly property string headline: {
     if (!loaded) return ""
-    const who = picked.length === 0 ? "Only mine"
+    const who = picked.length === 0 ? "Only yours"
       : picked.length === roster.length ? "All six Stoics"
       : roster.filter(function(author) { return picked.indexOf(author.slug) !== -1 }).map(shortName).join(", ")
     return who + " · " + rotatingCount + " of " + quotes.length + " quotes in rotation · every " + (Number(settings.interval) || 60) + "s"
@@ -280,7 +291,7 @@ Item {
     send({
       kind: "apply",
       payload: next.length ? { authors: next, mineOnly: false } : { mineOnly: true },
-      done: next.length ? "Saved" : "Only mine now",
+      done: next.length ? "Saved" : "Only yours now",
     })
   }
 
@@ -322,14 +333,16 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         const chosen = String(text || "").trim()
-        if (chosen !== "") imageField.text = chosen
+        if (chosen === "") return
+        if (root.pickFor === "") imageField.text = chosen
+        else root.setPortrait(root.pickFor, chosen)
       }
     }
     onExited: function(exitCode) {
       root.picking = false
       if (exitCode === 3) root.error = "No Pictures, Downloads or Desktop folder to choose from. Type the picture's path instead."
       else if (exitCode !== 0) root.error = "Omarchy's image picker did not open. Type the picture's path instead."
-      Qt.callLater(function() { if (root.opened) imageField.forceActiveFocus() })
+      if (root.pickFor === "") Qt.callLater(function() { if (root.opened) imageField.forceActiveFocus() })
     }
   }
 
@@ -522,8 +535,8 @@ Item {
             }
 
             Button {
-              text: "Mine " + root.mine.length
-              tooltipText: root.mineSwitchable.length ? "Switch all of mine on or off" : "Add a quote first"
+              text: "Yours " + root.mine.length
+              tooltipText: root.mineSwitchable.length ? "Switch all of yours on or off" : "Add a quote first"
               bordered: true
               selected: root.mineOn
               enabled: root.mineSwitchable.length > 0
@@ -538,8 +551,8 @@ Item {
             width: parent.width
             visible: root.loaded
             text: root.picked.length === 0
-              ? (root.mineOn ? "No Stoics: only mine rotate." : "Nothing is on, so the whole book rotates.")
-              : root.picked.length === root.roster.length ? "All six Stoics, plus mine that are on."
+              ? (root.mineOn ? "No Stoics: only yours rotate." : "Nothing is on, so the whole book rotates.")
+              : root.picked.length === root.roster.length ? "All six Stoics, plus yours that are on."
               : "Click a name to add or drop that Stoic. The list shows only the picked ones."
           }
 
@@ -568,7 +581,7 @@ Item {
                 { value: "all", label: "All " + root.pickedQuotes.length },
                 { value: "on", label: "On " + root.pickedOnCount },
                 { value: "off", label: "Off " + (root.pickedQuotes.length - root.pickedOnCount) },
-                { value: "mine", label: "Mine " + root.mine.length }
+                { value: "mine", label: "Yours " + root.mine.length }
               ]
               spacing: Style.space(6)
               foreground: Commons.Color.popups.text
@@ -661,7 +674,7 @@ Item {
                   enabled: !root.picking
                   foreground: Commons.Color.popups.text
                   fontSize: Style.font.bodySmall
-                  onClicked: root.chooseImage()
+                  onClicked: root.chooseImage("")
                 }
 
                 Button {
@@ -794,7 +807,7 @@ Item {
                     Text {
                       id: badge
                       anchors.centerIn: parent
-                      text: "mine"
+                      text: "yours"
                       color: Commons.Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
@@ -813,11 +826,29 @@ Item {
                   }
                 }
 
-                Caption {
-                  width: parent.width
-                  visible: quoteRow.open && !quoteRow.modelData.portrait
-                  text: "No portrait for " + quoteRow.modelData.name + " yet. Add a quote by them with a picture,"
-                    + " or in a terminal: omastoic portrait " + quoteRow.modelData.author + " <picture>"
+                // Your own authors' portraits, set from here with Omarchy's image grid.
+                Row {
+                  visible: quoteRow.open && quoteRow.modelData.custom && !quoteRow.modelData.switchable
+                  spacing: Style.space(8)
+
+                  Button {
+                    text: !!quoteRow.modelData.portrait ? "Change picture…" : "Add picture…"
+                    tooltipText: "The portrait for every quote by " + quoteRow.modelData.name
+                    bordered: true
+                    enabled: !root.picking
+                    foreground: Commons.Color.popups.text
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.chooseImage(quoteRow.modelData.author)
+                  }
+
+                  Button {
+                    visible: !!quoteRow.modelData.portrait
+                    text: "Remove picture"
+                    bordered: true
+                    foreground: Commons.Color.popups.text
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.removePortrait(quoteRow.modelData.author)
+                  }
                 }
               }
             }
@@ -826,7 +857,7 @@ Item {
           Caption {
             width: parent.width
             visible: root.loaded && root.shownQuotes.length === 0
-            text: root.listFilter === "mine" && root.mine.length === 0 ? "None of mine yet. Use + Add quote."
+            text: root.listFilter === "mine" && root.mine.length === 0 ? "None of yours yet. Use + Add quote."
               : root.picked.length === 0 && root.mine.length === 0 ? "No Stoics picked. Click a name above, or use + Add quote."
               : "No quote matches."
           }
