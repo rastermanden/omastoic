@@ -1269,8 +1269,9 @@ async function main(): Promise<number> {
       return 1;
     }
     case "ui": {
-      const toggled = Bun.spawnSync(["omarchy-shell", "shell", "toggle", PLUGIN_ID], { stdout: "ignore", stderr: "ignore" });
-      if (toggled.exitCode !== 0) {
+      const shell = Bun.which("omarchy-shell");
+      const toggled = shell ? Bun.spawnSync([shell, "shell", "toggle", PLUGIN_ID], { stdout: "ignore", stderr: "ignore" }) : null;
+      if (toggled?.exitCode !== 0) {
         console.error("omastoic: could not reach the Omarchy shell — is omarchy-shell running?");
         console.error(`          otherwise: omarchy-shell shell toggle ${PLUGIN_ID}`);
         return 1;
