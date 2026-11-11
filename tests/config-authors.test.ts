@@ -29,7 +29,7 @@ test("every config prompt runs in the terminal, so gum is not needed", async () 
     expect(saved.authors).toEqual(["marcus"]);
     expect(saved.interval).toBe(45);
     // One line toggled off, so Marcus keeps an explicit allow-list.
-    expect(saved.quotes.marcus).toHaveLength(24);
+    expect(saved.quotes.marcus).toHaveLength(26);
     expect(saved.quotes.marcus).not.toContain("q01");
   } finally { s.cleanup(); }
 });

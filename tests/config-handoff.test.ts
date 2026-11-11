@@ -21,6 +21,6 @@ test("a key typed after the author picker reaches the quote picker", async () =>
     expect(saved.authors).toEqual(["marcus"]);
     expect(saved.interval).toBe(60);
     expect(saved.quotes.marcus).not.toContain("q01");
-    expect(saved.quotes.marcus).toHaveLength(24);
+    expect(saved.quotes.marcus).toHaveLength(26);
   } finally { s.cleanup(); }
 }, 20000);

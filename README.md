@@ -1,7 +1,7 @@
 # Omastoic
 
 **The Stoics on your Omarchy screensaver.** One braille portrait, one thought,
-and a quiet label with its source. Six Stoics and 79 entries from public-domain
+and a quiet label with its source. Six Stoics and 84 entries from public-domain
 US translations, reviewed against the editions in [CREDITS.md](CREDITS.md).
 
 ![Omastoic on the Omarchy screensaver](https://github.com/rastermanden/omastoic/releases/latest/download/preview.gif)

@@ -36,6 +36,8 @@ set -eu
 log="${join(dir, "apply.log")}"
 case "\${1:-}:\${2:-}" in
   panel:state)
+    # A successful run may still warn on stderr; the panel must not show it.
+    echo "omastoic: ignoring unreadable /dev/null" >&2
     cat <<'JSON'
 ${stateJson}
 JSON
@@ -93,7 +95,17 @@ ShellRoot {
     Timer {
       interval: 1800; running: true; repeat: false
       onTriggered: {
-        console.log("loaded:", panel.interval, panel.selectedAuthors.join(","), panel.customQuotes)
+        console.log("loaded:", panel.interval, panel.selectedAuthors.join(","), panel.customQuotes, "error=" + panel.error)
+        // A partial pick turns "all" on; "all" turned off picks nobody, and nobody blocks Save.
+        panel.toggleAll()
+        console.log("toggled on:", panel.selectedAuthors.join(","), panel.allPicked)
+        panel.toggleAll()
+        console.log("toggled off:", panel.selectedAuthors.length, panel.blocker !== "")
+        // A half-filled quote blocks Save and survives it.
+        panel.selectedAuthors = ["marcus"]
+        panel.newCitation = "Meditations IX.1"
+        panel.save()
+        console.log("half quote:", panel.busy, panel.newCitation, panel.blocker)
         panel.interval = 30
         panel.selectedAuthors = ["marcus", "seneca", "zeno"]
         panel.newCitation = "Meditations IX.1"
@@ -136,7 +148,14 @@ if (import.meta.main) {
     console.log(`qml smoke: skipped — ${result.skipped}`);
   } else {
     console.log(result.log.trim());
-    for (const needle of ["summary:", "loaded: 90 marcus,seneca 1", "saved: 30 marcus,seneca,zeno "]) {
+    for (const needle of [
+      "summary:",
+      "loaded: 90 marcus,seneca 1 error=\n",
+      "toggled on: marcus,seneca,zeno true",
+      "toggled off: 0 true",
+      "half quote: false Meditations IX.1 Your quote needs quote text",
+      "saved: 30 marcus,seneca,zeno ",
+    ]) {
       if (!result.log.includes(needle)) {
         console.error(`qml smoke: missing ${JSON.stringify(needle)}`);
         process.exit(1);

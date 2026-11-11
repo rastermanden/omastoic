@@ -30,7 +30,7 @@ test("every author in the book has a name, dates and a portrait", () => {
   }
 });
 
-test("audit grid: all 79 quotes fit, or explicitly request a reading area", () => {
+test("audit grid: all 84 quotes fit, or explicitly request a reading area", () => {
   for (const [cols, rows] of [[92, 25], [60, 30], [40, 24], [20, 8], [60, 12], [80, 24]]) {
     for (const q of quotes) {
       const block = compose(q, authors.get(q.author), { cols, rows, art: art(q.author) });
