@@ -153,6 +153,11 @@ ShellRoot {
         console.log("confirm:", panel.confirmDelete)
         panel.deleteEdit()
         panel.changeSeconds(45)
+        // Dragging a corner sizes the card; the size saves like any change.
+        panel.beginSize(400, 300)
+        panel.dragSize("br", 520, 420)
+        console.log("sized:", panel.cardWidth > 0 && panel.cardHeight > 0)
+        panel.endSize()
         // Start waits for every queued save, then runs preview once.
         panel.startScreensaver()
         console.log("preview queued:", panel.previewWanted, panel.opened)
@@ -211,6 +216,7 @@ if (import.meta.main) {
       "flipped: false",
       "editing: c01 seneca true",
       "confirm: true",
+      "sized: true",
       "preview queued: true true",
       "done: false 0 false mine true false false",
     ]) {
@@ -220,6 +226,13 @@ if (import.meta.main) {
       }
     }
     const sent = result.payload.split("\n").map((line) => JSON.stringify(JSON.parse(line)));
+    // The dragged size is whatever the window allowed; only its shape is fixed.
+    const resizeAt = sent.findIndex((line) => line.startsWith('{"size":'));
+    if (resizeAt === -1 || !/^\{"size":\{"width":\d+,"height":\d+\}\}$/.test(sent[resizeAt])) {
+      console.error(`qml smoke: unexpected resize payload ${sent[resizeAt] ?? "(none)"}`);
+      process.exit(1);
+    }
+    sent.splice(resizeAt, 1);
     const expected = [
       { authors: ["marcus"], mineOnly: false },
       { mineOnly: true },

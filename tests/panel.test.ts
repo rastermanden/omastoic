@@ -10,6 +10,33 @@ const quotesPath = (s: Sandbox) => join(s.config, "omastoic/quotes.tsv");
 const saved = (s: Sandbox) => JSON.parse(readFileSync(settingsPath(s), "utf8"));
 const stateOf = (result: { stdout: string }) => JSON.parse(result.stdout);
 
+test("panel apply remembers the size the user dragged, without touching rotation", async () => {
+  const s = sandbox();
+  try {
+    const panelPath = join(s.config, "omastoic/panel.json");
+    expect(stateOf(await s.cli(["panel", "state"])).size).toBeNull();
+
+    const sized = await s.cli(["panel", "apply", JSON.stringify({ size: { width: 720, height: 560 } })]);
+    expect(sized.code).toBe(0);
+    expect(sized.stderr).toBe("");
+    expect(stateOf(sized).size).toEqual({ width: 720, height: 560 });
+    // Its own file: the rotation settings are untouched by a resize.
+    expect(existsSync(settingsPath(s))).toBe(false);
+    expect(JSON.parse(readFileSync(panelPath, "utf8"))).toEqual({ width: 720, height: 560 });
+    expect(stateOf(await s.cli(["panel", "state"])).size).toEqual({ width: 720, height: 560 });
+
+    const reset = await s.cli(["panel", "apply", JSON.stringify({ size: null })]);
+    expect(reset.code).toBe(0);
+    expect(stateOf(reset).size).toBeNull();
+    expect(existsSync(panelPath)).toBe(false);
+
+    const rejected = await s.cli(["panel", "apply", JSON.stringify({ size: { width: 20, height: 560 } })]);
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain("panel size");
+    expect(existsSync(panelPath)).toBe(false);
+  } finally { s.cleanup(); }
+});
+
 test("panel state reads the roster and defaults without writing anything", async () => {
   const s = sandbox();
   try {

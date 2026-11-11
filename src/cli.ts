@@ -77,6 +77,11 @@ const PRUNE_PATH = join(CONFIG_HOME, "systemd/user/omastoic-prune.path");
 const PLUGINS_DIR = join(CONFIG_HOME, "omarchy/plugins");
 
 const SETTINGS_FILE = join(USER_CONFIG, "config.json");
+// The panel's own size, kept apart from the rotation settings: it is a view
+// preference the user drags, not something `omastoic config` reads or prints.
+const PANEL_FILE = join(USER_CONFIG, "panel.json");
+const PANEL_MIN = 160;
+const PANEL_MAX = 20000;
 const owned = new OwnedFiles(STATE);
 const DISPLACED = join(STATE, "displaced.kind");
 
@@ -118,6 +123,39 @@ async function saveSettings(
   mkdirSync(USER_CONFIG, { recursive: true });
   const next = compactSettings(settings, roster, catalog, dropUnknownCustom);
   atomicWrite(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+/** One side of the panel, in pixels, or null when it is not a usable size. */
+function panelSide(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  if (raw < PANEL_MIN || raw > PANEL_MAX) return null;
+  return Math.round(raw);
+}
+
+/** The panel size the user dragged, or null for "fit the content". */
+async function panelSize(): Promise<{ width: number; height: number } | null> {
+  try {
+    const file = Bun.file(PANEL_FILE);
+    if (!(await file.exists()) || file.size > 4096) return null;
+    const raw: unknown = await file.json();
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const value = raw as Record<string, unknown>;
+    const width = panelSide(value.width);
+    const height = panelSide(value.height);
+    return width != null && height != null ? { width, height } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Pass null to forget the size and go back to fitting the content. */
+async function savePanelSize(size: { width: number; height: number } | null): Promise<void> {
+  if (!size) {
+    rmSync(PANEL_FILE, { force: true });
+    return;
+  }
+  mkdirSync(USER_CONFIG, { recursive: true });
+  atomicWrite(PANEL_FILE, `${JSON.stringify(size, null, 2)}\n`);
 }
 
 async function restartDaemon(): Promise<void> {
@@ -1141,6 +1179,7 @@ async function panelState(): Promise<string> {
   const roster = await authors();
   const names = await knownAuthors();
   const settings = await config();
+  const size = await panelSize();
   const custom = await indexedCustom();
   const bundled = await bundledBook();
   const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
@@ -1169,6 +1208,8 @@ async function panelState(): Promise<string> {
       summary: describeSettings(settings, roster, catalog),
       allAuthors: !settings.authors?.length && !settings.mineOnly,
       mineOnly: !!settings.mineOnly,
+      // The panel's own size: null means fit the content, as at first run.
+      size,
       authors: [...roster.values()].map((author) => ({
         slug: author.slug,
         name: author.name,
@@ -1254,6 +1295,27 @@ async function panelApply(raw: string): Promise<number> {
   }
 
   const value = payload as Record<string, unknown>;
+
+  // The panel's own size, dragged by its edges: { width, height } or null to
+  // fit the content again. Kept apart from the rotation settings.
+  if (Object.hasOwn(value, "size")) {
+    if (value.size == null) {
+      await savePanelSize(null);
+      console.log(await panelState());
+      return 0;
+    }
+    const ask = typeof value.size === "object" && !Array.isArray(value.size) ? (value.size as Record<string, unknown>) : {};
+    const width = panelSide(ask.width);
+    const height = panelSide(ask.height);
+    if (width == null || height == null) {
+      console.error(`omastoic: panel size needs a width and a height from ${PANEL_MIN} to ${PANEL_MAX} pixels`);
+      return 1;
+    }
+    await savePanelSize({ width, height });
+    console.log(await panelState());
+    return 0;
+  }
+
   const roster = await authors();
   const slugs = [...roster.keys()];
   const bundled = await bundledBook();

@@ -25,6 +25,25 @@ Item {
 
   property bool opened: false
 
+  // The card's size: 0 fits the content. Dragging an edge writes both numbers
+  // to the CLI, which remembers them; the drift is where the card sits relative
+  // to the middle after dragging a top or left edge (the opposite edge stays put).
+  property real cardWidth: 0
+  property real cardHeight: 0
+  property real cardDriftX: 0
+  property real cardDriftY: 0
+  property bool sizing: false
+  property bool sizeMoved: false
+  property real sizeStartWidth: 0
+  property real sizeStartHeight: 0
+  property real sizeStartX: 0
+  property real sizeStartY: 0
+
+  readonly property real sizeMinWidth: Style.space(420)
+  readonly property real sizeMinHeight: Style.space(380)
+  readonly property real sizeMaxWidth: Math.max(sizeMinWidth, keyCatcher.width - Style.space(48))
+  readonly property real sizeMaxHeight: Math.max(sizeMinHeight, keyCatcher.height - Style.space(48))
+
   // The plugin's own CLI wrapper lives at <plugin>/bin/omastoic, one level up
   // from this file. The host keeps `__sourceDir` on the manifest it hands a
   // third-party plugin, so the panel does not have to guess the install path.
@@ -223,6 +242,9 @@ Item {
 
   function open(payloadJson) {
     opened = true
+    // Each open starts centred; only the size itself is remembered.
+    cardDriftX = 0
+    cardDriftY = 0
     reload()
     Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
   }
@@ -231,11 +253,73 @@ Item {
     opened = false
     adding = false
     newAuthorOpen = false
+    sizing = false
   }
 
   function dismiss() {
     if (shell && typeof shell.hide === "function") shell.hide(root.pluginId)
     else close()
+  }
+
+  // --- resizing -----------------------------------------------------------------
+
+  function beginSize(x, y) {
+    sizing = true
+    sizeMoved = false
+    sizeStartWidth = card.width
+    sizeStartHeight = card.height
+    sizeStartX = x
+    sizeStartY = y
+  }
+
+  // `edge` mixes l/r with t/b: "r", "b" or "br" for the corner.
+  function dragSize(edge, x, y) {
+    if (!sizing) return
+    const dx = x - sizeStartX
+    const dy = y - sizeStartY
+    let width = sizeStartWidth
+    let height = sizeStartHeight
+    if (edge.indexOf("l") !== -1) width = sizeStartWidth - dx
+    if (edge.indexOf("r") !== -1) width = sizeStartWidth + dx
+    if (edge.indexOf("t") !== -1) height = sizeStartHeight - dy
+    if (edge.indexOf("b") !== -1) height = sizeStartHeight + dy
+    width = Math.max(sizeMinWidth, Math.min(width, sizeMaxWidth))
+    height = Math.max(sizeMinHeight, Math.min(height, sizeMaxHeight))
+    if (Math.round(width) === Math.round(card.width) && Math.round(height) === Math.round(card.height)) return
+    sizeMoved = true
+    // The card is placed around the middle, so half of every size change moves
+    // the edge you did not grab. Drift cancels that, keeping it still.
+    const grew = width - card.width
+    const taller = height - card.height
+    if (edge.indexOf("l") !== -1) cardDriftX -= grew / 2
+    else if (edge.indexOf("r") !== -1) cardDriftX += grew / 2
+    if (edge.indexOf("t") !== -1) cardDriftY -= taller / 2
+    else if (edge.indexOf("b") !== -1) cardDriftY += taller / 2
+    cardWidth = Math.round(width)
+    cardHeight = Math.round(height)
+  }
+
+  function endSize() {
+    if (!sizing) return
+    sizing = false
+    if (!sizeMoved) return
+    sizeMoved = false
+    // A drag on one edge still saves a whole size: the other side keeps the
+    // size it had on screen.
+    const width = cardWidth > 0 ? Math.round(cardWidth) : Math.round(card.width)
+    const height = cardHeight > 0 ? Math.round(cardHeight) : Math.round(card.height)
+    cardWidth = width
+    cardHeight = height
+    send({ kind: "apply", payload: { size: { width, height } }, done: "Panel size saved" })
+  }
+
+  // Double-clicking a grip goes back to fitting the content.
+  function resetSize() {
+    cardWidth = 0
+    cardHeight = 0
+    cardDriftX = 0
+    cardDriftY = 0
+    send({ kind: "apply", payload: { size: null }, done: "Panel size reset" })
   }
 
   // --- writes -------------------------------------------------------------------
@@ -340,6 +424,16 @@ Item {
     myAuthors = parsed.myAuthors instanceof Array ? parsed.myAuthors : []
     quotes = parsed.quotes
     summary = String(parsed.summary || "")
+    // The size is remembered by the CLI; only the first read of an open adopts
+    // it, so an echo of a save cannot fight a drag in progress.
+    if (!loaded && parsed.size && typeof parsed.size === "object") {
+      const width = Number(parsed.size.width)
+      const height = Number(parsed.size.height)
+      if (width > 0 && height > 0) {
+        cardWidth = width
+        cardHeight = height
+      }
+    }
     if (!intervalTimer.running) secondsField.field.value = Number(settings.interval) || 60
     loaded = true
     return true
@@ -514,6 +608,43 @@ Item {
     wrapMode: Text.WordWrap
   }
 
+  // An invisible strip on one edge or corner of the card: drag it to resize.
+  component ResizeGrip: MouseArea {
+    id: grip
+
+    property string edge: "r"   // any mix of l/r and t/b; two letters is a corner
+
+    readonly property bool grabsX: edge.indexOf("l") !== -1 || edge.indexOf("r") !== -1
+    readonly property bool grabsY: edge.indexOf("t") !== -1 || edge.indexOf("b") !== -1
+
+    width: grabsX && grabsY ? Style.space(16) : Style.space(6)
+    height: grabsX && grabsY ? Style.space(16) : Style.space(6)
+
+    anchors.left: edge.indexOf("l") !== -1 || !grabsX ? parent.left : undefined
+    anchors.right: edge.indexOf("r") !== -1 || !grabsX ? parent.right : undefined
+    anchors.top: edge.indexOf("t") !== -1 || !grabsY ? parent.top : undefined
+    anchors.bottom: edge.indexOf("b") !== -1 || !grabsY ? parent.bottom : undefined
+
+    cursorShape: !grabsX ? Qt.SizeVerCursor
+      : !grabsY ? Qt.SizeHorCursor
+      : (edge === "tl" || edge === "br") ? Qt.SizeFDiagCursor
+      : Qt.SizeBDiagCursor
+
+    preventStealing: true
+    onPressed: function(mouse) {
+      const at = grip.mapToItem(null, mouse.x, mouse.y)
+      root.beginSize(at.x, at.y)
+    }
+    onPositionChanged: function(mouse) {
+      // The grip itself moves as the card resizes, so read the pointer in scene
+      // coordinates rather than relative to this strip.
+      const at = grip.mapToItem(null, mouse.x, mouse.y)
+      root.dragSize(grip.edge, at.x, at.y)
+    }
+    onReleased: root.endSize()
+    onDoubleClicked: root.resetSize()
+  }
+
   PanelWindow {
     id: window
 
@@ -547,9 +678,11 @@ Item {
         id: card
 
         readonly property real pad: Style.spacing.popupPadding
-        anchors.centerIn: parent
-        width: Math.min(Style.space(620), keyCatcher.width - Style.space(48))
-        height: Math.min(content.implicitHeight + pad * 2, keyCatcher.height - Style.space(48))
+        readonly property real edge: Style.space(24)
+        width: Math.max(sizeMinWidth, Math.min(root.cardWidth > 0 ? root.cardWidth : Style.space(620), sizeMaxWidth))
+        height: Math.max(sizeMinHeight, Math.min(root.cardHeight > 0 ? root.cardHeight : content.implicitHeight + pad * 2, sizeMaxHeight))
+        x: Math.max(edge, Math.min(Math.round((keyCatcher.width - width) / 2) + root.cardDriftX, keyCatcher.width - width - edge))
+        y: Math.max(edge, Math.min(Math.round((keyCatcher.height - height) / 2) + root.cardDriftY, keyCatcher.height - height - edge))
         radius: Style.cornerRadius
         color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
@@ -563,6 +696,8 @@ Item {
 
           anchors.fill: parent
           anchors.margins: card.pad
+          // A very short card would otherwise let the last row paint outside.
+          clip: true
           spacing: Style.space(8)
 
           // Header: title, one-line status, and the summary that never truncates.
@@ -985,8 +1120,11 @@ Item {
           ListView {
             id: quoteView
             width: parent.width
-            // Grows with the list, up to about half the screen.
-            height: Math.min(contentHeight, Math.max(Style.space(140), keyCatcher.height * 0.34))
+            // Fits the list by default, up to about a third of the screen; once
+            // the card is sized by hand it takes whatever height is left.
+            height: root.cardHeight > 0
+              ? Math.max(Style.space(90), content.height - quoteView.y - (emptyHint.visible ? emptyHint.implicitHeight + content.spacing : 0))
+              : Math.min(contentHeight, Math.max(Style.space(140), keyCatcher.height * 0.34))
             clip: true
             spacing: Style.space(2)
             boundsBehavior: Flickable.StopAtBounds
@@ -1190,11 +1328,45 @@ Item {
           }
 
           Caption {
+            id: emptyHint
             width: parent.width
             visible: root.loaded && root.shownQuotes.length === 0
             text: root.listFilter === "mine" && root.mine.length === 0 ? "None of yours yet. Use + Add quote."
               : root.picked.length === 0 && root.mine.length === 0 ? "No Stoics picked. Click a name above, or use + Add quote."
               : "No quote matches."
+          }
+        }
+
+        // Drag any edge or corner to size the panel. The corners come last so
+        // they win over the edge strips they sit on.
+        ResizeGrip { edge: "l" }
+        ResizeGrip { edge: "r" }
+        ResizeGrip { edge: "t" }
+        ResizeGrip { edge: "b" }
+        ResizeGrip { edge: "tl" }
+        ResizeGrip { edge: "tr" }
+        ResizeGrip { edge: "bl" }
+        ResizeGrip { edge: "br" }
+
+        // The only visible hint that the card can be sized: a faint corner mark.
+        Canvas {
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          width: Style.space(14)
+          height: Style.space(14)
+          opacity: 0.45
+          onPaint: {
+            const context = getContext("2d")
+            context.reset()
+            context.strokeStyle = Commons.Color.popups.text
+            context.lineWidth = Math.max(1, Style.space(1))
+            for (let line = 0; line < 3; line++) {
+              const at = Style.space(3) + line * Style.space(4)
+              context.beginPath()
+              context.moveTo(width - at, height - Style.space(2))
+              context.lineTo(width - Style.space(2), height - at)
+              context.stroke()
+            }
           }
         }
       }

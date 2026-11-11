@@ -18,7 +18,8 @@ second writer with its own idea of the format.
      panel needs one round trip per change and renders only saved values.
 
    Payload kinds: `interval`, `authors`, `mineOnly`, `keep`, `portrait`,
-   `addQuote`, `editQuote`, `deleteQuote`, `addAuthor`, `removeAuthor`.
+   `addQuote`, `editQuote`, `deleteQuote`, `addAuthor`, `removeAuthor`, and
+   `size` (the panel's own geometry — see below).
 
    Both reuse the `src/cli.ts` helpers (`parseInterval`, `normalizeSettings`,
    `compactSettings`, `appendQuotes`, `saveSettings`), so a panel write cannot
@@ -74,6 +75,15 @@ second writer with its own idea of the format.
    editable, the author's portrait can be added, changed or removed, and Delete
    asks once before it writes. Comments and other lines in `quotes.tsv` are kept
    exactly; the per-quote switches are renumbered when a quote is deleted.
+
+   The card fits its content until you resize it: each edge and corner of the
+   card is a drag grip (the bottom-right corner has a faint mark), and a drag
+   saves `{ "size": { "width": …, "height": … } }` once you let go. That size
+   lives in `~/.config/omastoic/panel.json`, not in `config.json`: it is a view
+   preference, so it is read by `panel state` (as `size`, `null` for "fit") and
+   never printed by `omastoic config`. Double-clicking a grip sends
+   `{ "size": null }`, forgets the file and fits the content again. The quote
+   list takes whatever height the sized card leaves it.
 
    Earlier note, kept for history: **Save refuses what the CLI would misread.** An empty pick means "every
    Stoic" to the CLI, so the panel never sends one: with the toggle off and
