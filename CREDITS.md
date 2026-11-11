@@ -39,8 +39,8 @@ Glyptotek's Zeno and Cleanthes. Those entries are in the git history, and
 ## Translations
 
 Every entry was reviewed against the following **public-domain US source
-editions**: the 64 shipped in 2.2.0, and the 15 added afterwards from the same
-editions. Antiquity alone does not clear a modern translation, and
+editions**: the 64 shipped in 2.2.0, then 15 and five further entries added
+from the same editions. Antiquity alone does not clear a modern translation, and
 public-domain status is jurisdiction-dependent (not a worldwide license claim).
 The underlying translations/versions below were published before 1931; the
 undated McKay scan corroborates Long, rather than supplying a new rights basis.
@@ -94,3 +94,6 @@ translations. Corrections extend beyond the two initially reported errors:
   *Letters* 5.5, 5.9, 24.19, 28.1; Epictetus *Enchiridion* 6, 14, 23, 42. They
   are appended after the original rows, so the existing `q01`–`q64` ids keep
   pointing at the same lines.
+- Five further entries are appended as `q80`–`q84`: Marcus *Meditations* III.4
+  and IV.49; Seneca *Letters* 7.8 and 20.1; Epictetus *Discourses* I.15.
+  Existing quote IDs remain unchanged.

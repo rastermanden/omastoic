@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "reviewed": "2026-11-07",
-  "policy": "79 stable entries, one source record per TSV row. Words checked against the linked public-domain editions. Internal omissions marked with ellipsis; capitalization, punctuation and whitespace normalized. Passages are independent source excerpts, not generated from the runtime quote text. Automated consistency tests cannot prove historical authorship.",
+  "reviewed": "2026-11-10",
+  "policy": "84 stable entries, one source record per TSV row. Words checked against the linked public-domain editions. Internal omissions marked with ellipsis; capitalization, punctuation and whitespace normalized. Passages are independent source excerpts, not generated from the runtime quote text. Automated consistency tests cannot prove historical authorship.",
   "quotes": [
     {
       "id": "q01",
@@ -877,6 +877,62 @@
         "If you proceed then from these opinions, you will be mild in temper to him who reviles you; for say on each occasion, It seemed so to him."
       ],
       "note": "Two sentences of chapter XLII, the middle of the chapter omitted and marked with an ellipsis. Terminal punctuation normalized."
+    },
+    {
+      "id": "q80",
+      "author": "marcus",
+      "citation": "Meditations III.4",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.3.three.html",
+      "passages": [
+        "Do not waste the remainder of thy life in thoughts about others, when thou dost not refer thy thoughts to some object of common utility."
+      ],
+      "note": "Excerpt; terminal punctuation normalized."
+    },
+    {
+      "id": "q81",
+      "author": "marcus",
+      "citation": "Meditations IV.49",
+      "edition": "long-marcus-1862",
+      "url": "https://classics.mit.edu/Antoninus/meditations.4.four.html",
+      "passages": [
+        "Be like the promontory against which the waves continually break, but it stands firm and tames the fury of the water around it."
+      ],
+      "note": "Excerpt; terminal punctuation normalized."
+    },
+    {
+      "id": "q82",
+      "author": "seneca",
+      "citation": "Letters 7.8",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_7",
+      "passages": [
+        "Withdraw into yourself, as far as you can. Associate with those who will make a better man of you. Welcome those whom you yourself can improve. The process is mutual; for men learn while they teach."
+      ],
+      "note": "Section 8. Terminal punctuation normalized."
+    },
+    {
+      "id": "q83",
+      "author": "seneca",
+      "citation": "Letters 20.1",
+      "edition": "gummere-letters-1917",
+      "url": "https://en.wikisource.org/wiki/Moral_letters_to_Lucilius/Letter_20",
+      "passages": [
+        "This, however, my dear Lucilius, I ask and beg of you, on your part, that you let wisdom sink into your soul, and test your progress, not by mere speech or writings, but by stoutness of heart and decrease of desire. Prove your words by your deeds."
+      ],
+      "note": "Excerpt from section 1; terminal punctuation normalized."
+    },
+    {
+      "id": "q84",
+      "author": "epictetus",
+      "citation": "Discourses I.15",
+      "edition": "long-epictetus-1877",
+      "url": "https://www.gutenberg.org/ebooks/10661",
+      "passages": [
+        "Nothing great, said Epictetus,",
+        "is produced suddenly, since not even the grape or the fig is."
+      ],
+      "note": "From the discourse “What Philosophy Promises”; the narrator's words “said Epictetus” are omitted and marked with an ellipsis. Terminal punctuation normalized."
     }
   ]
 }

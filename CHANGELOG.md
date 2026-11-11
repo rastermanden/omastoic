@@ -30,6 +30,9 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Five further cited quotes from the same public-domain editions: Marcus
+  *Meditations* III.4 and IV.49, Seneca *Letters* 7.8 and 20.1, and Epictetus
+  *Discourses* I.15. They are appended as `q80`–`q84`, preserving existing IDs.
 - A Quickshell settings panel (`ui/Panel.qml`, `omastoic ui`) for the settings
   `omastoic config` already owns: the Stoics in rotation, seconds per quote, and
   one of your own quotes. It reads and writes through the CLI — `omastoic panel
