@@ -8,7 +8,7 @@ _omastoic() {
   prev="${COMP_WORDS[COMP_CWORD - 1]}"
   cmd="${COMP_WORDS[1]}"
 
-  local commands="toggle next preview show config ui portrait status uninstall help"
+  local commands="toggle next preview show config ui portrait author status uninstall help"
   local authors="@AUTHORS@"
 
   if ((COMP_CWORD == 1)); then
@@ -33,6 +33,13 @@ _omastoic() {
       return 0
     fi
     mapfile -t COMPREPLY < <(compgen -W "--authors --interval --quotes --add --list --plain" -- "$cur")
+    ;;
+  author)
+    if ((COMP_CWORD == 2)); then
+      mapfile -t COMPREPLY < <(compgen -W "add list remove" -- "$cur")
+    else
+      mapfile -t COMPREPLY < <(compgen -W "--dates --image --drawing" -- "$cur")
+    fi
     ;;
   uninstall)
     mapfile -t COMPREPLY < <(compgen -W "--purge" -- "$cur")

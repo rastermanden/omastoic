@@ -26,6 +26,7 @@ test("panel state reads the roster and defaults without writing anything", async
     expect(state.settings).toEqual({});
     expect(state.summary).toContain("every 60s");
     expect(state.customQuotes).toBe(0);
+    expect(state.myAuthors).toEqual([]);
     // A read-only bridge: no config, no state directory, no unit.
     expect(existsSync(settingsPath(s))).toBe(false);
     expect(existsSync(s.state)).toBe(false);
@@ -51,6 +52,54 @@ test("panel apply writes exactly what config --authors/--interval writes", async
   } finally { viaPanel.cleanup(); viaFlags.cleanup(); }
 });
 
+test("author add and remove keep your own authors, portraits included", async () => {
+  const s = sandbox();
+  try {
+    const registry = join(s.config, "omastoic/authors.tsv");
+    expect((await s.cli(["panel", "state"])).code).toBe(0);
+    // Reading the panel never writes the registry.
+    expect(existsSync(registry)).toBe(false);
+
+    const added = await s.cli(["author", "add", "Tomas", "Sowell", "--dates", "b. 1932"]);
+    expect(added.code).toBe(0);
+    expect(readFileSync(registry, "utf8")).toContain("tomas-sowell\tTomas Sowell\tb. 1932");
+    expect((await s.cli(["author", "list"])).stdout).toContain("Tomas Sowell (tomas-sowell) · b. 1932  0 quotes, no portrait");
+
+    // A quote attaches to the author, shows their name, and blocks removal.
+    const quote = await s.cli(["panel", "apply", JSON.stringify({ addQuote: { author: "tomas-sowell", citation: "Basic Economics", text: "Trade-offs." } })]);
+    expect(quote.code).toBe(0);
+    expect(stateOf(quote).quotes.find((row: { custom: boolean }) => row.custom).name).toBe("Tomas Sowell");
+    const refused = await s.cli(["author", "remove", "Tomas Sowell"]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("still has 1 quote");
+
+    // The six Stoics are already there, and cannot be duplicated.
+    expect((await s.cli(["author", "add", "Marcus Aurelius"])).code).toBe(1);
+
+    // Deleting the quote lets the author go, portrait and all.
+    const art = join(s.config, "omastoic/art/tomas-sowell.txt");
+    mkdirSync(join(s.config, "omastoic/art"), { recursive: true });
+    writeFileSync(art, "x\n");
+    expect((await s.cli(["panel", "apply", JSON.stringify({ deleteQuote: { id: "c01" } })])).code).toBe(0);
+    expect((await s.cli(["author", "remove", "tomas-sowell"])).code).toBe(0);
+    expect(existsSync(art)).toBe(false);
+    expect(readFileSync(registry, "utf8")).not.toContain("tomas-sowell");
+  } finally { s.cleanup(); }
+});
+
+test("a quote by an author you never listed registers them by name", async () => {
+  const s = sandbox();
+  try {
+    const result = await s.cli(["panel", "apply", JSON.stringify({ addQuote: { author: "aldous-huxley", citation: "Brave New World", text: "Words." } })]);
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(s.config, "omastoic/authors.tsv"), "utf8")).toContain("aldous-huxley\tAldous Huxley");
+    expect(stateOf(result).myAuthors).toEqual([{ slug: "aldous-huxley", name: "Aldous Huxley", dates: "", portrait: false, quotes: 1 }]);
+    // The Stoics need no row of their own.
+    await s.cli(["panel", "apply", JSON.stringify({ addQuote: { author: "seneca", citation: "Letters 1", text: "Time." } })]);
+    expect(readFileSync(join(s.config, "omastoic/authors.tsv"), "utf8")).not.toContain("seneca\t");
+  } finally { s.cleanup(); }
+});
+
 test("panel apply with every Stoic keeps the default and drops the key", async () => {
   const s = sandbox();
   try {
@@ -58,6 +107,41 @@ test("panel apply with every Stoic keeps the default and drops the key", async (
     expect((await s.cli(["panel", "apply", JSON.stringify({ interval: 60, authors: all })])).code).toBe(0);
     expect(saved(s)).toEqual({ interval: 60 });
     expect(stateOf(await s.cli(["panel", "state"])).allAuthors).toBe(true);
+  } finally { s.cleanup(); }
+});
+
+test("panel apply adds an author first, then attaches quotes to them", async () => {
+  const s = sandbox();
+  try {
+    const registry = join(s.config, "omastoic/authors.tsv");
+    const added = await s.cli(["panel", "apply", JSON.stringify({ addAuthor: { slug: "tomas-sowell", name: "Tomas Sowell", dates: "b. 1932" } })]);
+    expect(added.code).toBe(0);
+    expect(readFileSync(registry, "utf8")).toContain("tomas-sowell\tTomas Sowell\tb. 1932");
+    expect(stateOf(added).myAuthors).toEqual([{ slug: "tomas-sowell", name: "Tomas Sowell", dates: "b. 1932", portrait: false, quotes: 0 }]);
+
+    const quote = await s.cli(["panel", "apply", JSON.stringify({ addQuote: { author: "tomas-sowell", citation: "Basic Economics", text: "Trade-offs." } })]);
+    expect(quote.code).toBe(0);
+    expect(stateOf(quote).myAuthors[0].quotes).toBe(1);
+
+    for (const payload of [
+      { addAuthor: { slug: "marcus", name: "Marcus Aurelius" } },
+      { addAuthor: { slug: "Tomas Sowell", name: "Tomas Sowell" } },
+      { addAuthor: { slug: "tomas-sowell", name: " " } },
+      { addAuthor: { name: "No Slug" } },
+      { removeAuthor: { slug: "tomas-sowell" } },
+      { removeAuthor: { slug: "nobody" } },
+    ]) {
+      const rejected = await s.cli(["panel", "apply", JSON.stringify(payload)]);
+      expect(rejected.code).toBe(1);
+      expect(rejected.stderr).toContain("omastoic:");
+    }
+    expect(readFileSync(registry, "utf8")).toContain("tomas-sowell");
+
+    // With no quotes left, the author can go.
+    expect((await s.cli(["panel", "apply", JSON.stringify({ deleteQuote: { id: "c01" } })])).code).toBe(0);
+    const removed = await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: { slug: "tomas-sowell" } })]);
+    expect(removed.code).toBe(0);
+    expect(stateOf(removed).myAuthors).toEqual([]);
   } finally { s.cleanup(); }
 });
 

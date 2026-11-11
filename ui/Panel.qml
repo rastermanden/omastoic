@@ -80,17 +80,48 @@ Item {
     })
   }
 
-  // The add form, closed until "+ Add quote".
+  // Adding a quote starts with an author: a Stoic, one of yours, or a new one.
   property bool adding: false
-  property string newAuthor: ""
+  property var myAuthors: []
+  property string addAuthorSlug: ""
   property string newCitation: ""
   property string newText: ""
-  // An optional picture for the author's portrait, and whether it is line art.
-  property string newImage: ""
-  property bool newDrawing: false
+  // The "new author" form inside the add form.
+  property bool newAuthorOpen: false
+  property string newAuthorName: ""
+  property string newAuthorDates: ""
+  property string newAuthorImage: ""
+  property bool newAuthorDrawing: false
+  // An author is created and selected before the CLI has answered, so the quote
+  // can be attached to them right away.
+  property string pendingAuthor: ""
+  property string pendingAuthorName: ""
   property bool picking: false
-  // Where a picked picture goes: "" for the add form, or an author's slug.
+  // Where a picked picture goes: "" for the new-author form, or an author's slug.
   property string pickFor: ""
+
+  readonly property var authorSlugs: roster.map(function(author) { return author.slug })
+    .concat(myAuthors.map(function(author) { return author.slug }))
+  readonly property bool authorChosen: addAuthorSlug !== ""
+    && (authorSlugs.indexOf(addAuthorSlug) !== -1 || addAuthorSlug === pendingAuthor)
+  readonly property string newAuthorSlug: slugFor(newAuthorName)
+
+  function authorBySlug(slug) {
+    if (slug === "") return null
+    if (slug === pendingAuthor) return { slug: slug, name: pendingAuthorName || slug, dates: "", portrait: false }
+    const known = roster.concat(myAuthors).find(function(author) { return author.slug === slug })
+    return known || null
+  }
+
+  // Why a new author cannot be added yet, or "" when they can.
+  readonly property string newAuthorBlock: {
+    if (newAuthorName.trim() === "") return "Needs a name."
+    const slug = newAuthorSlug
+    if (slug === "") return "That name has no letters or numbers to make an author of."
+    if (isStoic(slug)) return "That is one of the Stoics — pick their name above."
+    if (myAuthors.some(function(author) { return author.slug === slug })) return "You already have that author — pick their name above."
+    return ""
+  }
 
   function chooseImage(author) {
     if (picking) return
@@ -107,15 +138,14 @@ Item {
     send({ kind: "apply", payload: { portrait: { author: author, remove: true } }, done: "Portrait removed" })
   }
   // The quote file keys authors by slug: "Tomas Sowell" becomes tomas-sowell,
-  // and a Stoic's full or short name becomes that Stoic's slug.
-  readonly property string authorSlug: slugFor(newAuthor)
+  // and a known full or short name becomes that author's slug.
   function slugFor(raw) {
     const typed = String(raw || "").trim().toLowerCase()
-    const stoic = roster.find(function(author) {
+    const known = roster.concat(myAuthors).find(function(author) {
       const name = String(author.name).toLowerCase()
       return name === typed || name.split(" ")[0] === typed || author.slug === typed
     })
-    return stoic ? stoic.slug : slugOf(typed)
+    return known ? known.slug : slugOf(typed)
   }
   function isStoic(slug) { return roster.some(function(author) { return author.slug === slug }) }
 
@@ -125,7 +155,11 @@ Item {
   property string editAuthor: ""
   property string editCitation: ""
   property bool confirmDelete: false
-  readonly property string editSlug: slugFor(editAuthor)
+  // Keep the quote's own slug unless the author is actually edited: a stored
+  // slug like "foo_bar" and its display name "Foo Bar" slugify differently.
+  property string editBaseSlug: ""
+  property string editBaseName: ""
+  readonly property string editSlug: editAuthor === editBaseName && editBaseSlug !== "" ? editBaseSlug : slugFor(editAuthor)
   readonly property bool editReady: editText.trim() !== "" && editCitation.trim() !== "" && editSlug !== ""
 
   function startEdit(quote) {
@@ -133,6 +167,8 @@ Item {
     editText = quote.text
     editAuthor = quote.name
     editCitation = quote.citation
+    editBaseSlug = quote.author
+    editBaseName = quote.name
     confirmDelete = false
   }
 
@@ -162,7 +198,7 @@ Item {
   function slugOf(typed) { return typed.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64) }
   readonly property string addBlocker: {
     const missing = []
-    if (authorSlug === "") missing.push("an author")
+    if (!authorChosen) missing.push("an author")
     if (newCitation.trim() === "") missing.push("a citation")
     if (newText.trim() === "") missing.push("the quote")
     if (!missing.length) return ""
@@ -175,10 +211,11 @@ Item {
     const who = picked.length === 0 ? "Only yours"
       : picked.length === roster.length ? "All six Stoics"
       : roster.filter(function(author) { return picked.indexOf(author.slug) !== -1 }).map(shortName).join(", ")
-    return who + " · " + rotatingCount + " of " + quotes.length + " quotes in rotation · every " + (Number(settings.interval) || 60) + "s"
+    return who + " · " + rotatingCount + " of " + quotes.length + " quotes in rotation"
   }
 
   function hasPortrait(slug) {
+    if (myAuthors.some(function(author) { return author.slug === slug && author.portrait })) return true
     return quotes.some(function(quote) { return quote.author === slug && quote.portrait })
   }
 
@@ -193,6 +230,7 @@ Item {
   function close() {
     opened = false
     adding = false
+    newAuthorOpen = false
   }
 
   function dismiss() {
@@ -249,6 +287,11 @@ Item {
       error = run.stderr.trim() !== "" ? run.stderr.trim() : "omastoic could not " + (job.kind === "state" ? "read" : "save") + " the settings."
       // Drop the optimistic flip: show what is really saved.
       queue = []
+      if (job.addedAuthor) {
+        pendingAuthor = ""
+        pendingAuthorName = ""
+        addAuthorSlug = ""
+      }
       if (job.kind !== "state") Qt.callLater(reload)
     } else if (!adoptState(run.stdout)) {
       error = "Could not read the omastoic state."
@@ -256,14 +299,24 @@ Item {
       notice = job.done || "Saved"
       noticeTimer.restart()
       if (job.closesEdit) stopEdit()
+      if (job.addedAuthor) {
+        pendingAuthor = ""
+        pendingAuthorName = ""
+        newAuthorOpen = false
+        newAuthorName = ""
+        newAuthorDates = ""
+        newAuthorImage = ""
+        newAuthorDrawing = false
+        newAuthorField.text = ""
+        newAuthorDatesField.text = ""
+        newAuthorImageField.text = ""
+      }
       if (job.added) {
         adding = false
         newCitation = ""
         newText = ""
         citationField.text = ""
         textField.text = ""
-        imageField.text = ""
-        newDrawing = false
         listFilter = "mine"
         quoteView.positionViewAtBeginning()
       }
@@ -284,6 +337,7 @@ Item {
     if (!parsed || typeof parsed !== "object" || !(parsed.quotes instanceof Array)) return false
     settings = parsed.settings && typeof parsed.settings === "object" ? Object.assign({}, parsed.settings, { mineOnly: !!parsed.mineOnly }) : ({})
     roster = parsed.authors instanceof Array ? parsed.authors : []
+    myAuthors = parsed.myAuthors instanceof Array ? parsed.myAuthors : []
     quotes = parsed.quotes
     summary = String(parsed.summary || "")
     if (!intervalTimer.running) secondsField.field.value = Number(settings.interval) || 60
@@ -351,11 +405,26 @@ Item {
     if (addBlocker !== "" || adding === false) return
     send({
       kind: "apply",
-      payload: { addQuote: newImage.trim()
-        ? { author: authorSlug, citation: newCitation.trim(), text: newText.trim(), image: newImage.trim(), drawing: newDrawing }
-        : { author: authorSlug, citation: newCitation.trim(), text: newText.trim() } },
-      done: newImage.trim() ? "Added, with a portrait." : "Added. It is in rotation.",
+      payload: { addQuote: { author: addAuthorSlug, citation: newCitation.trim(), text: newText.trim() } },
+      done: "Added. It is in rotation.",
       added: true,
+    })
+  }
+
+  // A new author: saved first, then selected, so the quote attaches to them.
+  function createAuthor() {
+    if (newAuthorBlock !== "" || !newAuthorOpen) return
+    const slug = newAuthorSlug
+    pendingAuthor = slug
+    pendingAuthorName = newAuthorName.trim()
+    addAuthorSlug = slug
+    send({
+      kind: "apply",
+      payload: { addAuthor: newAuthorImage.trim()
+        ? { slug: slug, name: newAuthorName.trim(), dates: newAuthorDates.trim(), image: newAuthorImage.trim(), drawing: newAuthorDrawing }
+        : { slug: slug, name: newAuthorName.trim(), dates: newAuthorDates.trim() } },
+      done: newAuthorImage.trim() ? "Author added, with a portrait." : "Author added.",
+      addedAuthor: true,
     })
   }
 
@@ -378,7 +447,7 @@ Item {
       onStreamFinished: {
         const chosen = String(text || "").trim()
         if (chosen === "") return
-        if (root.pickFor === "") imageField.text = chosen
+        if (root.pickFor === "") newAuthorImageField.text = chosen
         else root.setPortrait(root.pickFor, chosen)
       }
     }
@@ -386,7 +455,7 @@ Item {
       root.picking = false
       if (exitCode === 3) root.error = "No Pictures, Downloads or Desktop folder to choose from. Type the picture's path instead."
       else if (exitCode !== 0) root.error = "Omarchy's image picker did not open. Type the picture's path instead."
-      if (root.pickFor === "") Qt.callLater(function() { if (root.opened) imageField.forceActiveFocus() })
+      if (root.pickFor === "") Qt.callLater(function() { if (root.opened) newAuthorImageField.forceActiveFocus() })
     }
   }
 
@@ -479,7 +548,7 @@ Item {
 
         readonly property real pad: Style.spacing.popupPadding
         anchors.centerIn: parent
-        width: Math.min(Style.space(520), keyCatcher.width - Style.space(48))
+        width: Math.min(Style.space(620), keyCatcher.width - Style.space(48))
         height: Math.min(content.implicitHeight + pad * 2, keyCatcher.height - Style.space(48))
         radius: Style.cornerRadius
         color: Commons.Color.popups.background
@@ -494,7 +563,7 @@ Item {
 
           anchors.fill: parent
           anchors.margins: card.pad
-          spacing: Style.space(12)
+          spacing: Style.space(8)
 
           // Header: title, one-line status, and the summary that never truncates.
           Item {
@@ -533,6 +602,38 @@ Item {
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
             }
+
+            // Seconds per quote: the one number in the header.
+            Row {
+              id: secondsRow
+              anchors.right: statusText.left
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: titleText.verticalCenter
+              spacing: Style.space(6)
+
+              Caption {
+                height: secondsField.height
+                verticalAlignment: Text.AlignVCenter
+                text: "every"
+              }
+
+              NumberField {
+                id: secondsField
+                value: 60
+                from: 1
+                to: 3600
+                stepSize: 5
+                fieldWidth: Style.space(64)
+                foreground: Commons.Color.popups.text
+                onModified: function(value) { root.changeSeconds(value) }
+              }
+
+              Caption {
+                height: secondsField.height
+                verticalAlignment: Text.AlignVCenter
+                text: "s"
+              }
+            }
           }
 
           Caption {
@@ -553,62 +654,37 @@ Item {
           PanelSeparator { foreground: Commons.Color.popups.text }
 
           // Rotation: one chip per Stoic, one for your own quotes, then seconds.
-          PanelSectionHeader {
-            text: "In rotation"
-            foreground: Commons.Color.popups.text
-          }
-
           Flow {
             id: chips
             width: parent.width
             spacing: Style.space(6)
 
-            Repeater {
-              model: root.roster
-              delegate: Button {
-                required property var modelData
-                text: root.shortName(modelData)
-                tooltipText: modelData.name + " · " + modelData.dates
+              Repeater {
+                model: root.roster
+                delegate: Button {
+                  required property var modelData
+                  text: root.shortName(modelData)
+                  tooltipText: modelData.name + " · " + modelData.dates
+                  bordered: true
+                  selected: root.picked.indexOf(modelData.slug) !== -1
+                  foreground: Commons.Color.popups.text
+                  fontSize: Style.font.bodySmall
+                  horizontalPadding: Style.space(8)
+                  onClicked: root.toggleStoic(modelData.slug)
+                }
+              }
+
+              Button {
+                text: "Yours " + root.mine.length
+                tooltipText: root.mineSwitchable.length ? "Switch all of yours on or off" : "Add a quote first"
                 bordered: true
-                selected: root.picked.indexOf(modelData.slug) !== -1
+                selected: root.mineOn
+                enabled: root.mineSwitchable.length > 0
                 foreground: Commons.Color.popups.text
                 fontSize: Style.font.bodySmall
                 horizontalPadding: Style.space(8)
-                onClicked: root.toggleStoic(modelData.slug)
+                onClicked: root.toggleMine()
               }
-            }
-
-            Button {
-              text: "Yours " + root.mine.length
-              tooltipText: root.mineSwitchable.length ? "Switch all of yours on or off" : "Add a quote first"
-              bordered: true
-              selected: root.mineOn
-              enabled: root.mineSwitchable.length > 0
-              foreground: Commons.Color.popups.text
-              fontSize: Style.font.bodySmall
-              horizontalPadding: Style.space(8)
-              onClicked: root.toggleMine()
-            }
-          }
-
-          Caption {
-            width: parent.width
-            visible: root.loaded
-            text: root.picked.length === 0
-              ? (root.mineOn ? "No Stoics: only yours rotate." : "Nothing is on, so the whole book rotates.")
-              : root.picked.length === root.roster.length ? "All six Stoics, plus yours that are on."
-              : "Click a name to add or drop that Stoic. The list shows only the picked ones."
-          }
-
-          NumberField {
-            id: secondsField
-            label: "Seconds per quote"
-            value: 60
-            from: 1
-            to: 3600
-            stepSize: 5
-            foreground: Commons.Color.popups.text
-            onModified: function(value) { root.changeSeconds(value) }
           }
 
           PanelSeparator { foreground: Commons.Color.popups.text }
@@ -643,16 +719,16 @@ Item {
               fontSize: Style.font.bodySmall
               onClicked: {
                 root.adding = !root.adding
-                if (root.adding) Qt.callLater(function() { authorField.forceActiveFocus() })
+                if (root.adding) Qt.callLater(function() { textField.forceActiveFocus() })
               }
             }
           }
 
-          // The add form, right above the list it lands in.
+          // The add form: pick or add the author first, then attach the quote to them.
           Rectangle {
             width: parent.width
             visible: root.adding
-            height: visible ? addForm.implicitHeight + Style.space(20) : 0
+            height: visible ? addForm.implicitHeight + Style.space(12) : 0
             radius: Style.cornerRadius
             color: "transparent"
             border.width: Math.max(1, Style.space(1))
@@ -661,8 +737,201 @@ Item {
             Column {
               id: addForm
               anchors.fill: parent
-              anchors.margins: Style.space(10)
-              spacing: Style.space(8)
+              anchors.margins: Style.space(8)
+              spacing: Style.space(6)
+
+              Flow {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Repeater {
+                  model: root.roster
+                  delegate: Button {
+                    required property var modelData
+                    text: root.shortName(modelData)
+                    tooltipText: modelData.name + " · " + modelData.dates
+                    bordered: true
+                    selected: root.addAuthorSlug === modelData.slug
+                    foreground: Commons.Color.popups.text
+                    fontSize: Style.font.bodySmall
+                    horizontalPadding: Style.space(8)
+                    onClicked: {
+                      root.addAuthorSlug = modelData.slug
+                      root.newAuthorOpen = false
+                    }
+                  }
+                }
+
+                Repeater {
+                  model: root.myAuthors
+                  delegate: Button {
+                    required property var modelData
+                    text: modelData.name
+                    tooltipText: modelData.quotes + (modelData.quotes === 1 ? " quote" : " quotes")
+                      + (modelData.portrait ? " · has a portrait" : " · no portrait")
+                    bordered: true
+                    selected: root.addAuthorSlug === modelData.slug
+                    foreground: Commons.Color.popups.text
+                    fontSize: Style.font.bodySmall
+                    horizontalPadding: Style.space(8)
+                    onClicked: {
+                      root.addAuthorSlug = modelData.slug
+                      root.newAuthorOpen = false
+                    }
+                  }
+                }
+
+                Button {
+                  text: "+ New author"
+                  tooltipText: "Add an author of your own, with an optional picture"
+                  bordered: true
+                  selected: root.newAuthorOpen
+                  foreground: Commons.Color.popups.text
+                  fontSize: Style.font.bodySmall
+                  horizontalPadding: Style.space(8)
+                  onClicked: {
+                    root.newAuthorOpen = !root.newAuthorOpen
+                    if (root.newAuthorOpen) Qt.callLater(function() { if (root.opened) newAuthorField.forceActiveFocus() })
+                  }
+                }
+              }
+
+              // A new author: a name, optional dates and an optional picture.
+              Rectangle {
+                width: parent.width
+                visible: root.newAuthorOpen
+                height: visible ? newAuthorForm.implicitHeight + Style.space(12) : 0
+                radius: Style.cornerRadius
+                color: "transparent"
+                border.width: Math.max(1, Style.space(1))
+                border.color: Commons.Color.popups.border
+
+                Column {
+                  id: newAuthorForm
+                  anchors.fill: parent
+                  anchors.margins: Style.space(8)
+                  spacing: Style.space(6)
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.space(8)
+
+                    TextField {
+                      id: newAuthorField
+                      width: (parent.width - parent.spacing) * 0.6
+                      placeholderText: "Author's name, e.g. Tomas Sowell"
+                      foreground: Commons.Color.popups.text
+                      onTextChanged: root.newAuthorName = text
+                      onAccepted: root.createAuthor()
+                    }
+
+                    TextField {
+                      id: newAuthorDatesField
+                      width: parent.width - newAuthorField.width - parent.spacing
+                      placeholderText: "Dates (optional)"
+                      foreground: Commons.Color.popups.text
+                      onTextChanged: root.newAuthorDates = text
+                      onAccepted: root.createAuthor()
+                    }
+                  }
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.space(8)
+
+                    TextField {
+                      id: newAuthorImageField
+                      width: parent.width - newAuthorChoose.width - newAuthorDrawingButton.width - parent.spacing * 2
+                      placeholderText: "Picture for their portrait (optional)"
+                      foreground: Commons.Color.popups.text
+                      onTextChanged: root.newAuthorImage = text
+                      onAccepted: root.createAuthor()
+                    }
+
+                    Button {
+                      id: newAuthorChoose
+                      text: "Choose…"
+                      tooltipText: "Pick from Pictures, Downloads or Desktop"
+                      bordered: true
+                      enabled: !root.picking
+                      foreground: Commons.Color.popups.text
+                      fontSize: Style.font.bodySmall
+                      onClicked: root.chooseImage("")
+                    }
+
+                    Button {
+                      id: newAuthorDrawingButton
+                      text: "Drawing"
+                      tooltipText: "Line art: sharp strokes instead of photo shading"
+                      bordered: true
+                      selected: root.newAuthorDrawing
+                      foreground: Commons.Color.popups.text
+                      fontSize: Style.font.bodySmall
+                      onClicked: root.newAuthorDrawing = !root.newAuthorDrawing
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Math.max(newAuthorHint.implicitHeight, newAuthorCreate.height)
+
+                    Caption {
+                      id: newAuthorHint
+                      anchors.left: parent.left
+                      anchors.right: newAuthorCreate.left
+                      anchors.rightMargin: Style.space(8)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: root.newAuthorBlock !== "" ? root.newAuthorBlock
+                        : "Saved as “" + root.newAuthorSlug + "”."
+                          + (root.newAuthorImage.trim() !== "" ? " Their portrait is set." : " No picture yet.")
+                    }
+
+                    Button {
+                      id: newAuthorCreate
+                      anchors.right: parent.right
+                      text: "Add author"
+                      bordered: true
+                      enabled: root.newAuthorBlock === ""
+                      foreground: Commons.Color.popups.text
+                      fontSize: Style.font.bodySmall
+                      onClicked: root.createAuthor()
+                    }
+                  }
+                }
+              }
+
+              // The chosen author, and a portrait for them when they have none.
+              Item {
+                width: parent.width
+                height: Math.max(addAuthorHint.implicitHeight, addAuthorPicture.height)
+
+                Caption {
+                  id: addAuthorHint
+                  anchors.left: parent.left
+                  anchors.right: addAuthorPicture.visible ? addAuthorPicture.left : parent.right
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: {
+                    var author = root.authorBySlug(root.addAuthorSlug)
+                    if (!author) return "Pick who said it above, or add an author of your own."
+                    if (root.isStoic(author.slug)) return author.name + " uses their own portrait."
+                    return author.name + (root.hasPortrait(author.slug) ? " has a portrait." : " has no portrait yet.")
+                  }
+                }
+
+                Button {
+                  id: addAuthorPicture
+                  anchors.right: parent.right
+                  visible: root.addAuthorSlug !== "" && !root.isStoic(root.addAuthorSlug) && !root.hasPortrait(root.addAuthorSlug)
+                  text: "Add picture…"
+                  tooltipText: "A portrait for every quote by this author"
+                  bordered: true
+                  enabled: !root.picking
+                  foreground: Commons.Color.popups.text
+                  fontSize: Style.font.bodySmall
+                  onClicked: root.chooseImage(root.addAuthorSlug)
+                }
+              }
 
               TextField {
                 id: textField
@@ -678,82 +947,16 @@ Item {
                 spacing: Style.space(8)
 
                 TextField {
-                  id: authorField
-                  width: (parent.width - parent.spacing) / 2
-                  placeholderText: "Author, e.g. Seneca or Tomas Sowell"
-                  foreground: Commons.Color.popups.text
-                  onTextChanged: root.newAuthor = text
-                  onAccepted: root.addQuote()
-                }
-
-                TextField {
                   id: citationField
-                  width: (parent.width - parent.spacing) / 2
+                  width: parent.width - addConfirm.width - parent.spacing
                   placeholderText: "Source, e.g. Letters 1"
                   foreground: Commons.Color.popups.text
                   onTextChanged: root.newCitation = text
                   onAccepted: root.addQuote()
                 }
-              }
-
-              // The author's portrait: any picture, chosen in Omarchy's image grid or typed.
-              Row {
-                width: parent.width
-                spacing: Style.space(8)
-
-                TextField {
-                  id: imageField
-                  width: parent.width - chooseButton.width - drawingButton.width - parent.spacing * 2
-                  placeholderText: root.hasPortrait(root.authorSlug) ? "New picture for the portrait (optional)" : "Picture for a portrait (optional)"
-                  foreground: Commons.Color.popups.text
-                  onTextChanged: root.newImage = text
-                  onAccepted: root.addQuote()
-                }
-
-                Button {
-                  id: chooseButton
-                  text: "Choose…"
-                  tooltipText: "Pick from Pictures, Downloads or Desktop"
-                  bordered: true
-                  enabled: !root.picking
-                  foreground: Commons.Color.popups.text
-                  fontSize: Style.font.bodySmall
-                  onClicked: root.chooseImage("")
-                }
-
-                Button {
-                  id: drawingButton
-                  text: "Drawing"
-                  tooltipText: "Line art: sharp strokes instead of photo shading"
-                  bordered: true
-                  selected: root.newDrawing
-                  foreground: Commons.Color.popups.text
-                  fontSize: Style.font.bodySmall
-                  onClicked: root.newDrawing = !root.newDrawing
-                }
-              }
-
-              Item {
-                width: parent.width
-                height: Math.max(addHint.implicitHeight, addConfirm.height)
-
-                Caption {
-                  id: addHint
-                  anchors.left: parent.left
-                  anchors.right: addConfirm.left
-                  anchors.rightMargin: Style.space(8)
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: root.addBlocker !== "" ? root.addBlocker
-                    : "Saved as “" + root.authorSlug + "”. "
-                      + (root.newImage.trim() !== "" ? (root.hasPortrait(root.authorSlug) ? "The picture replaces the portrait. " : "The picture becomes the portrait. ")
-                        : root.hasPortrait(root.authorSlug) ? "Uses the portrait already there. "
-                        : "No picture: the quote shows without a portrait. ")
-                      + "Enter adds it."
-                }
 
                 Button {
                   id: addConfirm
-                  anchors.right: parent.right
                   text: "Add"
                   bordered: true
                   enabled: root.addBlocker === ""
@@ -762,9 +965,15 @@ Item {
                   onClicked: root.addQuote()
                 }
               }
+
+              Caption {
+                id: addHint
+                width: parent.width
+                visible: root.addBlocker !== ""
+                text: root.addBlocker
+              }
             }
           }
-
           TextField {
             id: searchField
             width: parent.width
@@ -777,9 +986,9 @@ Item {
             id: quoteView
             width: parent.width
             // Grows with the list, up to about half the screen.
-            height: Math.min(contentHeight, Math.max(Style.space(160), keyCatcher.height * 0.45))
+            height: Math.min(contentHeight, Math.max(Style.space(140), keyCatcher.height * 0.34))
             clip: true
-            spacing: Style.space(4)
+            spacing: Style.space(2)
             boundsBehavior: Flickable.StopAtBounds
             model: root.shownQuotes
 
@@ -789,7 +998,7 @@ Item {
               readonly property bool open: !!root.expanded[modelData.id]
               readonly property bool editing: root.editingId === modelData.id
               width: quoteView.width
-              height: (editing ? editor.implicitHeight : rowBody.implicitHeight) + Style.space(12)
+              height: (editing ? editor.implicitHeight : rowBody.implicitHeight) + Style.space(8)
               radius: Style.cornerRadius
               color: rowMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
 

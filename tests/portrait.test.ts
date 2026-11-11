@@ -92,3 +92,28 @@ test.skipIf(!Bun.which("magick"))("panel apply sets and removes a portrait for a
     expect(existsSync(file)).toBe(false);
   } finally { s.cleanup(); }
 });
+
+test.skipIf(!Bun.which("magick"))("panel apply adds an author of yours with their portrait", async () => {
+  const s = sandbox();
+  try {
+    const image = join(s.home, "face.png");
+    Bun.spawnSync(["magick", "-size", "200x240", "radial-gradient:white-black", image]);
+    const file = join(s.config, "omastoic/art/tomas-sowell.txt");
+
+    const added = await s.cli(["panel", "apply", JSON.stringify({ addAuthor: { slug: "tomas-sowell", name: "Tomas Sowell", image, drawing: false } })]);
+    expect(added.code).toBe(0);
+    expect(existsSync(file)).toBe(true);
+    expect(readFileSync(file, "utf8")).toMatch(/[\u2801-\u28ff]/);
+    expect(JSON.parse(added.stdout).myAuthors[0]).toMatchObject({ slug: "tomas-sowell", name: "Tomas Sowell", portrait: true });
+
+    // A missing picture adds no author and no portrait.
+    const before = readFileSync(join(s.config, "omastoic/authors.tsv"), "utf8");
+    expect((await s.cli(["panel", "apply", JSON.stringify({ addAuthor: { slug: "aldous-huxley", name: "Aldous Huxley", image: join(s.home, "none.png") } })])).code).toBe(1);
+    expect(readFileSync(join(s.config, "omastoic/authors.tsv"), "utf8")).toBe(before);
+    expect(existsSync(join(s.config, "omastoic/art/aldous-huxley.txt"))).toBe(false);
+
+    // The portrait belongs to the author and goes with them.
+    expect((await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: { slug: "tomas-sowell" } })])).code).toBe(0);
+    expect(existsSync(file)).toBe(false);
+  } finally { s.cleanup(); }
+});

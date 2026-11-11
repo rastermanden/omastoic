@@ -14,7 +14,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, displayName, findArt, indexBundled, indexCustom, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
+import { compose, displayName, findArt, indexBundled, indexCustom, parseAuthors, parseQuotes, pick, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
@@ -49,6 +49,8 @@ const MENU = join(CONFIG_HOME, "omarchy/extensions/omarchy-menu.jsonc");
 const USER_CONFIG = join(CONFIG_HOME, "omastoic");
 // Your own portraits come first, so one can stand in for a bundled Stoic.
 const USER_ART = join(USER_CONFIG, "art");
+const USER_AUTHORS = join(USER_CONFIG, "authors.tsv");
+const AUTHOR_HEADER = "# your authors: slug <TAB> display name <TAB> dates";
 const ART_DIRS = [USER_ART, join(ROOT, "art")];
 const STATE = join(STATE_HOME, "omastoic");
 const WRITTEN = join(STATE, "written.sha");
@@ -168,6 +170,43 @@ async function quoteBook(): Promise<Quote[]> {
 
 const authors = async () => parseAuthors(await Bun.file(join(ROOT, "data/authors.tsv")).text());
 
+/** The authors you added yourself, in the same slug/name/dates shape as the roster. */
+const userAuthors = async () => parseAuthors(await Bun.file(USER_AUTHORS).text().catch(() => ""));
+
+/** The six Stoics first, then your authors: every name the screensaver can show. */
+async function knownAuthors(): Promise<Map<string, Author>> {
+  const known = new Map(await authors());
+  for (const [slug, author] of await userAuthors()) if (!known.has(slug)) known.set(slug, author);
+  return known;
+}
+
+/** Add or update one of your authors, keeping the file's comments and other rows. */
+async function saveUserAuthor(author: Author): Promise<void> {
+  const existing = await Bun.file(USER_AUTHORS).text().catch(() => "");
+  const row = `${author.slug}\t${author.name}\t${author.dates}`;
+  const lines = existing.trim() === ""
+    ? AUTHOR_HEADER.split("\n")
+    : existing.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+  let found = false;
+  const out = lines.map((line) => {
+    if (!line.trim() || line.startsWith("#")) return line;
+    return line.split("\t")[0]?.trim() === author.slug ? ((found = true), row) : line;
+  });
+  if (!found) out.push(row);
+  mkdirSync(USER_CONFIG, { recursive: true });
+  atomicWrite(USER_AUTHORS, `${out.join("\n")}\n`);
+}
+
+/** Drop one of your authors. Their quotes and portrait are handled by the caller. */
+async function dropUserAuthor(slug: string): Promise<boolean> {
+  const existing = await Bun.file(USER_AUTHORS).text().catch(() => "");
+  const lines = existing.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n").filter((line) => line !== "");
+  const out = lines.filter((line) => line.startsWith("#") || line.split("\t")[0]?.trim() !== slug);
+  if (out.length === lines.length) return false;
+  atomicWrite(USER_AUTHORS, `${out.join("\n")}\n`);
+  return true;
+}
+
 async function recent(): Promise<number[]> {
   try {
     const value = await Bun.file(join(STATE, "recent.json")).json();
@@ -261,7 +300,7 @@ async function render(size?: { cols: number; rows: number }, remember = true): P
 
   const grid = size ?? (await screensaverSize());
   const art = await findArt(ART_DIRS, chosen.quote.author);
-  return compose(chosen.quote, (await authors()).get(chosen.quote.author), {
+  return compose(chosen.quote, (await knownAuthors()).get(chosen.quote.author), {
     cols: grid.cols,
     rows: grid.rows,
     art,
@@ -1100,15 +1139,29 @@ async function configure(rest: string[]): Promise<number> {
 /** What the panel renders. Read-only: no lock, no writes, no state directory. */
 async function panelState(): Promise<string> {
   const roster = await authors();
+  const names = await knownAuthors();
   const settings = await config();
   const custom = await indexedCustom();
   const bundled = await bundledBook();
   const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   const selected = settings.mineOnly ? [] : settings.authors?.length ? settings.authors : [...roster.keys()];
   const rotating = new Set<Quote>(inRotation(bundled, custom.quotes, settings).quotes);
+  // Your authors: the ones you added, plus any author a quote mentions that the
+  // roster does not know (so an author never disappears between the two lists).
+  const counts = new Map<string, number>();
+  const mine = new Map<string, Author>();
+  for (const [slug, author] of await userAuthors()) if (!roster.has(slug)) mine.set(slug, author);
+  for (const quote of custom.quotes) {
+    counts.set(quote.author, (counts.get(quote.author) ?? 0) + 1);
+    if (roster.has(quote.author) || mine.has(quote.author)) continue;
+    mine.set(quote.author, { slug: quote.author, name: names.get(quote.author)?.name ?? displayName(quote.author), dates: "" });
+  }
   const portraits = new Map<string, boolean>();
   for (const quote of [...bundled, ...custom.quotes]) {
     if (!portraits.has(quote.author)) portraits.set(quote.author, !!(await findArt(ART_DIRS, quote.author)));
+  }
+  for (const slug of mine.keys()) {
+    if (!portraits.has(slug)) portraits.set(slug, !!(await findArt(ART_DIRS, slug)));
   }
   return JSON.stringify(
     {
@@ -1122,12 +1175,20 @@ async function panelState(): Promise<string> {
         dates: author.dates,
         selected: selected.includes(author.slug),
       })),
+      // Authors of your own, for the panel's author list.
+      myAuthors: [...mine.values()].map((author) => ({
+        slug: author.slug,
+        name: author.name,
+        dates: author.dates,
+        portrait: portraits.get(author.slug) ?? false,
+        quotes: counts.get(author.slug) ?? 0,
+      })),
       customQuotes: custom.quotes.length,
       // Every quote, the Stoics' book first and then yours, marked when in rotation.
       quotes: [...bundled, ...custom.quotes].map((quote) => ({
         id: quote.id,
         author: quote.author,
-        name: roster.get(quote.author)?.name ?? displayName(quote.author),
+        name: names.get(quote.author)?.name ?? displayName(quote.author),
         citation: quote.citation,
         text: quote.text,
         custom: quote.id.startsWith("c"),
@@ -1200,6 +1261,65 @@ async function panelApply(raw: string): Promise<number> {
   let catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   let next: Settings = { ...(await config()) };
   let settingsTouched = false;
+
+  // Add or update an author of your own, portrait included: { slug, name, dates, image, drawing }.
+  if (Object.hasOwn(value, "addAuthor")) {
+    const ask = value.addAuthor && typeof value.addAuthor === "object" && !Array.isArray(value.addAuthor) ? (value.addAuthor as Record<string, unknown>) : {};
+    const name = typeof ask.name === "string" ? flatField(ask.name) : "";
+    const slug = typeof ask.slug === "string" ? ask.slug : "";
+    if (!name) {
+      console.error("omastoic: panel addAuthor needs a name");
+      return 1;
+    }
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) {
+      console.error("omastoic: panel addAuthor needs an author slug");
+      return 1;
+    }
+    if (slugs.includes(slug)) {
+      console.error(`omastoic: ${name} is one of the six Stoics — pick their name on the panel instead`);
+      return 1;
+    }
+    let made: string | null = null;
+    const image = typeof ask.image === "string" ? ask.image.trim().replace(/^~(?=\/|$)/, HOME) : "";
+    if (image) {
+      try {
+        made = await makePortrait(image, { drawing: ask.drawing === true });
+      } catch (error) {
+        console.error(`omastoic: ${(error as Error).message}`);
+        return 1;
+      }
+      if (!made.trim()) {
+        console.error("omastoic: that picture came out blank; try it as a drawing, or another picture");
+        return 1;
+      }
+    }
+    await saveUserAuthor({ slug, name, dates: typeof ask.dates === "string" ? flatField(ask.dates) : "" });
+    if (made) {
+      mkdirSync(USER_ART, { recursive: true });
+      atomicWrite(join(USER_ART, `${slug}.txt`), `${made}\n`);
+    }
+    console.log(await panelState());
+    return 0;
+  }
+
+  // Drop an author of your own, but never their quotes: those are yours to keep or delete.
+  if (Object.hasOwn(value, "removeAuthor")) {
+    const ask = value.removeAuthor && typeof value.removeAuthor === "object" && !Array.isArray(value.removeAuthor) ? (value.removeAuthor as Record<string, unknown>) : {};
+    const slug = typeof ask.slug === "string" ? ask.slug : "";
+    if (!(await userAuthors()).has(slug)) {
+      console.error(`omastoic: you have no author ${JSON.stringify(slug)}`);
+      return 1;
+    }
+    const count = [...bundled, ...custom.quotes].filter((quote) => quote.author === slug).length;
+    if (count) {
+      console.error(`omastoic: ${slug} still has ${count} ${count === 1 ? "quote" : "quotes"} — delete them or move them to another author first`);
+      return 1;
+    }
+    await dropUserAuthor(slug);
+    rmSync(join(USER_ART, `${slug}.txt`), { force: true });
+    console.log(await panelState());
+    return 0;
+  }
 
   if (Object.hasOwn(value, "interval")) {
     const seconds =
@@ -1315,6 +1435,7 @@ async function panelApply(raw: string): Promise<number> {
       return 1;
     }
     next = renumberCustom(next, index, key === "deleteQuote", before.author, replacement?.author);
+    if (replacement) await rememberAuthor(replacement.author);
     const customNow = indexCustom(await customQuotes());
     catalog = [...choicesOf(bundled), ...choicesOf(customNow)];
     await saveSettings(next, slugs, catalog, true);
@@ -1358,6 +1479,7 @@ async function panelApply(raw: string): Promise<number> {
       mkdirSync(USER_ART, { recursive: true });
       atomicWrite(join(USER_ART, `${added.author}.txt`), `${art}\n`);
     }
+    await rememberAuthor(added.author);
     const customNow = indexCustom(await customQuotes());
     catalog = [...choicesOf(bundled), ...choicesOf(customNow)];
     const remembered = rememberAddedQuote(next, customNow, added);
@@ -1373,10 +1495,16 @@ async function panelApply(raw: string): Promise<number> {
   return 0;
 }
 
+/** Register an author a quote introduced, so the panel lists them and the name sticks. */
+async function rememberAuthor(slug: string): Promise<void> {
+  if ((await authors()).has(slug) || (await userAuthors()).has(slug)) return;
+  await saveUserAuthor({ slug, name: displayName(slug), dates: "" });
+}
+
 /** An author as typed: a slug, a Stoic's full or first name, or any name. */
 async function authorSlug(typed: string): Promise<string> {
   const lower = typed.trim().toLowerCase();
-  for (const author of (await authors()).values()) {
+  for (const author of (await knownAuthors()).values()) {
     if (author.slug === lower || author.name.toLowerCase() === lower || author.name.toLowerCase().split(" ")[0] === lower) return author.slug;
   }
   return lower.replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64);
@@ -1435,12 +1563,101 @@ async function portrait(rest: string[]): Promise<number> {
   return 0;
 }
 
+const AUTHOR_USAGE = `usage: omastoic author list
+       omastoic author add <name> [--dates "b. 1932"] [--image <picture>] [--drawing]
+       omastoic author remove <name>`;
+
+/** The authors you added yourself: list them, add one with a portrait, or remove one. */
+async function authorCommand(rest: string[]): Promise<number> {
+  const action = rest[0];
+  if (!action || action === "list") {
+    const mine = await userAuthors();
+    if (!mine.size) {
+      console.log("no authors of your own yet");
+      console.log(`  add one: omastoic author add "Tomas Sowell" --image ~/Pictures/tomas.jpg`);
+      console.log(`  they are kept in ${USER_AUTHORS}`);
+      return 0;
+    }
+    const quotes = await quoteBook();
+    console.log("your authors:");
+    for (const author of mine.values()) {
+      const count = quotes.filter((quote) => quote.author === author.slug).length;
+      const art = (await findArt(ART_DIRS, author.slug)) ? "has a portrait" : "no portrait";
+      console.log(`  ${author.name} (${author.slug})${author.dates ? ` · ${author.dates}` : ""}  ${count} ${count === 1 ? "quote" : "quotes"}, ${art}`);
+    }
+    return 0;
+  }
+
+  const valued = new Set(["--dates", "--image"]);
+  const words = rest.slice(1).filter((word, i, all) => !word.startsWith("--") && !valued.has(all[i - 1] ?? ""));
+  const name = flatField(words.join(" "));
+  if (!name) {
+    console.error(AUTHOR_USAGE);
+    return 1;
+  }
+  const slug = await authorSlug(name);
+
+  if (action === "add") {
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) {
+      console.error(`omastoic: ${JSON.stringify(name)} is not an author name`);
+      return 1;
+    }
+    if ((await authors()).has(slug)) {
+      console.error(`omastoic: ${name} is one of the six Stoics — they are already there`);
+      return 1;
+    }
+    let made: string | null = null;
+    const image = stringFlag(rest, "image");
+    if (image) {
+      try {
+        made = await makePortrait(image.replace(/^~(?=\/|$)/, HOME), { drawing: rest.includes("--drawing") });
+      } catch (error) {
+        console.error(`omastoic: ${(error as Error).message}`);
+        return 1;
+      }
+      if (!made.trim()) {
+        console.error("omastoic: that picture came out blank; try --drawing, or another picture");
+        return 1;
+      }
+    }
+    const had = (await userAuthors()).has(slug);
+    await saveUserAuthor({ slug, name, dates: (stringFlag(rest, "dates") ?? "").trim() });
+    if (made) {
+      mkdirSync(USER_ART, { recursive: true });
+      atomicWrite(join(USER_ART, `${slug}.txt`), `${made}\n`);
+    }
+    console.log(`→ ${had ? "updated" : "added"} ${name} (${slug})`);
+    if (made) console.log(`  their portrait is ${join(USER_ART, `${slug}.txt`)}`);
+    else console.log(`  quotes by ${slug} now show ${name}; add a portrait with: omastoic portrait ${JSON.stringify(name)} <picture>`);
+    return 0;
+  }
+
+  if (action === "remove" || action === "rm") {
+    if (!(await userAuthors()).has(slug)) {
+      console.error(`omastoic: you have no author ${JSON.stringify(name)}`);
+      return 1;
+    }
+    const count = (await quoteBook()).filter((quote) => quote.author === slug).length;
+    if (count) {
+      console.error(`omastoic: ${name} still has ${count} ${count === 1 ? "quote" : "quotes"} — delete or move them first`);
+      return 1;
+    }
+    await dropUserAuthor(slug);
+    rmSync(join(USER_ART, `${slug}.txt`), { force: true });
+    console.log(`→ removed ${name} (${slug})`);
+    return 0;
+  }
+
+  console.error(AUTHOR_USAGE);
+  return 1;
+}
+
 async function status(): Promise<number> {
   const quotes = await quoteBook();
   const byAuthor = new Map<string, number>();
   for (const q of quotes) byAuthor.set(q.author, (byAuthor.get(q.author) ?? 0) + 1);
 
-  const names = await authors();
+  const names = await knownAuthors();
   console.log(`${quotes.length} quotes:`);
   for (const [slug, count] of [...byAuthor].sort((a, b) => b[1] - a[1])) {
     const art = (await findArt(ART_DIRS, slug)) ? "portrait" : "no portrait";
@@ -1553,6 +1770,8 @@ async function main(): Promise<number> {
     }
     case "portrait":
       return portrait(rest);
+    case "author":
+      return authorCommand(rest);
     case "ui": {
       const shell = Bun.which("omarchy-shell");
       const toggled = shell ? Bun.spawnSync([shell, "shell", "toggle", PLUGIN_ID], { stdout: "ignore", stderr: "ignore" }) : null;
@@ -1573,6 +1792,9 @@ async function main(): Promise<number> {
   omastoic config      choose Stoics, their quotes, and seconds, or add a quote
                        (--plain asks for numbers instead of keys)
   omastoic ui          open the settings panel in the Omarchy shell
+  omastoic author add <name> [--dates "b. 1932"] [--image <picture>] [--drawing]
+                       add an author of your own, with an optional portrait
+  omastoic author list author remove <name>   list or drop your own authors
   omastoic portrait <author> <image> [--drawing] [--threshold 45] [--crop WxH+X+Y]
                        make a braille portrait for an author's quotes
   omastoic portrait <author> --remove   drop your portrait for that author
@@ -1595,7 +1817,8 @@ Settings: ${join(USER_CONFIG, "config.json")}`);
 try {
   const command = Bun.argv[2];
   const mutating = ["on", "off", "toggle", "next", "preview", "setup", "install", "uninstall", "config", "configure"].includes(command)
-    || (command === "panel" && Bun.argv[3] === "apply");
+    || (command === "panel" && Bun.argv[3] === "apply")
+    || (command === "author" && ["add", "remove", "rm"].includes(Bun.argv[3] ?? ""));
   process.exit(await (mutating ? locked(STATE, main) : main()));
 } catch (error) {
   console.error(`omastoic: ${(error as Error).message}`);

@@ -23,6 +23,7 @@ export const STATE_JSON = {
     { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", selected: true },
     { slug: "zeno", name: "Zeno of Citium", dates: "c. 334 – 262 BC", selected: false },
   ],
+  myAuthors: [],
   customQuotes: 1,
   quotes: [
     { id: "q01", author: "marcus", name: "Marcus Aurelius", citation: "Meditations II.5", text: "A bundled line.", custom: false, switchable: true, kept: true, inRotation: true },
@@ -76,7 +77,13 @@ export function fixture(): string {
   cpSync(panel, join(dir, relative));
   for (const module of ["Commons", "Ui"]) symlinkSync(join(host, module), join(dir, module));
   mkdirSync(join(dir, "bin"));
-  const applied = { ...STATE_JSON, settings: { interval: 30, authors: ["marcus", "seneca", "zeno"] }, summary: "Marcus Aurelius, Seneca, Zeno of Citium · every 30s", customQuotes: 2 };
+  const applied = {
+    ...STATE_JSON,
+    settings: { interval: 30, authors: ["marcus", "seneca", "zeno"] },
+    summary: "Marcus Aurelius, Seneca, Zeno of Citium · every 30s",
+    myAuthors: [{ slug: "tomas-sowell", name: "Tomas Sowell", dates: "b. 1932", portrait: false, quotes: 1 }],
+    customQuotes: 2,
+  };
   const cli = fakeCli(JSON.stringify(STATE_JSON, null, 2), JSON.stringify(applied, null, 2), dir);
   writeFileSync(join(dir, "bin/omastoic"), cli);
   chmodSync(join(dir, "bin/omastoic"), 0o755);
@@ -116,19 +123,24 @@ ShellRoot {
         panel.settings = Object.assign({}, panel.settings, { authors: ["seneca"] })
         console.log("chips:", harness.ids())
         panel.settings = Object.assign({}, panel.settings, { authors: ["marcus", "seneca"] })
-        // Names become slugs; a Stoic's short or full name becomes that Stoic's slug.
-        panel.newAuthor = "Seneca"; console.log("slug:", panel.authorSlug)
-        panel.newAuthor = "Marcus Aurelius"; console.log("slug:", panel.authorSlug)
-        panel.newAuthor = "Tomas Sowell"; console.log("slug:", panel.authorSlug, panel.addBlocker)
+        // A quote starts with its author: pick a chip, or add an author first.
+        panel.addAuthorSlug = "seneca"; console.log("author:", panel.addAuthorSlug, panel.addBlocker)
+        panel.addAuthorSlug = ""; console.log("author:", panel.addBlocker)
         // Each change queues one save.
         panel.toggleStoic("seneca")
         panel.setPicked([])
         panel.keep("q01", false)
         console.log("flipped:", panel.quotes[0].kept)
         panel.toggleMine()
+        // Add the author first; the quote then attaches to them.
         panel.adding = true
+        panel.newAuthorOpen = true
+        panel.newAuthorName = "Tomas Sowell"; panel.newAuthorDates = "b. 1932"
+        console.log("new author:", panel.newAuthorSlug, panel.newAuthorBlock === "")
+        panel.createAuthor()
         panel.newCitation = "Basic Economics"
         panel.newText = "There are no solutions, only trade-offs."
+        console.log("quote author:", panel.addAuthorSlug, panel.addBlocker === "")
         panel.addQuote()
         // Your quote opens for editing; Delete asks once before it sends.
         panel.startEdit(panel.mine[0])
@@ -192,9 +204,10 @@ if (import.meta.main) {
       "mine: c01",
       "search: q01",
       "chips: c01",
-      "slug: seneca",
-      "slug: marcus",
-      "slug: tomas-sowell Needs a citation and the quote.",
+      "author: seneca Needs a citation and the quote.",
+      "author: Needs an author, a citation and the quote.",
+      "new author: tomas-sowell true",
+      "quote author: tomas-sowell true",
       "flipped: false",
       "editing: c01 seneca true",
       "confirm: true",
@@ -212,6 +225,7 @@ if (import.meta.main) {
       { mineOnly: true },
       { keep: { q01: false } },
       { keep: { c01: false } },
+      { addAuthor: { slug: "tomas-sowell", name: "Tomas Sowell", dates: "b. 1932" } },
       { addQuote: { author: "tomas-sowell", citation: "Basic Economics", text: "There are no solutions, only trade-offs." } },
       { editQuote: { id: "c01", author: "seneca", citation: "Meditations IX.1", text: "Your line, edited." } },
       { deleteQuote: { id: "c01" } },

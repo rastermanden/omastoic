@@ -1,11 +1,11 @@
 # Quickshell settings panel
 
 A small QML panel for the settings that `omastoic config` already owns: which
-Stoics are in rotation, how many seconds each quote stays up, and adding one of
-your own quotes. It reads and writes the same
-`~/.config/omastoic/config.json` and `quotes.tsv` through the CLI, so there is
-one validator, one lock and one daemon-restart path — never a second writer
-with its own idea of the format.
+Stoics are in rotation, how many seconds each quote stays up, your own authors
+and quotes, and each quote's switch. It reads and writes the same
+`~/.config/omastoic/config.json`, `quotes.tsv` and `authors.tsv` through the
+CLI, so there is one validator, one lock and one daemon-restart path — never a
+second writer with its own idea of the format.
 
 ## Shape
 
@@ -16,6 +16,9 @@ with its own idea of the format.
      payload, appends a custom quote through the existing `appendQuotes`, saves
      atomically and restarts an enabled daemon. It prints the new state, so the
      panel needs one round trip per change and renders only saved values.
+
+   Payload kinds: `interval`, `authors`, `mineOnly`, `keep`, `portrait`,
+   `addQuote`, `editQuote`, `deleteQuote`, `addAuthor`, `removeAuthor`.
 
    Both reuse the `src/cli.ts` helpers (`parseInterval`, `normalizeSettings`,
    `compactSettings`, `appendQuotes`, `saveSettings`), so a panel write cannot
@@ -45,19 +48,32 @@ with its own idea of the format.
    (the smoke harness) falls back to the file's own directory.
 
 3. **Host components reused** from `/usr/share/omarchy/shell`:
-   `qs.Ui.MultiSelect` (the Stoic roster), `qs.Ui.Toggle` (every Stoic on/off),
-   `qs.Ui.NumberField` (seconds per quote), `qs.Ui.TextField` (author,
-   citation, quote text), `qs.Ui.Button`, `qs.Ui.PanelHero`,
-   `qs.Ui.PanelSectionHeader`, and `qs.Commons.Style` / `Commons.Color` for
-   every color, size and font. The `qs.Ui.Panel` base is *not* reused: it is the
-   bar-widget popup base and needs a live bar instance plus an anchor item, and a
-   summoned overlay has neither.
+   `qs.Ui.Button` (the Stoic and author chips), `qs.Ui.ButtonGroup` (the list
+   filters), `qs.Ui.NumberField` (seconds per quote), `qs.Ui.TextField` (quote,
+   source, author names), `qs.Ui.ToggleSwitch` (each quote's switch),
+   `qs.Ui.PanelSectionHeader`, `qs.Ui.PanelSeparator`, `qs.Ui.Caption`, and
+   `qs.Commons.Style` / `Commons.Color` for every color, size and font. The
+   `qs.Ui.Panel` base is *not* reused: it is the bar-widget popup base and needs
+   a live bar instance plus an anchor item, and a summoned overlay has neither.
 
-4. **Every change saves at once.** Stoic chips, the Mine chip, each quote's
-   switch, the seconds field (after it stops changing) and the add form each
-   send one `panel apply`; writes queue one at a time, the row flips first and
-   the state the CLI echoes back is what stays on screen. No Stoic picked is
-   saved as `mineOnly`, never as an empty list (which means every Stoic).
+4. **Every change saves at once.** Stoic chips, the Yours chip, each quote's
+   switch, the seconds field (after it stops changing), the add form and the
+   editor each send one `panel apply`; writes queue one at a time, the row flips
+   first and the state the CLI echoes back is what stays on screen. No Stoic
+   picked is saved as `mineOnly`, never as an empty list (which means every
+   Stoic).
+
+   Adding a quote starts with its author. The add form lists the six Stoics and
+   your own authors as chips, plus **+ New author** (name, optional dates,
+   optional picture through Omarchy's image grid). Creating an author writes
+   `~/.config/omastoic/authors.tsv` and the portrait, then selects them, so the
+   quote that follows attaches to that author. Quotes by an author the roster
+   does not know always rotate, whatever the Stoic picks are.
+
+   Your own quotes open for editing when clicked: quote, source and author are
+   editable, the author's portrait can be added, changed or removed, and Delete
+   asks once before it writes. Comments and other lines in `quotes.tsv` are kept
+   exactly; the per-quote switches are renumbered when a quote is deleted.
 
    Earlier note, kept for history: **Save refuses what the CLI would misread.** An empty pick means "every
    Stoic" to the CLI, so the panel never sends one: with the toggle off and
@@ -106,8 +122,8 @@ whose URL the engine already knows.
 
 - Per-quote checklists and the full author/quote pickers stay in
   `omastoic config` in a terminal.
-- Editing or removing an existing custom quote is out of scope for the first
-  version; the panel only adds.
+- Removing an author of your own is CLI-only (`omastoic author remove <name>`),
+  and refuses while any quote still uses them.
 - No bar-widget entry point and no installed keybind: the panel opens by
   command. Bind `omastoic ui` in `~/.config/hypr/bindings.conf` for a key.
 - Strings are English literals; the host kit's `I18n` is not used yet.
