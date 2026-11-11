@@ -653,38 +653,38 @@ Item {
 
           PanelSeparator { foreground: Commons.Color.popups.text }
 
-          // Rotation: one chip per Stoic, one for your own quotes, then seconds.
+          // Rotation: one chip per Stoic, one for your own quotes.
           Flow {
             id: chips
             width: parent.width
             spacing: Style.space(6)
 
-              Repeater {
-                model: root.roster
-                delegate: Button {
-                  required property var modelData
-                  text: root.shortName(modelData)
-                  tooltipText: modelData.name + " · " + modelData.dates
-                  bordered: true
-                  selected: root.picked.indexOf(modelData.slug) !== -1
-                  foreground: Commons.Color.popups.text
-                  fontSize: Style.font.bodySmall
-                  horizontalPadding: Style.space(8)
-                  onClicked: root.toggleStoic(modelData.slug)
-                }
-              }
-
-              Button {
-                text: "Yours " + root.mine.length
-                tooltipText: root.mineSwitchable.length ? "Switch all of yours on or off" : "Add a quote first"
+            Repeater {
+              model: root.roster
+              delegate: Button {
+                required property var modelData
+                text: root.shortName(modelData)
+                tooltipText: modelData.name + " · " + modelData.dates
                 bordered: true
-                selected: root.mineOn
-                enabled: root.mineSwitchable.length > 0
+                selected: root.picked.indexOf(modelData.slug) !== -1
                 foreground: Commons.Color.popups.text
                 fontSize: Style.font.bodySmall
                 horizontalPadding: Style.space(8)
-                onClicked: root.toggleMine()
+                onClicked: root.toggleStoic(modelData.slug)
               }
+            }
+
+            Button {
+              text: "Yours " + root.mine.length
+              tooltipText: root.mineSwitchable.length ? "Switch all of yours on or off" : "Add a quote first"
+              bordered: true
+              selected: root.mineOn
+              enabled: root.mineSwitchable.length > 0
+              foreground: Commons.Color.popups.text
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(8)
+              onClicked: root.toggleMine()
+            }
           }
 
           PanelSeparator { foreground: Commons.Color.popups.text }
