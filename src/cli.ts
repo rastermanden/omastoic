@@ -15,7 +15,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
-import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
+import { screensaverSize, screensaverWindowEvents, waitForLiveGrid, type Size } from "./hyprland.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { ChunkSource, pickAuthors } from "./author-picker.ts";
@@ -248,33 +248,57 @@ async function ownsBranding(): Promise<boolean> {
   }
 }
 
-async function render(size?: { cols: number; rows: number }, remember = true): Promise<string> {
-  const quotes = await quoteBook();
-  if (!quotes.length) throw new Error("the quote book is empty");
-
-  const chosen = pick(quotes, await recent());
-  if (remember) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
-
-  const grid = size ?? (await screensaverSize());
-  const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
-  return compose(chosen.quote, (await authors()).get(chosen.quote.author), {
+async function composeQuote(quote: Quote, grid: Size): Promise<string> {
+  const art = await loadArt(join(ROOT, "art"), quote.author);
+  return compose(quote, (await authors()).get(quote.author), {
     cols: grid.cols,
     rows: grid.rows,
     art,
   });
 }
 
+async function onScreen(): Promise<Quote | null> {
+  const quotes = await quoteBook();
+  const index = (await recent())[0];
+  return typeof index === "number" ? quotes[index] ?? null : null;
+}
+
+async function render(size?: Size): Promise<{ body: string; recent: number[] }> {
+  const quotes = await quoteBook();
+  if (!quotes.length) throw new Error("the quote book is empty");
+
+  const chosen = pick(quotes, await recent());
+  const grid = size ?? (await screensaverSize());
+  return { body: await composeQuote(chosen.quote, grid), recent: chosen.recent };
+}
+
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
-async function writeBranding(takeSlot = false): Promise<boolean> {
-  // Recheck after rendering too: a user's branding command may run while we
-  // measure terminals. All our writers hold the transaction lock.
-  const before = await Bun.file(BRANDING).text().catch(() => null);
+async function commitCanvas(body: string, before: string | null, takeSlot = false): Promise<boolean> {
+  const canvas = `${body}\n`;
   if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
-  const canvas = `${await render()}\n`;
   if ((await Bun.file(BRANDING).text().catch(() => null)) !== before) { standAside(); return false; }
   atomicWrite(BRANDING, canvas);
   await rememberWrite(canvas);
   return true;
+}
+
+async function writeBranding(takeSlot = false, size?: Size): Promise<boolean> {
+  // Recheck after rendering too: a user's branding command may run while we
+  // measure terminals. All our writers hold the transaction lock.
+  const before = await Bun.file(BRANDING).text().catch(() => null);
+  if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
+  const drawn = await render(size);
+  if (!(await commitCanvas(drawn.body, before, takeSlot))) return false;
+  atomicWrite(join(STATE, "recent.json"), JSON.stringify(drawn.recent));
+  return true;
+}
+
+async function reflowQuote(size: Size): Promise<boolean> {
+  const before = await Bun.file(BRANDING).text().catch(() => null);
+  if (!(await ownsBranding())) { standAside(); return false; }
+  const quote = await onScreen();
+  if (!quote) return false;
+  return commitCanvas(await composeQuote(quote, size), before, false);
 }
 
 /**
@@ -516,6 +540,7 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
 
   const previous = await Bun.file(INSTALLED).text().catch(() => "");
   const first = !previous;
+  let undoActivation = false;
   if (previous && existsSync(WRITTEN) && !existsSync(DISPLACED)) {
     owned.write("backup", BACKUP, readFileSync(existsSync(BACKUP) ? BACKUP : LOGO, "utf8"));
     atomicWrite(DISPLACED, "file");
@@ -544,6 +569,7 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
     if (opts.onFirst && first) {
       const code = await on();
       if (code) throw new Error("could not activate the Stoics");
+      undoActivation = true;
     } else if (enabled()) {
       await checked(["systemctl", "--user", "enable", "omastoic.service"]);
       if (previous !== marker || changed) await checked(["systemctl", "--user", "restart", "omastoic.service"]);
@@ -552,12 +578,13 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
       await stopDaemon();
     }
     atomicWrite(INSTALLED, marker); // Only successful setup is an installation.
+    undoActivation = false;
   } catch (error) {
-    // Leave owned plumbing available for retry/uninstall, but fail closed.
-    await run(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
-    await run(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
-    if (existsSync(WRITTEN) && await ownsBranding()) await restoreSlot();
-    setEnabled(false);
+    if (undoActivation) {
+      await run(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
+      if (existsSync(WRITTEN) && await ownsBranding()) await restoreSlot();
+      setEnabled(false);
+    }
     throw error;
   }
   const interval = (await config()).interval ?? DEFAULT_INTERVAL;
@@ -625,15 +652,47 @@ async function daemon(): Promise<number> {
 
   const open = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let fitted: Size | null = null;
+  const GRID_POLL_MS = 200;
 
   const stopRotating = () => {
     if (timer) clearTimeout(timer);
     timer = null;
   };
 
+  const sameGrid = (grid: Size) => fitted?.cols === grid.cols && fitted?.rows === grid.rows;
+
   const rotate = async (): Promise<boolean> => {
     await locked(STATE, async () => {
-      if (enabled()) await writeBranding();
+      if (!enabled()) return;
+      const grid = await screensaverSize();
+      if (await writeBranding(false, grid)) fitted = grid.source === "live" ? grid : null;
+    }).catch((err) => { console.error(`omastoic: ${err.message}`); });
+    if (!enabled()) {
+      stopRotating();
+      return false;
+    }
+    if (!(await ownsBranding())) {
+      standAside();
+      stopRotating();
+      return false;
+    }
+    return true;
+  };
+
+  const refit = async (): Promise<boolean> => {
+    const seen = await screensaverSize();
+    if (seen.source !== "live" || sameGrid(seen)) return enabled() && await ownsBranding();
+    await locked(STATE, async () => {
+      if (!enabled()) return;
+      const grid = await screensaverSize();
+      if (grid.source !== "live" || sameGrid(grid)) return;
+      try {
+        if (await reflowQuote(grid)) fitted = grid;
+      } catch (err) {
+        fitted = grid;
+        throw err;
+      }
     }).catch((err) => { console.error(`omastoic: ${err.message}`); });
     if (!enabled()) {
       stopRotating();
@@ -663,31 +722,73 @@ async function daemon(): Promise<number> {
   // screensaver is already new, without racing the ttfx that is about to read it.
   await rotate();
 
-  for await (const event of screensaverWindowEvents()) {
-    if (event.kind === "sync") {
-      open.clear();
-      for (const address of event.addresses) open.add(address);
-      if (open.size) await startRotating();
-      else stopRotating();
-    } else if (event.kind === "open") {
-      if (open.has(event.address)) continue;
-      const alreadyReading = open.size > 0;
-      open.add(event.address);
-      if (enabled()) {
-        // ttfx measures the tty at start; wait until it has left 80x24, then
-        // write a canvas that matches the real grid before the first effect.
-        if (!alreadyReading) {
-          await waitForLiveGrid();
-          await rotate();
-        }
-        await startRotating();
+  const windows = screensaverWindowEvents()[Symbol.asyncIterator]();
+  type Incoming = { kind: "event"; result: Awaited<ReturnType<typeof windows.next>> } | { kind: "grid" };
+  const queue: Incoming[] = [];
+  let notify: (() => void) | null = null;
+  const push = (item: Incoming) => {
+    queue.push(item);
+    notify?.();
+    notify = null;
+  };
+  const take = (): Promise<Incoming> => queue.length
+    ? Promise.resolve(queue.shift()!)
+    : new Promise((resolve) => { notify = () => resolve(queue.shift()!); });
+  void (async () => {
+    try {
+      while (true) {
+        const result = await windows.next();
+        push({ kind: "event", result });
+        if (result.done) return;
       }
-    } else if (open.delete(event.address) && open.size === 0) {
-      stopRotating();
-      await rotate();
+    } catch (error) {
+      console.error(`omastoic: ${String(error)}`);
+      push({ kind: "event", result: { done: true, value: undefined } });
     }
+  })();
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  const arm = () => {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = null;
+    if (open.size === 0) return;
+    pollTimer = setTimeout(() => {
+      if (!queue.some((item) => item.kind === "grid")) push({ kind: "grid" });
+    }, GRID_POLL_MS);
+  };
+
+  while (true) {
+    const incoming = await take();
+    if (incoming.kind === "grid") {
+      if (open.size > 0) await refit();
+    } else if (incoming.result.done) {
+      if (pollTimer) clearTimeout(pollTimer);
+      return 0;
+    } else {
+      const event = incoming.result.value;
+      if (event.kind === "sync") {
+        open.clear();
+        for (const address of event.addresses) open.add(address);
+        if (open.size) {
+          if (await refit()) await startRotating();
+        } else stopRotating();
+      } else if (event.kind === "open") {
+        if (!open.has(event.address)) {
+          open.add(event.address);
+          if (enabled()) {
+            if (open.size === 1) await waitForLiveGrid();
+            if (await refit()) await startRotating();
+          }
+        }
+      } else if (event.kind === "close" && open.delete(event.address)) {
+        if (open.size === 0) {
+          stopRotating();
+          fitted = null;
+          await rotate();
+        } else await refit();
+      }
+    }
+    arm();
   }
-  return 0;
 }
 
 // --- configure ----------------------------------------------------------------
@@ -1172,7 +1273,7 @@ async function status(): Promise<number> {
   console.log(`
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
 settings:         ${describeSettings(await config(), names, [...choicesOf(await bundledBook()), ...choicesOf((await indexedCustom()).quotes)])}
-grid:             ${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)
+grid:             ${size.cols}x${size.rows} (${size.source})
 canvas file:      ${BRANDING}
 rotation service: ${unit.stdout.toString().trim() || "not installed"}`);
   return 0;
@@ -1195,7 +1296,7 @@ async function main(): Promise<number> {
     case "show": {
       const cols = flag("cols") ?? (process.stdout.columns || undefined);
       const rows = flag("rows") ?? (process.stdout.rows || undefined);
-      console.log(await render({ cols: cols ?? 92, rows: rows ?? 25 }, false));
+      console.log((await render({ cols: cols ?? 92, rows: rows ?? 25 })).body);
       return 0;
     }
     case "on":
@@ -1234,8 +1335,9 @@ async function main(): Promise<number> {
       } else if (!(await writeBranding())) return 1;
       {
         const code = await launchScreensaver();
-        await waitForLiveGrid();
-        if (!(await writeBranding())) return 1;
+        const live = await waitForLiveGrid();
+        if (!(await ownsBranding())) { standAside(); return 1; }
+        if (live && !(await reflowQuote(live))) return 1;
         return code;
       }
     case "daemon":

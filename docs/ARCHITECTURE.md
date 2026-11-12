@@ -10,10 +10,12 @@ Omarchy owns saver launch, effects, dismissal and locking. Omastoic only writes
 `setup --on-first`; subsequent loads refresh plumbing but respect the source
 toggle. Setup preflights dependencies, the menu document and artifact conflicts.
 Only after all systemctl calls and activation succeed is `state/omastoic/installed`
-written. Failure disables the units, restores owned branding, and leaves owned
-plumbing available for retry/uninstall. A content fingerprint of code, data,
-art and manifest restarts a selected daemon after updates, even if unit text
-has not changed.
+written. If setup fails after this invocation activated the Stoics, it rolls
+back that toggle, the rotation service, and owned branding. A failed refresh
+leaves an existing selection, canvas, and displacement records in place. Owned
+plumbing stays available for retry and uninstall. A content fingerprint of
+code, data, art and manifest restarts a selected daemon after updates, even if
+unit text has not changed.
 
 A kernel `flock` on a persistent file in XDG state serializes setup, config,
 toggle, branding writers and cleanup. The daemon locks each rotation, not its
@@ -59,17 +61,22 @@ The streaming UTF-8 decoder retains fragmented records; record and queue caps
 force reconnect/reconciliation rather than unbounded memory growth.
 
 There is no periodic rotation timer while no saver windows are open. The
-configurable timer defaults to 60 seconds; another monitor opening does not
-interrupt a quote already being read. Each rotation reads `config.json` and
+configurable timer defaults to 60 seconds; opening another monitor does not
+advance the quote or restart its remaining display time. When any open
+screensaver's actual character grid becomes known or changes, including a
+resize that does not open or close a window, the same quote is fitted to the
+smallest of those grids. Grids come from the screensaver terminals. An 80×24
+mapping placeholder is not a measured grid. Until a real grid is known, the
+canvas uses a fixed 92×24 size. Each rotation reads `config.json` and
 `quotes.tsv`. Omitting `quotes` keeps every bundled line for the selected
 authors. A per-author id list keeps only those bundled lines. Custom lines
 in `quotes.tsv` stay in rotation with that list until their checkbox is
 cleared. That file and `config.json` live in the user
 config directory, outside the plugin checkout, so a plugin update does not
 replace them. When a filter matches nothing, rotation uses
-the fallback in the README settings section. PTY/monitor sizing is shared
-across outputs, with quote-only fallback. The host rereads branding between
-effects, so file cadence and visible effect cadence are distinct.
+the fallback in the README settings section. The live PTY grid is shared
+across saver outputs, with quote-only fallback. The host rereads branding
+between effects, so file cadence and visible effect cadence are distinct.
 
 `show --cols … --rows …` is a non-mutating text export. `preview` is deliberately
 mutating: it selects the source and launches Omarchy's saver. Tests stub that
