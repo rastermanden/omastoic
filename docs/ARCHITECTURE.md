@@ -1,8 +1,30 @@
-# Terminal-backend lifecycle
+# Screensaver lifecycle
 
-This is the maintained terminal/ttfx implementation, not a native renderer port.
 Omarchy owns saver launch, effects, dismissal and locking. Omastoic only writes
-`omarchy/branding/screensaver.txt` under XDG config.
+`omarchy/branding/screensaver.txt` under XDG config (on a normal Omarchy
+install that is `~/.config/omarchy/branding/screensaver.txt`, which is also the
+path the native binary reads when it is not given `--input`).
+
+Two backends share that file:
+
+- **Native.** `omarchy-launch-screensaver` execs
+  `/usr/lib/omarchy-screensaver/omarchy-screensaver`. The process reads its
+  input once. Idle and the System menu pass no arguments, so they cannot be
+  given `--input` without replacing Omarchy's launcher. The daemon therefore
+  leaves the next quote in the branding file before a start, and writes
+  another when that process exits. `omastoic preview` is the one launch
+  Omastoic performs itself: it passes `force --input <branding>` and detaches,
+  because the binary runs until a key, click, scroll or mouse movement.
+  A missing binary is reported as an install hint
+  (`omarchy pkg add omarchy-screensaver`) rather than the shell's `exec` error.
+- **Terminal/ttfx.** Older Omarchy rereads the branding file between effects.
+  The daemon subscribes to Hyprland window events and swaps the quote on the
+  configured interval while a screensaver window is open. `ttfx` is required
+  only for this backend.
+
+Setup accepts whichever backend the launcher script and `ttfx` indicate.
+A launcher that references `/usr/lib/omarchy-screensaver/` is native even if
+`ttfx` is still installed. Neither backend shadows `omarchy-launch-screensaver`.
 
 ## Setup and ownership
 
@@ -53,25 +75,36 @@ own atomic branding writes as external replacement.
 
 ## Rotation
 
-The daemon subscribes to the Hyprland UNIX stream **before** taking a clients
-snapshot, then replays buffered events. Reconnect replaces stale window state.
-The streaming UTF-8 decoder retains fragmented records; record and queue caps
-force reconnect/reconciliation rather than unbounded memory growth.
+Each rotation reads `config.json` and `quotes.tsv`. Omitting `quotes` keeps
+every bundled line for the selected authors. A per-author id list keeps only
+those bundled lines. Custom lines in `quotes.tsv` stay in rotation with that
+list until their checkbox is cleared. That file and `config.json` live in the
+user config directory, outside the plugin checkout, so a plugin update does
+not replace them. When a filter matches nothing, rotation uses the fallback
+in the README settings section. The canvas grid is the smallest measured
+terminal, or, with no terminal, the smallest monitor at the screensaver cell.
+Quote-only layout is the fallback when a portrait does not fit.
 
-There is no periodic rotation timer while no saver windows are open. The
-configurable timer defaults to 60 seconds; another monitor opening does not
-interrupt a quote already being read. Each rotation reads `config.json` and
-`quotes.tsv`. Omitting `quotes` keeps every bundled line for the selected
-authors. A per-author id list keeps only those bundled lines. Custom lines
-in `quotes.tsv` stay in rotation with that list until their checkbox is
-cleared. That file and `config.json` live in the user
-config directory, outside the plugin checkout, so a plugin update does not
-replace them. When a filter matches nothing, rotation uses
-the fallback in the README settings section. PTY/monitor sizing is shared
-across outputs, with quote-only fallback. The host rereads branding between
-effects, so file cadence and visible effect cadence are distinct.
+On the **terminal** backend the daemon subscribes to the Hyprland UNIX stream
+**before** taking a clients snapshot, then replays buffered events. Reconnect
+replaces stale window state. The streaming UTF-8 decoder retains fragmented
+records; record and queue caps force reconnect/reconciliation rather than
+unbounded memory growth. There is no periodic rotation timer while no saver
+windows are open. The configurable timer defaults to 60 seconds; another
+monitor opening does not interrupt a quote already being read. The host
+rereads branding between effects, so file cadence and visible effect cadence
+are distinct.
+
+On the **native** backend there is no terminal and no window event. The
+daemon polls for a process whose argv is the screensaver binary. It does not
+rewrite the branding file while that process is running: the overlay already
+has its text. When the process exits, and the file is still the quote that
+was showing, the daemon writes the next one. `omastoic next` during a running
+overlay is left in place for the following start. The stored interval is not
+applied; the native program cannot reread the file.
 
 `show --cols … --rows …` is a non-mutating text export. `preview` is deliberately
 mutating: it selects the source and launches Omarchy's saver. Tests stub that
 external boundary; neither command is used to preview on the maintainer's real
-desktop during automated validation.
+desktop during automated validation. A checkout with the native package
+installed can also render a canvas through `--headless`.

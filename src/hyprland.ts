@@ -207,6 +207,11 @@ export function isScreensaverArgv(argv: string[]): boolean {
   return argv.some((arg) => arg === "omarchy-screensaver" || arg.endsWith("/omarchy-screensaver"));
 }
 
+/** The native binary's path ends in /omarchy-screensaver. The launcher script does not. */
+export function screensaverIsRunning(): boolean {
+  return pidsWhere(isScreensaverArgv).length > 0;
+}
+
 export function isTtfxArgv(argv: string[]): boolean {
   return (argv[0]?.split("/").pop() ?? "") === "ttfx";
 }

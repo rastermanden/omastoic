@@ -10,7 +10,22 @@ plugin_id="io.github.rastermanden.omastoic"
 plugin_home="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
 target="$plugin_home/$plugin_id"
 
-for dependency in bun omarchy ttfx systemctl jq python3 rsync; do
+launcher=$(command -v omarchy-launch-screensaver || true)
+if [[ -z $launcher ]]; then
+  echo "omarchy-launch-screensaver is required; nothing was copied." >&2
+  exit 1
+fi
+# Dev-channel Omarchy execs the native binary and does not need ttfx.
+# Stable still launches ttfx from a terminal, and that backend does.
+native=0
+if [[ -f $launcher ]] && grep -q '/usr/lib/omarchy-screensaver/' "$launcher"; then
+  native=1
+fi
+dependencies=(bun omarchy systemctl jq python3 rsync)
+if [[ $native -eq 0 ]]; then
+  dependencies+=(ttfx)
+fi
+for dependency in "${dependencies[@]}"; do
   command -v "$dependency" >/dev/null 2>&1 || { echo "$dependency is required; nothing was copied." >&2; exit 1; }
 done
 if [[ -L $target || -e $target/.git || $root == "$target" ]]; then
