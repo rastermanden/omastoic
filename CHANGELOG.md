@@ -8,6 +8,20 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 2.3.1 - 2026-11-19
+
+### Fixed
+
+- Disabling or removing Omastoic restores the screensaver only when that file
+  is still the canvas we wrote. A newer file from Omarchy stays put, and
+  `screensaver.txt.pre-omastoic` stays with it. Reported by HANCORE-linux on
+  marketplace review 15412.
+- Saving settings or adding a quote no longer replaces `config.json` or
+  `quotes.tsv` when that file is already there but cannot be read. The command
+  fails and the file is left unchanged.
+- Setup and cleanup write through a symlink for the screensaver file and the
+  menu file. The link is not replaced with a regular file.
+
 ## 2.3.0 - 2026-11-19
 
 ### Changed

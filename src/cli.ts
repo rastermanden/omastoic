@@ -17,7 +17,7 @@
 // ran `omarchy branding screensaver image`, say — it stands aside instead of
 // clobbering the new art.
 
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
@@ -96,16 +96,33 @@ async function indexedCustom(): Promise<{ quotes: BundledQuote[]; readable: bool
   }
 }
 
-async function config(): Promise<Settings> {
-  const file = Bun.file(SETTINGS_FILE);
-  if (!(await file.exists())) return {};
+function readExisting(path: string): { missing: true } | { missing: false; text: string } {
+  try { lstatSync(path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { missing: true };
+    throw new Error(`could not read ${path}: ${(error as Error).message}`);
+  }
+  try { return { missing: false, text: readFileSync(path, "utf8") }; }
+  catch (error) { throw new Error(`could not read ${path}: ${(error as Error).message}`); }
+}
+
+/** Settings for a write. Throws when an existing file cannot be read whole. */
+async function loadSettings(): Promise<Settings> {
+  const read = readExisting(SETTINGS_FILE);
+  if (read.missing) return {};
+  if (Buffer.byteLength(read.text) > 65536) throw new Error(`refusing to replace unreadable ${SETTINGS_FILE}`);
+  let raw: unknown;
+  try { raw = JSON.parse(read.text); }
+  catch { throw new Error(`refusing to replace unreadable ${SETTINGS_FILE}`); }
   const roster = [...(await authors()).keys()];
   const custom = await indexedCustom();
   const catalog = [...choicesOf(await bundledBook()), ...choicesOf(custom.quotes)];
-  try {
-    if (file.size > 65536) throw new Error("config exceeds 64 KiB");
-    return normalizeSettings(await file.json(), roster, catalog, custom.readable);
-  } catch {
+  return normalizeSettings(raw, roster, catalog, custom.readable);
+}
+
+async function config(): Promise<Settings> {
+  try { return await loadSettings(); }
+  catch {
     console.error(`omastoic: ignoring unreadable ${SETTINGS_FILE}`);
     return {};
   }
@@ -278,18 +295,30 @@ async function rememberWrite(canvas: string): Promise<void> {
 
 /** True when the branding file still holds exactly what omastoic last put there. */
 async function ownsBranding(): Promise<boolean> {
-  const current = Bun.file(BRANDING);
-  if (!(await current.exists())) return true; // nothing to trample
+  return brandingStillOurs();
+}
 
-  const written = Bun.file(WRITTEN);
-  if (!(await written.exists())) {
-    return false; // A backup's mere existence is not proof of ownership.
+/**
+ * Ownership for a restore. A missing file is ours only when we recorded that
+ * the slot was empty. A newer file, a deleted canvas, or an unreadable path
+ * is not ours: leave it and keep the backup.
+ */
+function brandingStillOurs(): boolean {
+  let expected: string;
+  try { expected = readFileSync(WRITTEN, "utf8").trim(); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
-
+  if (!expected) return false;
   try {
-    return digest(await current.text()) === (await written.text()).trim();
-  } catch {
-    return false;
+    const stat = lstatSync(BRANDING);
+    if (!stat.isFile() && !stat.isSymbolicLink()) return false;
+    return digest(readFileSync(BRANDING, "utf8")) === expected;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    const kind = existsSync(DISPLACED) ? readFileSync(DISPLACED, "utf8").trim() : "";
+    return kind === "absent";
   }
 }
 
@@ -338,15 +367,35 @@ async function preserveDisplaced(): Promise<void> {
 
 async function restoreSlot(): Promise<void> {
   if (!(await Bun.file(DISPLACED).exists()) && !(await Bun.file(WRITTEN).exists())) return;
+  if (!brandingStillOurs()) {
+    console.error("omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup");
+    return;
+  }
   const backup = Bun.file(BACKUP);
   const kind = await Bun.file(DISPLACED).text().catch(() => "legacy");
-  if (kind === "absent") rmSync(BRANDING, { force: true });
+  if (!brandingStillOurs()) {
+    console.error("omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup");
+    return;
+  }
+  if (kind === "absent") discardBranding();
   else if (await backup.exists() && owned.owns("backup", BACKUP)) atomicWrite(BRANDING, await backup.text());
   else if (kind === "file") throw new Error(`displaced branding backup changed or is missing: ${BACKUP}; restore the backup before retrying off/uninstall`);
   else if (kind === "legacy" && await Bun.file(LOGO).exists()) atomicWrite(BRANDING, await Bun.file(LOGO).text());
   owned.remove("backup", BACKUP);
   rmSync(DISPLACED, { force: true });
   rmSync(WRITTEN, { force: true });
+}
+
+/** Remove the canvas we wrote without unlinking a symlink the user put at this path. */
+function discardBranding(): void {
+  let stat;
+  try { stat = lstatSync(BRANDING); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+  if (stat.isSymbolicLink()) {
+    rmSync(realpathSync(BRANDING), { force: true });
+    return;
+  }
+  rmSync(BRANDING, { force: true });
 }
 
 async function stopDaemon(): Promise<void> {
@@ -380,10 +429,9 @@ async function on(): Promise<number> {
 }
 
 async function off(): Promise<number> {
-  const ours = await ownsBranding();
   setEnabled(false);
   await stopDaemon();
-  if (ours) await restoreSlot();
+  await restoreSlot();
   console.log("→ the Stoics have stood down");
   notify("Screensaver: the Stoics off");
   return 0;
@@ -625,7 +673,8 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
   for (const [id, path] of completionFiles()) owned.remove(id, path);
   await removePrune();
 
-  owned.remove("backup", BACKUP);
+  // restoreSlot already removed the backup when it put the old art back.
+  // If the branding file changed, that backup has to stay.
   await Bun.file(INSTALLED).delete().catch(() => {});
 
   if (opts.purge) {
@@ -913,7 +962,14 @@ async function appendQuotes(lines: string[], quiet = false): Promise<number> {
     parsed.push(rows[0]);
   }
   const path = join(USER_CONFIG, "quotes.tsv");
-  const existing = await Bun.file(path).text().catch(() => "");
+  let existing: string;
+  try {
+    const read = readExisting(path);
+    existing = read.missing ? "" : read.text;
+  } catch (error) {
+    console.error(`omastoic: ${(error as Error).message}`);
+    return 1;
+  }
   let have: Quote[] = [];
   try {
     have = existing ? parseQuotes(existing) : [];
@@ -985,7 +1041,12 @@ async function configure(rest: string[]): Promise<number> {
   const bundled = await bundledBook();
   const customBook = await indexedCustom();
   let catalog = [...choicesOf(bundled), ...choicesOf(customBook.quotes)];
-  const current = await config();
+  let current: Settings;
+  try { current = await loadSettings(); }
+  catch (error) {
+    console.error(`omastoic: ${(error as Error).message}`);
+    return 1;
+  }
   const authorsFlag = stringFlag(rest, "authors");
   const intervalFlag = stringFlag(rest, "interval");
   const quoteFlags = flagValues(rest, "quotes");
@@ -1194,7 +1255,12 @@ async function panelApply(raw: string): Promise<number> {
   const bundled = await bundledBook();
   const custom = await indexedCustom();
   let catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
-  let next: Settings = { ...(await config()) };
+  let next: Settings;
+  try { next = { ...(await loadSettings()) }; }
+  catch (error) {
+    console.error(`omastoic: ${(error as Error).message}`);
+    return 1;
+  }
   let settingsTouched = false;
 
   if (Object.hasOwn(value, "interval")) {
