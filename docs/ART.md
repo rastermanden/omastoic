@@ -93,9 +93,11 @@ A new source also wants a line in [CREDITS.md](../CREDITS.md) matching its
 bun scripts/make-preview.ts
 ```
 
-Rebuilds `preview.png`, and the `preview.gif` and `demo.mp4` that go on the
-release, from the committed art — one plate per Stoic, each with that Stoic's
-shortest quote, so the same art always gives the same preview. Frames are real
+The committed `preview.png` is a live native capture, described in the README.
+This script overwrites that still, and builds the `preview.gif` and `demo.mp4`
+that go on a release, from the committed art — one plate per Stoic, each with
+that Stoic's shortest quote, so the same art always gives the same generated
+preview. Run it only when you mean to replace the live still. Frames are real
 canvases, laid out by the same `compose()` the screensaver writes and on the
 same 111×30 grid; the only liberty is the gradient they are multiplied through.
 `--mono` leaves them white, `--still <slug>` chooses the Stoic on the still.
@@ -104,5 +106,5 @@ The gif and the mp4 are gitignored and belong on the release, so they are not
 cloned with the plugin. Attach them when you tag:
 
 ```bash
-gh release create v2.2.0 preview.gif demo.mp4 --title "Omastoic 2.2.0" --latest
+gh release create v2.3.0 preview.gif demo.mp4 --title "Omastoic 2.3.0" --latest
 ```

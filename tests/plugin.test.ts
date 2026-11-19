@@ -170,6 +170,29 @@ test("uninstall preserves replaced completions, units, backups and foreign symli
   } finally { s.cleanup(); }
 });
 
+test("uninstall keeps quotes and drops runtime state except the lock file", async () => {
+  const s = sandbox();
+  const quotes = join(s.config, "omastoic/quotes.tsv");
+  const settings = join(s.config, "omastoic/config.json");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(quotes, "marcus\tNote\tA line that must survive uninstall.\n");
+    s.put(settings, JSON.stringify({ interval: 90 }));
+    s.put(join(s.state, "cell.json"), "{}\n");
+    s.put(join(s.state, "launch.err"), "err\n");
+    s.put(join(s.state, "recent.json"), "[]\n");
+    expect(existsSync(join(s.home, ".local/lib/omastoic/prune.sh"))).toBe(true);
+    expect((await s.cli(["uninstall"])).code).toBe(0);
+    expect(readFileSync(quotes, "utf8")).toContain("A line that must survive uninstall.");
+    expect(JSON.parse(readFileSync(settings, "utf8")).interval).toBe(90);
+    for (const name of ["cell.json", "launch.err", "recent.json", "installed", "owned"]) {
+      expect(existsSync(join(s.state, name))).toBe(false);
+    }
+    expect(existsSync(join(s.state, "transaction.flock"))).toBe(true);
+    expect(existsSync(join(s.home, ".local/lib/omastoic"))).toBe(false);
+  } finally { s.cleanup(); }
+});
+
 test("concurrent setup and quote writers serialize and leave valid owned state", async () => {
   const s = sandbox();
   try {

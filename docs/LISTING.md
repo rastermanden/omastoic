@@ -73,10 +73,12 @@ slot Omarchy already reads.
 
 ## Artwork
 
-Listing still: [preview.png](../preview.png). README motion and the longer clip
-are [release assets](https://github.com/rastermanden/omastoic/releases/latest)
-(`preview.gif`, `demo.mp4`) so `omarchy plugin add` does not clone ~4.5MB of
-video.
+Listing still: [preview.png](../preview.png). It is a live colorshift capture
+from 19 November 2026 on Omarchy dev `d54cde78f` (x86_64),
+`omarchy-screensaver` 1.3.1, Tokyo Night, plugin `eae779c`: Marcus Aurelius,
+Meditations VII.34. Further stills are in
+[docs/screenshots](screenshots). Older `preview.gif` and `demo.mp4` on the
+latest GitHub release are generated plates, not these captures.
 
 ## Disclosures
 

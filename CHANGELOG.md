@@ -12,12 +12,20 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Uninstall and host removal delete runtime files under
+  `~/.local/state/omastoic` (`cell.json`, `launch.err`, `recent.json`,
+  `owned/`) and an empty `~/.local/lib/omastoic`. `~/.config/omastoic` stays
+  unless `omastoic uninstall --purge`. `transaction.flock` can remain: the
+  uninstall process holds that lock until it exits.
+- The listing still is a live native colorshift capture (Marcus Aurelius,
+  Meditations VII.34) from Omarchy dev `d54cde78f`, `omarchy-screensaver`
+  1.3.1, Tokyo Night, plugin `eae779c`. It replaces the generated plate.
 - Plugin installs no longer include vendored agent skills. `omarchy plugin add`
   clones this tree, so `.agents/` and `LOOM.md` were part of every install.
   Keep build-omarchy-plugins outside the checkout. `./install.sh` still skips a
   local `.agents/` directory.
 - The native Omarchy screensaver is supported. `omarchy-launch-screensaver`
-  on the dev channel execs `omarchy-screensaver`, which reads its text once
+  on the dev channel execs `/usr/lib/omarchy-screensaver/omarchy-screensaver`, which reads its text once
   at start. Omastoic keeps the next quote in the branding file, passes that
   file with `--input` from `omastoic preview`, and writes a different quote
   when the saver process exits. Setup no longer refuses the native launcher,
@@ -83,13 +91,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   14, 23 and 42. They are appended after the existing rows, so `q01`–`q64` keep
   their meaning for stored selections.
 
+### Fixed
+
+- `omastoic <command> --help` and `-h` print help and do not run the command.
+  `omastoic uninstall --help` no longer uninstalls.
+
 ### Compatibility
 
-- Native screensaver checked with `omarchy-screensaver` 1.3.1. The terminal
-  saver was audited on Omarchy 4.5.0rc3 against host
-  `5eb922f137422ff32a90869a9ba47525a428792d`.
-- The automated suite is sandboxed. A live desktop install, update, and removal
-  were not run for these notes.
+- A live upgrade from main `2c9a0e9` to this change, CLI removal, and a fresh
+  `omarchy plugin add` passed on Omarchy dev `d54cde78f` (x86_64) with
+  `omarchy-screensaver` 1.3.1. Quotes and settings in `~/.config/omastoic`
+  survived the upgrade and the removal.
+- The terminal saver was audited on Omarchy 4.5.0rc3 against host
+  `5eb922f137422ff32a90869a9ba47525a428792d`. The automated suite stays sandboxed.
 
 ## 2.2.0 - 2026-11-04
 

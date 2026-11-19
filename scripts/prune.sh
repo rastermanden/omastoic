@@ -110,5 +110,10 @@ remove_owned unit "$UNIT"
 remove_owned prune-unit "$PRUNE_UNIT"
 remove_owned prune-path "$PRUNE_PATH"
 remove_owned prune-script "$HOME/.local/lib/omastoic/prune.sh"
+rmdir "$HOME/.local/lib/omastoic" 2>/dev/null || true
 rm -f "$STATE/installed" "$STATE/launcher.target"
+# Drop runtime state. Leave transaction.flock: this script holds it on fd 9.
+if [[ -d $STATE ]]; then
+  find "$STATE" -mindepth 1 -maxdepth 1 ! -name transaction.flock -exec rm -rf -- {} +
+fi
 systemctl --user daemon-reload
