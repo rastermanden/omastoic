@@ -179,9 +179,11 @@ omastoic uninstall
 omarchy plugin remove io.github.rastermanden.omastoic
 ```
 
-Both stop and disable the user service, restore branding when it is still
-ours, and remove the menu block, the `omastoic` link, completions, user units,
-and the prune script. `omastoic uninstall` also asks Omarchy to remove the
+Both stop and disable the user service, restore branding when the file is
+still the canvas we wrote, and remove the menu block, the `omastoic` link,
+completions, user units, and the prune script. If Omarchy wrote a newer
+screensaver file after that, we leave the new file in place and keep
+`screensaver.txt.pre-omastoic`. `omastoic uninstall` also asks Omarchy to remove the
 plugin. Removing it from Omarchy runs the same cleanup.
 
 Kept on purpose: `~/.config/omastoic/` (`config.json` and `quotes.tsv`).

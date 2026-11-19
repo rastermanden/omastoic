@@ -57,24 +57,81 @@ BACKUP="$BRANDING.pre-omastoic"
 # Fail loudly and retain units/records if systemd cannot stop the service.
 if owns unit "$UNIT"; then systemctl --user disable --now omastoic.service; fi
 if command -v omarchy-toggle >/dev/null 2>&1; then omarchy-toggle omastoic off; fi
-if [[ -f $STATE/written.sha && -f $BRANDING ]]; then
-  current=$(sha256sum "$BRANDING"); current=${current%% *}
+
+still_ours() {
+  [[ -f $STATE/written.sha && -e $BRANDING ]] || return 1
+  local current expected
+  current=$(sha256sum -- "$BRANDING"); current=${current%% *}
   expected=$(< "$STATE/written.sha")
-  if [[ $current == "$expected" ]]; then
-    if [[ -f $STATE/displaced.kind && $(< "$STATE/displaced.kind") == absent ]]; then
-      rm -f "$BRANDING"
-    elif owns backup "$BACKUP"; then
-      temp=$(mktemp "$BRANDING.omastoic-prune-XXXXXXXX")
-      cp "$BACKUP" "$temp"
-      mv "$temp" "$BRANDING"
-    elif [[ -f $STATE/displaced.kind && $(< "$STATE/displaced.kind") == file ]]; then
-      echo "omastoic: displaced branding backup changed or is missing: $BACKUP; restore it and retry cleanup" >&2
-      exit 1
+  [[ $current == "$expected" ]]
+}
+# A symlink stays a symlink. The bytes land on its target.
+commit_branding() {
+  local payload=$1 final=$BRANDING
+  if [[ -L $BRANDING ]]; then
+    final=$(readlink -f -- "$BRANDING") || {
+      echo "omastoic: screensaver symlink is dangling — leaving it and keeping the backup" >&2
+      return 1
+    }
+    if [[ ! -f $final || -L $final ]]; then
+      echo "omastoic: screensaver symlink does not point at a regular file — leaving it and keeping the backup" >&2
+      return 1
     fi
+  elif [[ -e $BRANDING && ! -f $BRANDING ]]; then
+    echo "omastoic: screensaver path is not a regular file — leaving it and keeping the backup" >&2
+    return 1
+  fi
+  if ! still_ours; then
+    echo "omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup" >&2
+    return 1
+  fi
+  local tmp
+  tmp=$(mktemp "${final}.omastoic-XXXXXXXX")
+  cp -- "$payload" "$tmp"
+  if ! still_ours; then
+    rm -f -- "$tmp"
+    echo "omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup" >&2
+    return 1
+  fi
+  mv -- "$tmp" "$final"
+}
+clear_branding() {
+  if ! still_ours; then
+    echo "omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup" >&2
+    return 1
+  fi
+  if [[ -L $BRANDING ]]; then
+    rm -f -- "$(readlink -f -- "$BRANDING")"
+  else
+    rm -f -- "$BRANDING"
+  fi
+}
+
+restored=0
+if [[ -f $STATE/written.sha ]]; then
+  kind=""
+  [[ -f $STATE/displaced.kind ]] && kind=$(< "$STATE/displaced.kind")
+  if [[ $kind == absent && ! -e $BRANDING ]]; then
+    restored=1
+  elif still_ours; then
+    if [[ $kind == absent ]]; then
+      clear_branding && restored=1
+    elif owns backup "$BACKUP"; then
+      commit_branding "$BACKUP" && restored=1
+    elif [[ $kind == file ]]; then
+      echo "omastoic: displaced branding backup changed or is missing: $BACKUP; restore the backup before retrying off/uninstall" >&2
+      exit 1
+    elif [[ -f ${OMARCHY_PATH:-/usr/share/omarchy}/logo.txt ]]; then
+      commit_branding "${OMARCHY_PATH:-/usr/share/omarchy}/logo.txt" && restored=1
+    fi
+  else
+    echo "omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup" >&2
   fi
 fi
-remove_owned backup "$BACKUP"
-rm -f "$STATE/written.sha" "$STATE/displaced.kind"
+if [[ $restored == 1 ]]; then
+  remove_owned backup "$BACKUP"
+  rm -f "$STATE/written.sha" "$STATE/displaced.kind"
+fi
 # Disable keeps plumbing for re-enable; remove tears it down entirely.
 if installed; then exit 0; fi
 
@@ -86,6 +143,9 @@ if [[ -f $MENU ]]; then
   python3 - "$MENU" <<'PY'
 import json, os, pathlib, re, sys, tempfile
 path = pathlib.Path(sys.argv[1])
+dest = path.resolve(strict=True) if path.is_symlink() else path
+if path.is_symlink() and (not dest.is_file() or dest.is_symlink()):
+    raise SystemExit(f"omastoic: refusing to replace symlink {path}")
 text = path.read_text()
 nxt = re.sub(r"\n  // >>> omastoic:begin v2[^\n]*\n[\s\S]*?  // <<< omastoic:end\n", "", text, count=1)
 if nxt == text:
@@ -93,11 +153,11 @@ if nxt == text:
 if nxt != text:
     stripped = re.sub(r"^\s*//[^\n]*(\n|$)", "", nxt, flags=re.M)
     if stripped.strip(): json.loads(re.sub(r",(\s*[}\]])", r"\1", stripped))
-    fd, temp = tempfile.mkstemp(prefix=".omastoic-menu-", dir=path.parent)
+    fd, temp = tempfile.mkstemp(prefix=".omastoic-menu-", dir=dest.parent)
     try:
         with os.fdopen(fd, 'w') as stream: stream.write(nxt)
         if path.read_text() != text: raise RuntimeError('menu changed during cleanup; retry')
-        os.replace(temp, path)
+        os.replace(temp, dest)
     finally:
         if os.path.exists(temp): os.unlink(temp)
 PY
