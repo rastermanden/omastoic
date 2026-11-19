@@ -8,6 +8,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 2.3.2 - 2026-11-19
+
+### Fixed
+
+- Turning the Stoics off checks the screensaver file again immediately before
+  replacing it. A change made while the backup is read stays on screen, and
+  `screensaver.txt.pre-omastoic` is kept. Reported by HANCORE-linux on
+  marketplace review 15412.
+- Automatic cleanup no longer installs a partial copy of that backup. The copy
+  is checked and flushed, then renamed onto the real file. The backup is
+  removed only after that rename. A failed copy leaves both files untouched
+  and returns an error.
+
 ## 2.3.1 - 2026-11-19
 
 ### Fixed

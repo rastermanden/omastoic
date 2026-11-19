@@ -86,14 +86,43 @@ commit_branding() {
     return 1
   fi
   local tmp
-  tmp=$(mktemp "${final}.omastoic-XXXXXXXX")
-  cp -- "$payload" "$tmp"
+  tmp=$(mktemp "${final}.omastoic-XXXXXXXX") || return 2
+  # set -e does not apply while this function runs from `if commit_branding`.
+  if ! cp -- "$payload" "$tmp"; then
+    rm -f -- "$tmp"
+    echo "omastoic: could not copy the screensaver backup — leaving the active file and the backup" >&2
+    return 2
+  fi
+  local src_size tmp_size
+  src_size=$(stat -c '%s' -- "$payload") || { rm -f -- "$tmp"; return 2; }
+  tmp_size=$(stat -c '%s' -- "$tmp") || { rm -f -- "$tmp"; return 2; }
+  if [[ $src_size != "$tmp_size" ]] || ! cmp -s -- "$payload" "$tmp"; then
+    rm -f -- "$tmp"
+    echo "omastoic: screensaver backup copy was incomplete — leaving the active file and the backup" >&2
+    return 2
+  fi
+  if ! python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_RDONLY); os.fsync(fd); os.close(fd)' "$tmp"; then
+    rm -f -- "$tmp"
+    echo "omastoic: could not commit the screensaver backup copy — leaving the active file and the backup" >&2
+    return 2
+  fi
+  if [[ -n ${OMASTOIC_BEFORE_BRANDING_REPLACE:-} ]]; then
+    if ! bash -c "$OMASTOIC_BEFORE_BRANDING_REPLACE"; then
+      rm -f -- "$tmp"
+      echo "omastoic: could not finish the screensaver restore — leaving the active file and the backup" >&2
+      return 2
+    fi
+  fi
   if ! still_ours; then
     rm -f -- "$tmp"
     echo "omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup" >&2
     return 1
   fi
-  mv -- "$tmp" "$final"
+  if ! mv -- "$tmp" "$final"; then
+    rm -f -- "$tmp"
+    echo "omastoic: could not replace the screensaver file — leaving the active file and the backup" >&2
+    return 2
+  fi
 }
 clear_branding() {
   if ! still_ours; then
@@ -117,12 +146,22 @@ if [[ -f $STATE/written.sha ]]; then
     if [[ $kind == absent ]]; then
       clear_branding && restored=1
     elif owns backup "$BACKUP"; then
-      commit_branding "$BACKUP" && restored=1
+      if commit_branding "$BACKUP"; then
+        restored=1
+      else
+        rc=$?
+        if [[ $rc -ne 1 ]]; then exit "$rc"; fi
+      fi
     elif [[ $kind == file ]]; then
       echo "omastoic: displaced branding backup changed or is missing: $BACKUP; restore the backup before retrying off/uninstall" >&2
       exit 1
     elif [[ -f ${OMARCHY_PATH:-/usr/share/omarchy}/logo.txt ]]; then
-      commit_branding "${OMARCHY_PATH:-/usr/share/omarchy}/logo.txt" && restored=1
+      if commit_branding "${OMARCHY_PATH:-/usr/share/omarchy}/logo.txt"; then
+        restored=1
+      else
+        rc=$?
+        if [[ $rc -ne 1 ]]; then exit "$rc"; fi
+      fi
     fi
   else
     echo "omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup" >&2

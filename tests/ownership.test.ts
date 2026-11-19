@@ -58,6 +58,69 @@ test("a failed read does not replace config.json or quotes.tsv", async () => {
   }
 });
 
+test("turning off does not restore over a screensaver change made while the backup is read", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const backup = `${branding}.pre-omastoic`;
+  s.put(branding, "art before the Stoics\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const kept = readFileSync(backup, "utf8");
+    const canvas = readFileSync(branding, "utf8");
+    const result = await s.cli(["off"], {
+      OMASTOIC_BEFORE_BRANDING_REPLACE: `printf '%s' 'newer art from Omarchy\n' > ${JSON.stringify(branding)}`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stderr).toContain("leaving it in place");
+    expect(readFileSync(branding, "utf8")).toBe("newer art from Omarchy\n");
+    expect(readFileSync(branding, "utf8")).not.toBe(canvas);
+    expect(readFileSync(backup, "utf8")).toBe(kept);
+    expect(readFileSync(join(s.state, "written.sha"), "utf8").length).toBeGreaterThan(0);
+  } finally { s.cleanup(); }
+});
+
+test("cleanup does not restore over a screensaver change made while the backup is copied", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const backup = `${branding}.pre-omastoic`;
+  s.put(branding, "art before the Stoics\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const kept = readFileSync(backup, "utf8");
+    const canvas = readFileSync(branding, "utf8");
+    s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+    const result = await s.prune({
+      OMASTOIC_BEFORE_BRANDING_REPLACE: `printf '%s' 'newer art from Omarchy\n' > ${JSON.stringify(branding)}`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stderr).toContain("leaving it in place");
+    expect(readFileSync(branding, "utf8")).toBe("newer art from Omarchy\n");
+    expect(readFileSync(branding, "utf8")).not.toBe(canvas);
+    expect(readFileSync(backup, "utf8")).toBe(kept);
+    expect(readFileSync(join(s.state, "written.sha"), "utf8").length).toBeGreaterThan(0);
+  } finally { s.cleanup(); }
+});
+
+test("cleanup does not publish a partial backup copy or delete the backup when copy fails", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const backup = `${branding}.pre-omastoic`;
+  s.put(branding, "art before the Stoics\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const kept = readFileSync(backup, "utf8");
+    const canvas = readFileSync(branding, "utf8");
+    s.stub("cp", "printf '%s' PARTIAL > \"${@: -1}\"; exit 1");
+    s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+    const result = await s.prune();
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("could not copy the screensaver backup");
+    expect(readFileSync(branding, "utf8")).toBe(canvas);
+    expect(readFileSync(branding, "utf8")).not.toContain("PARTIAL");
+    expect(readFileSync(backup, "utf8")).toBe(kept);
+  } finally { s.cleanup(); }
+});
+
 test("setup and cleanup keep branding and menu symlinks and write the target", async () => {
   const s = sandbox();
   const branding = join(s.config, "omarchy/branding/screensaver.txt");
