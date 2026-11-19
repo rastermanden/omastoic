@@ -8,11 +8,11 @@ repository, and release posts.
 | Field | Value |
 | --- | --- |
 | Name | Omastoic |
-| Category | Look & Feel |
+| Category | Appearance |
 | Short description | The Stoics on your Omarchy screensaver: braille portraits and cited quotes from Marcus Aurelius, Seneca, Epictetus and the founders of the school. |
 | Repository | <https://github.com/rastermanden/omastoic> |
 | License | MIT |
-| Tags | `screensaver`, `stoic`, `quotes`, `branding`, `bun` |
+| Tags | Quickshell, Hyprland |
 | Suggested GitHub topics | `omarchy`, `omarchy-plugin`, `screensaver`, `stoicism`, `bun` |
 
 ## Long description

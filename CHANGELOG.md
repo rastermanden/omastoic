@@ -8,6 +8,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 2.3.0 - 2026-11-19
+
 ### Changed
 
 - Plugin installs no longer include vendored agent skills. `omarchy plugin add`
@@ -80,6 +82,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   VI.54; Seneca *Letters* 5.5, 5.9, 24.19 and 28.1; Epictetus *Enchiridion* 6,
   14, 23 and 42. They are appended after the existing rows, so `q01`–`q64` keep
   their meaning for stored selections.
+
+### Compatibility
+
+- Native screensaver checked with `omarchy-screensaver` 1.3.1. The terminal
+  saver was audited on Omarchy 4.5.0rc3 against host
+  `5eb922f137422ff32a90869a9ba47525a428792d`.
+- The automated suite is sandboxed. A live desktop install, update, and removal
+  were not run for these notes.
 
 ## 2.2.0 - 2026-11-04
 

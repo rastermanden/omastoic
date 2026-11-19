@@ -252,3 +252,4 @@ they are not a claim that software can verify ancient authorship.
 
 MIT licensed code. Translation editions and artwork provenance:
 [CREDITS.md](CREDITS.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+Report a vulnerability privately: [SECURITY.md](SECURITY.md).
