@@ -1,6 +1,6 @@
 // Small local transactions shared by CLI commands and daemon writes.
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const digest = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -37,6 +37,54 @@ export function atomicWrite(path: string, text: string): void {
   } finally {
     rmSync(temp, { force: true });
   }
+}
+
+/**
+ * Replace `path` with `nextText` only if its current bytes still hash to
+ * `expectedDigest`. The temp file is in the target's directory (the symlink
+ * target, when `path` is a link). A mismatch or a short copy leaves `path`
+ * untouched and returns false or throws before any rename.
+ */
+export function replaceIfUnchanged(path: string, expectedDigest: string, nextText: string): boolean {
+  const matches = (): boolean => {
+    try { return digest(readFileSync(path, "utf8")) === expectedDigest; }
+    catch { return false; }
+  };
+  if (!matches()) return false;
+  const destination = writeDestination(path);
+  const temp = `${destination}.omastoic-${randomUUID()}`;
+  const bytes = Buffer.from(nextText, "utf8");
+  const fd = openSync(temp, "wx", 0o600);
+  try {
+    let offset = 0;
+    while (offset < bytes.length) {
+      const wrote = writeSync(fd, bytes, offset);
+      if (wrote <= 0) throw new Error("could not copy the screensaver backup");
+      offset += wrote;
+    }
+    fsyncSync(fd);
+  } catch (error) {
+    closeSync(fd);
+    rmSync(temp, { force: true });
+    throw error;
+  }
+  closeSync(fd);
+  const copied = readFileSync(temp);
+  if (!copied.equals(bytes)) {
+    rmSync(temp, { force: true });
+    throw new Error("screensaver backup copy was incomplete");
+  }
+  if (!matches()) {
+    rmSync(temp, { force: true });
+    return false;
+  }
+  try {
+    renameSync(temp, destination);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+  return true;
 }
 
 export async function locked<T>(state: string, action: () => Promise<T>): Promise<T> {

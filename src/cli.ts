@@ -18,7 +18,7 @@
 // clobbering the new art.
 
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
-import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
+import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
@@ -365,22 +365,55 @@ async function preserveDisplaced(): Promise<void> {
   atomicWrite(DISPLACED, "file");
 }
 
+function leaveChangedBranding(): void {
+  console.error("omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup");
+}
+
+/** Read the bytes to restore, then let a test change the live file before the swap. */
+function restorationText(source: string): string {
+  const text = readFileSync(source, "utf8");
+  const hook = process.env.OMASTOIC_BEFORE_BRANDING_REPLACE;
+  if (hook) {
+    const ran = Bun.spawnSync(["bash", "-c", hook], { env: process.env });
+    if (ran.exitCode !== 0) throw new Error("could not finish the screensaver restore");
+  }
+  return text;
+}
+
 async function restoreSlot(): Promise<void> {
   if (!(await Bun.file(DISPLACED).exists()) && !(await Bun.file(WRITTEN).exists())) return;
   if (!brandingStillOurs()) {
-    console.error("omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup");
+    leaveChangedBranding();
     return;
   }
-  const backup = Bun.file(BACKUP);
+  const expected = readFileSync(WRITTEN, "utf8").trim();
   const kind = await Bun.file(DISPLACED).text().catch(() => "legacy");
-  if (!brandingStillOurs()) {
-    console.error("omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup");
-    return;
+  let restored = false;
+  if (kind === "absent") {
+    if (!brandingStillOurs()) {
+      leaveChangedBranding();
+      return;
+    }
+    discardBranding();
+    restored = true;
+  } else if (existsSync(BACKUP) && owned.owns("backup", BACKUP)) {
+    const text = restorationText(BACKUP);
+    restored = replaceIfUnchanged(BRANDING, expected, text);
+    if (!restored) {
+      leaveChangedBranding();
+      return;
+    }
+  } else if (kind === "file") {
+    throw new Error(`displaced branding backup changed or is missing: ${BACKUP}; restore the backup before retrying off/uninstall`);
+  } else if (kind === "legacy" && existsSync(LOGO)) {
+    const text = restorationText(LOGO);
+    restored = replaceIfUnchanged(BRANDING, expected, text);
+    if (!restored) {
+      leaveChangedBranding();
+      return;
+    }
   }
-  if (kind === "absent") discardBranding();
-  else if (await backup.exists() && owned.owns("backup", BACKUP)) atomicWrite(BRANDING, await backup.text());
-  else if (kind === "file") throw new Error(`displaced branding backup changed or is missing: ${BACKUP}; restore the backup before retrying off/uninstall`);
-  else if (kind === "legacy" && await Bun.file(LOGO).exists()) atomicWrite(BRANDING, await Bun.file(LOGO).text());
+  if (!restored) return;
   owned.remove("backup", BACKUP);
   rmSync(DISPLACED, { force: true });
   rmSync(WRITTEN, { force: true });

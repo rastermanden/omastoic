@@ -42,7 +42,7 @@ exit 0`);
   };
   return { home, config, state, data, bin, plugin, env, put, stub,
     cli: (args: string[], extra: Record<string, string> = {}) => exec([process.execPath, join(root, "src/cli.ts"), ...args], extra),
-    prune: () => exec(["bash", join(root, "scripts/prune.sh")]),
+    prune: (extra: Record<string, string> = {}) => exec(["bash", join(root, "scripts/prune.sh")], extra),
     log: () => { try { return readFileSync(join(home, "systemctl.log"), "utf8"); } catch { return ""; } },
     cleanup: () => rmSync(home, { recursive: true, force: true }), exec };
 }
