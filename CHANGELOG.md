@@ -10,6 +10,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The native Omarchy screensaver is supported. `omarchy-launch-screensaver`
+  on the dev channel execs `omarchy-screensaver`, which reads its text once
+  at start. Omastoic keeps the next quote in the branding file, passes that
+  file with `--input` from `omastoic preview`, and writes a different quote
+  when the saver process exits. Setup no longer refuses the native launcher,
+  and `ttfx` is required only for the older terminal saver. The stored
+  seconds-per-quote interval still rotates that terminal saver while it is up.
 - `omastoic config` asks for a Stoic's quotes with a built-in terminal
   checklist instead of gum's multi-select: space or `x` toggles the focused
   line, `1`–`9` toggle the row with that number on screen, arrows or `j`/`k`

@@ -21,13 +21,13 @@ Omastoic puts the Stoics on the Omarchy screensaver. When the screen goes
 idle, Marcus Aurelius looks back at you; a minute later it is Seneca, or
 Epictetus, or the man who founded the school on an Athenian porch. Six
 braille portraits, and 84 entries from public-domain US translations, every one
-cited by book and section. This release supports the terminal/ttfx screensaver,
-audited on Omarchy 4.5.0rc3 and regression-tested with the 4.5.0 host parser
-and branding CLI, not the newer native renderer.
+cited by book and section. On current Omarchy the native screensaver reads
+that canvas once each time it starts. Older installs that still run the
+terminal/ttfx saver keep changing the quote while it is up.
 
 It does not replace, shadow or patch anything Omarchy ships. The screensaver
-already re-reads `~/.config/omarchy/branding/screensaver.txt`; Omastoic keeps
-a freshly composed canvas in that file and swaps it between effects. One
+already reads `~/.config/omarchy/branding/screensaver.txt`; Omastoic keeps
+the next composed canvas in that file. One
 **Stoics** toggle sits in Appearance → Branding → Screensaver next to Edit Text, Set From
 Image and Restore Default. Omarchy's own branding commands win — set the art
 some other way and the Stoics stand aside.
@@ -35,9 +35,9 @@ some other way and the Stoics stand aside.
 ## Feature bullets
 
 - Six braille portraits and 84 cited quotes (Marcus, Seneca, Epictetus, Zeno, Cleanthes, Chrysippus).
-- Rotates only while the screensaver is actually on screen.
+- A new quote each time the native screensaver starts. The terminal saver still rotates while it is on screen.
 - **Appearance → Branding → Screensaver → Stoics** is the single on/off row.
-- 60 seconds per canvas by default, configurable; the host reads changes at effect boundaries.
+- 60 seconds per canvas by default on the terminal saver; the native saver shows one quote per start.
 - Choose which bundled quotes from each Stoic stay in rotation, and add your own. Quotes and settings stay in `~/.config/omastoic/` across plugin updates.
 - Stands aside when `omarchy branding screensaver` writes the slot.
 - Your quotes and settings survive uninstall; `--purge` drops them.
@@ -48,7 +48,8 @@ some other way and the Stoics stand aside.
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 ```
 
-Needs Bun (`omarchy pkg add bun`) and the terminal/ttfx host backend. Then
+Needs Bun (`omarchy pkg add bun`). The native screensaver does not need `ttfx`;
+the older terminal saver does (`omarchy pkg add ttfx`). Then
 `omastoic preview` selects Stoics and launches the saver; `omastoic show` is a
 read-only text export. Update Git-managed installs with
 `omarchy plugin update io.github.rastermanden.omastoic`.

@@ -1,10 +1,16 @@
 #!/usr/bin/env bun
 // omastoic — the Stoics on your Omarchy screensaver.
 //
-// Omarchy's screensaver loops `ttfx` over ~/.config/omarchy/branding/screensaver.txt,
-// re-reading the file every time round. So omastoic never has to replace, shadow
-// or patch anything Omarchy ships: it just keeps a fresh quote in that file, and
-// swaps it for another one while the screensaver is actually up.
+// The native screensaver (omarchy-screensaver 1.3+) reads its text once, at
+// start, from --input or else ~/.config/omarchy/branding/screensaver.txt.
+// Omarchy's idle timer and System menu launch it with no arguments, so the
+// quote they show is whatever is already in that branding file. Omastoic
+// keeps the next quote there and writes a different one when the saver
+// exits. It does not wrap or replace omarchy-launch-screensaver.
+//
+// Older Omarchy still runs ttfx in a terminal and rereads the branding file
+// between effects. On that backend the daemon swaps quotes on the interval
+// while a screensaver window is open.
 //
 // The screensaver art is one slot, and Omarchy's own commands own it too. So
 // omastoic tracks what it wrote: if the file has changed underneath it — someone
@@ -15,7 +21,8 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
-import { screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
+import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
+import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { ChunkSource, pickAuthors } from "./author-picker.ts";
@@ -180,15 +187,28 @@ async function checked(cmd: string[]): Promise<void> {
   if (code !== 0) throw new Error(`${cmd.join(" ")} failed (exit ${code}); check the user session bus and journalctl --user -u omastoic.service, then retry setup`);
 }
 
+const keepLauncherLines = (text: string) =>
+  text
+    .split("\n")
+    .filter((line) => line.trim() && !/socat\[\d+\].*Broken pipe/.test(line) && !line.startsWith("exited:"));
+
+async function installedBackend(): Promise<ScreensaverBackend> {
+  const launcher = Bun.which("omarchy-launch-screensaver");
+  const text = launcher ? await Bun.file(launcher).text().catch(() => "") : "";
+  return screensaverBackend(text, { ttfx: Boolean(Bun.which("ttfx")) });
+}
+
 /**
- * Omarchy's launcher talks to Hyprland over socat and prints "Broken pipe"
- * when that socket closes — noise, not a failed screensaver. Keep real errors.
+ * The terminal launcher exits once its windows are open. The native binary
+ * is the screensaver and runs until dismissed, so preview must leave it in
+ * its own session instead of waiting out the overlay.
  */
-async function launchScreensaver(): Promise<number> {
+async function launchScreensaver(backend: Exclude<ScreensaverBackend, "missing">): Promise<number> {
   if (!Bun.which("omarchy-launch-screensaver")) {
     console.error("omastoic: omarchy-launch-screensaver is missing");
     return 1;
   }
+  if (backend === "native") return launchNative();
 
   const proc = Bun.spawn(["omarchy-launch-screensaver", "force"], {
     stdout: "pipe",
@@ -200,14 +220,38 @@ async function launchScreensaver(): Promise<number> {
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
+  for (const line of keepLauncherLines(stdout)) console.log(line);
+  for (const line of keepLauncherLines(stderr)) console.error(line);
+  if (code === 0) console.log("→ screensaver");
+  return code ?? 1;
+}
 
-  const keep = (text: string) =>
-    text
-      .split("\n")
-      .filter((line) => line.trim() && !/socat\[\d+\].*Broken pipe/.test(line));
-  for (const line of keep(stdout)) console.log(line);
-  for (const line of keep(stderr)) console.error(line);
-
+async function launchNative(): Promise<number> {
+  mkdirSync(STATE, { recursive: true });
+  const errorLog = join(STATE, "launch.err");
+  rmSync(errorLog, { force: true });
+  const proc = Bun.spawn(["bash", "-c", nativeLaunchScript(BRANDING, errorLog)], {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (stdout.startsWith("running")) {
+    console.log("→ screensaver");
+    return 0;
+  }
+  const childError = await Bun.file(errorLog).text().catch(() => "");
+  const explained = explainLauncherFailure(`${childError}\n${stderr}`);
+  if (explained) {
+    console.error(explained);
+    return 1;
+  }
+  for (const line of keepLauncherLines(stdout)) console.log(line);
+  for (const line of keepLauncherLines(`${stderr}\n${childError}`)) console.error(line);
   if (code === 0) console.log("→ screensaver");
   return code ?? 1;
 }
@@ -429,7 +473,7 @@ function unitBody(): string {
   // a dangling or missing ~/.local/bin/omastoic fails closed instead of
   // restart-looping on a path that no longer exists.
   return `[Unit]
-Description=Rotate the Stoic quote on the Omarchy screensaver
+Description=Keep a Stoic quote ready for the Omarchy screensaver
 ConditionPathExists=${LAUNCHER}
 PartOf=graphical-session.target
 After=graphical-session.target
@@ -481,21 +525,15 @@ async function removePrune(): Promise<void> {
 
 async function requireOmarchy(): Promise<number> {
   if (!Bun.which("omarchy")) {
-    console.error("omastoic: omarchy is not on PATH — this needs Omarchy's terminal/ttfx screensaver");
+    console.error("omastoic: omarchy is not on PATH");
     return 1;
   }
-  if (!Bun.which("ttfx")) {
-    console.error("omastoic: ttfx is missing, so the Omarchy screensaver cannot run");
-    console.error("          install it with: omarchy pkg add ttfx");
-    return 1;
-  }
-  for (const command of ["systemctl", "jq", "python3", "flock", "omarchy-toggle", "omarchy-toggle-enabled"]) {
+  for (const command of ["systemctl", "jq", "python3", "flock", "omarchy-toggle", "omarchy-toggle-enabled", "omarchy-launch-screensaver"]) {
     if (!Bun.which(command)) { console.error(`omastoic: required command missing: ${command}`); return 1; }
   }
-  // The native renderer reads its input only once and has no terminal events.
-  const launcher = Bun.which("omarchy-launch-screensaver");
-  if (launcher && /\/usr\/lib\/omarchy-screensaver\//.test(await Bun.file(launcher).text())) {
-    console.error("omastoic: native Omarchy screensaver is not supported by this release; nothing was installed");
+  const backend = await installedBackend();
+  if (backend === "missing") {
+    console.error("omastoic: no screensaver backend — install omarchy-screensaver, or ttfx for the older terminal saver (omarchy pkg add ttfx)");
     return 1;
   }
   return 0;
@@ -560,8 +598,11 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
     setEnabled(false);
     throw error;
   }
-  const interval = (await config()).interval ?? DEFAULT_INTERVAL;
-  say(`→ a new quote every ${interval}s while the screensaver is up`);
+  if ((await installedBackend()) === "native") say("→ a new quote each time the screensaver starts");
+  else {
+    const interval = (await config()).interval ?? DEFAULT_INTERVAL;
+    say(`→ a new quote every ${interval}s while the screensaver is up`);
+  }
   return 0;
 }
 
@@ -617,7 +658,69 @@ async function intervalMs(): Promise<number> {
   return ((await config()).interval ?? DEFAULT_INTERVAL) * 1000;
 }
 
+async function brandingDigest(): Promise<string | null> {
+  try {
+    return digest(await Bun.file(BRANDING).text());
+  } catch {
+    return null;
+  }
+}
+
+/** Write the next canvas when we still own the slot. `onStop` clears a terminal rotation timer. */
+async function rotate(onStop?: () => void): Promise<boolean> {
+  await locked(STATE, async () => {
+    if (enabled()) await writeBranding();
+  }).catch((err) => { console.error(`omastoic: ${err.message}`); });
+  if (!enabled()) {
+    onStop?.();
+    return false;
+  }
+  if (!(await ownsBranding())) {
+    standAside();
+    onStop?.();
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The native saver has already read its text by the time its process is
+ * visible. Watch for it to leave, then write the quote the next start will
+ * read. A quote written while it was up (`omastoic next`) is kept.
+ */
+async function daemonNative(): Promise<number> {
+  if (!enabled()) {
+    console.log("omastoic: parked (omastoic toggle to bring the Stoics back)");
+    return 0;
+  }
+
+  let running = screensaverIsRunning();
+  let shown: string | null = running ? await brandingDigest() : null;
+  if (!running && !(await rotate())) return 0;
+
+  while (true) {
+    await Bun.sleep(400);
+    if (!enabled()) return 0;
+    const now = screensaverIsRunning();
+    if (!now && !(await ownsBranding())) {
+      standAside();
+      return 0;
+    }
+    if (!running && now) shown = await brandingDigest();
+    if (running && !now) {
+      const current = await brandingDigest();
+      // Unchanged, or removed: the next start needs a new canvas. A different
+      // digest is either `next` or someone else's art; the idle check stands
+      // aside when we no longer own it.
+      if ((current === null || current === shown) && !(await rotate())) return 0;
+      shown = null;
+    }
+    running = now;
+  }
+}
+
 async function daemon(): Promise<number> {
+  if ((await installedBackend()) === "native") return daemonNative();
   if (!enabled()) {
     console.log("omastoic: parked (omastoic toggle to bring the Stoics back)");
     return 0;
@@ -631,25 +734,9 @@ async function daemon(): Promise<number> {
     timer = null;
   };
 
-  const rotate = async (): Promise<boolean> => {
-    await locked(STATE, async () => {
-      if (enabled()) await writeBranding();
-    }).catch((err) => { console.error(`omastoic: ${err.message}`); });
-    if (!enabled()) {
-      stopRotating();
-      return false;
-    }
-    if (!(await ownsBranding())) {
-      standAside();
-      stopRotating();
-      return false;
-    }
-    return true;
-  };
-
   const tick = async () => {
     timer = null;
-    if (!(await rotate())) return;
+    if (!(await rotate(stopRotating))) return;
     if (open.size === 0) return;
     timer = setTimeout(tick, await intervalMs());
   };
@@ -661,7 +748,7 @@ async function daemon(): Promise<number> {
 
   // Leave a fresh quote sitting in the file so the very first frame of the next
   // screensaver is already new, without racing the ttfx that is about to read it.
-  await rotate();
+  await rotate(stopRotating);
 
   for await (const event of screensaverWindowEvents()) {
     if (event.kind === "sync") {
@@ -678,13 +765,13 @@ async function daemon(): Promise<number> {
         // write a canvas that matches the real grid before the first effect.
         if (!alreadyReading) {
           await waitForLiveGrid();
-          await rotate();
+          await rotate(stopRotating);
         }
         await startRotating();
       }
     } else if (open.delete(event.address) && open.size === 0) {
       stopRotating();
-      await rotate();
+      await rotate(stopRotating);
     }
   }
   return 0;
@@ -1168,9 +1255,16 @@ async function status(): Promise<number> {
   const unit = Bun.spawnSync(["systemctl", "--user", "is-active", "omastoic.service"]);
   const on = enabled();
   const ours = on && (await ownsBranding());
+  const backend = await installedBackend();
+  const backendLine = backend === "native"
+    ? "native — one quote when the screensaver starts; it reads the canvas once"
+    : backend === "terminal"
+      ? "terminal/ttfx — a new quote on the interval while it is up"
+      : "not found";
 
   console.log(`
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
+backend:          ${backendLine}
 settings:         ${describeSettings(await config(), names, [...choicesOf(await bundledBook()), ...choicesOf((await indexedCustom()).quotes)])}
 grid:             ${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)
 canvas file:      ${BRANDING}
@@ -1226,18 +1320,35 @@ async function main(): Promise<number> {
     }
     case "next":
       if (!(await requireOn())) return 1;
-      return await writeBranding() ? 0 : 1;
-    case "preview":
+      if (!(await writeBranding())) return 1;
+      if ((await installedBackend()) === "native" && screensaverIsRunning()) {
+        console.log("→ the running screensaver already read its quote; this one shows the next time it starts");
+      }
+      return 0;
+    case "preview": {
       if (!enabled()) {
         const code = await on();
         if (code) return code;
       } else if (!(await writeBranding())) return 1;
-      {
-        const code = await launchScreensaver();
+      const backend = await installedBackend();
+      if (backend === "missing") {
+        console.error("omastoic: no screensaver backend — install omarchy-screensaver, or ttfx for the older terminal saver (omarchy pkg add ttfx)");
+        return 1;
+      }
+      // The running overlay already has its text. Launching again exits
+      // immediately and would look like a preview that did nothing.
+      if (backend === "native" && screensaverIsRunning()) {
+        console.log("→ a screensaver is already up, still showing the quote it started with");
+        console.log("→ this canvas is what the next start will read");
+        return 0;
+      }
+      const code = await launchScreensaver(backend);
+      if (backend === "terminal") {
         await waitForLiveGrid();
         if (!(await writeBranding())) return 1;
-        return code;
       }
+      return code;
+    }
     case "daemon":
       return daemon();
     case "setup":
@@ -1284,6 +1395,7 @@ async function main(): Promise<number> {
   omastoic toggle      hand the screensaver to the Stoics, or give it back
   omastoic next        write another quote, only if the Stoics still own the slot
   omastoic preview     write a new canvas and start the screensaver now
+                       (native: passes that file with --input)
   omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
   omastoic config      choose Stoics, their quotes, and seconds, or add a quote
                        (--plain asks for numbers instead of keys)
@@ -1297,6 +1409,10 @@ Remove:   omastoic uninstall
 Appearance → Branding → Screensaver → Stoics is the same toggle. Edit Text, Set From Image
 and Restore Default stay Omarchy's; if they write the slot, the Stoics
 stand aside.
+
+The native screensaver reads the canvas once per start. The next quote is
+written when that start ends. The terminal screensaver still changes quote
+on the interval while it is up.
 
 Quotes:   ${join(USER_CONFIG, "quotes.tsv")}
 Settings: ${join(USER_CONFIG, "config.json")}`);

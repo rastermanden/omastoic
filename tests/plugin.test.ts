@@ -266,17 +266,6 @@ for (const transition of ["on/off", "disable", "remove"]) {
   });
 }
 
-test("native backend is rejected before installing external artifacts", async () => {
-  const s = sandbox();
-  s.stub("omarchy-launch-screensaver", "exec /usr/lib/omarchy-screensaver/omarchy-screensaver");
-  try {
-    const result = await s.cli(["setup", "--on-first", "--quiet"]);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("native Omarchy screensaver is not supported");
-    expect(existsSync(join(s.config, "systemd/user/omastoic.service"))).toBe(false);
-    expect(existsSync(join(s.state, "installed"))).toBe(false);
-  } finally { s.cleanup(); }
-});
 
 test("install.sh copies a runtime tree without the authoring payload", async () => {
   const missing = ["rsync", "jq", "python3"].filter((name) => !Bun.which(name));

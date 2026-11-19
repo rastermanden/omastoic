@@ -10,18 +10,30 @@ US translations, reviewed against the editions in [CREDITS.md](CREDITS.md).
 
 ## Compatibility
 
-This correctness release supports **Omarchy's terminal/ttfx screensaver**,
-audited on Omarchy **4.5.0rc3**, with these regression tests run against the
-installed **4.5.0** host parser/branding CLI. This is sandboxed integration
-evidence, not a live compositor/display matrix. It still requires
-[Bun](https://bun.sh) (tested with **1.4.4**, `omarchy pkg add bun`), plus the host's `ttfx`, systemd,
-`jq` and Python 3. No network is used at runtime.
+Omastoic follows the screensaver Omarchy actually launches.
 
-**The newer native `omarchy-screensaver` backend is not supported.** It reads
-its input once and has no terminal window events. Setup detects the known
-native launcher and refuses installation, rather than promising rotation that
-cannot work. Native integration, runtime removal and historical portrait
-replacement are separate follow-ups, not features of this release.
+**Native (Omarchy dev, `omarchy-screensaver` 1.3.1).** `omarchy-launch-screensaver`
+execs `/usr/lib/omarchy-screensaver/omarchy-screensaver`. That program reads its
+text once, at start, from `--input` or else
+`~/.config/omarchy/branding/screensaver.txt`. Idle and *System → Screensaver*
+call the launcher with no arguments, so they show the branding file. Omastoic
+keeps the next quote in that file. When the saver process exits, the service
+writes a different quote for the following start. `omastoic preview` writes a
+quote and starts the saver with `--input` pointed at that same file. The quote
+does not change while the overlay is up. Turning the Stoics off restores the
+branding that was displaced; the user's file is not left overwritten.
+
+**Terminal/ttfx (older Omarchy).** The saver rereads the branding file between
+effects. The service swaps the quote on the interval while a screensaver
+window is open. This path was audited on Omarchy **4.5.0rc3**, with regression
+tests against the **4.5.0** host parser and branding CLI. It needs `ttfx`
+(`omarchy pkg add ttfx`).
+
+Both paths need [Bun](https://bun.sh) (tested with **1.4.4**, `omarchy pkg add bun`),
+systemd, `jq` and Python 3. The native path does not need `ttfx`. No network
+is used at runtime. The automated suite is sandboxed and does not open a
+Wayland overlay. On a machine that has the package, one test also runs
+`omarchy-screensaver --headless`.
 
 ## Install and update
 
@@ -43,10 +55,11 @@ launcher/.desktop entry and no Configure menu row. Old plugin-owned
 Image and Restore Default remain Omarchy's commands.
 
 Defaults are **all six authors and 60 seconds per quote**, with no setup wizard.
-While the saver is active, the service keeps each composed canvas in the
-branding file for 60 seconds before choosing another. `ttfx` rereads the file
-at its next effect boundary: the host controls transitions, so this is not a
-guarantee of exactly 60 uninterrupted, fully legible seconds on screen.
+On the native screensaver that interval is stored but not applied: each start
+shows one quote, and the next start shows another. On the terminal screensaver
+the service keeps each canvas for that many seconds while the saver is up.
+`ttfx` rereads the file at its next effect boundary, so the gap is not a
+guarantee of exactly that many uninterrupted seconds on screen.
 
 Setup failures return a non-zero status and leave no successful-install marker.
 Fix the reported dependency/user-session error, then retry `omastoic setup`.
@@ -71,6 +84,7 @@ copy over a linked or Git-managed plugin. Coming from 1.x, uninstall the old
 omastoic toggle                # select Stoics, or restore displaced art
 omastoic next                  # another quote, only if we still own the slot
 omastoic preview               # MUTATING: select Stoics and launch the saver
+                               # native: --input is the canvas just written
 omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
 omastoic status
 omastoic config                # Stoics, their quotes, the interval, and a new quote
