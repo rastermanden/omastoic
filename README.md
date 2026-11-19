@@ -30,10 +30,13 @@ tests against the **4.5.0** host parser and branding CLI. It needs `ttfx`
 (`omarchy pkg add ttfx`).
 
 Both paths need [Bun](https://bun.sh) (tested with **1.4.4**, `omarchy pkg add bun`),
-systemd, `jq` and Python 3. The native path does not need `ttfx`. No network
-is used at runtime. The automated suite is sandboxed and does not open a
-Wayland overlay. On a machine that has the package, one test also runs
-`omarchy-screensaver --headless`.
+a user systemd session, `jq` and Python 3. The native path needs the optional
+`omarchy-screensaver` package (`omarchy pkg add omarchy-screensaver`, tested at
+**1.3.1**) and does not need `ttfx`. The older terminal path needs the optional
+`ttfx` package instead (`omarchy pkg add ttfx`) and does not need
+`omarchy-screensaver`. No network is used at runtime. The automated suite is
+sandboxed and does not open a Wayland overlay. On a machine that has the
+package, one test also runs `omarchy-screensaver --headless`.
 
 ## Install and update
 
@@ -41,6 +44,10 @@ Wayland overlay. On a machine that has the package, one test also runs
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 omarchy plugin update io.github.rastermanden.omastoic
 ```
+
+`omarchy plugin add` does not install packages. Install Bun first, and either
+`omarchy-screensaver` (native) or `ttfx` (older terminal saver). Manual
+`./install.sh` also needs `rsync`.
 
 Enabling the plugin runs setup inside the existing Omarchy shell. On first
 successful setup it preserves your branding, writes a canvas, links the
@@ -208,17 +215,33 @@ Implementation details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Tests
 
 ```bash
-bun test tests
-omarchy plugin validate .
+./tests/run
 ```
+
+`./tests/run` is the portable entry point. It runs the Bun suite, including the
+QML lint in `tests/qml.test.ts` (skipped when this machine has no host kit or
+`qmllint`), then `bash -n` on the shell scripts. When `omarchy` is on `PATH` it
+also runs `omarchy plugin validate`.
 
 Tests require the real Omarchy host parser, defaults and branding reset command.
 On an Omarchy desktop they are read from `/usr/share/omarchy`; elsewhere set
 `OMARCHY_TEST_ROOT` to a checkout of the audited host revision
 `5eb922f137422ff32a90869a9ba47525a428792d`. GitHub Actions uses that pinned host,
-Bun 1.4.4, sandboxed HOME/XDG directories, the Bun suite, Bash syntax checks and
-`omarchy plugin validate`. No test launches a real saver or changes installed
-plugins, shell config, services or branding.
+Bun 1.4.4, sandboxed HOME/XDG directories, `./tests/run`, and
+`omarchy plugin validate` on a `git archive` of HEAD. No test launches a real
+saver or changes installed plugins, shell config, services or branding.
+
+Release preflight is not part of this repository. `omarchy plugin add` clones
+the tracked tree, so authoring skills stay outside it. Use
+[build-omarchy-plugins](https://github.com/tcballard/build-omarchy-plugins) at
+`edc72aa3b3762e20ca543df8b472ba1a3b7f52c7` from another directory:
+
+```bash
+python3 "<skills>/omarchy-plugin-release/scripts/release_preflight.py" /path/to/omastoic
+```
+
+That script finds `validate_plugin.py` in the sibling test skill. If those
+directories are renamed, pass `--validator` with the test skill's script.
 
 Coverage includes the actual host menu parser/parent graph, migration and
 comment-preserving round trips, every quote across the audit size grid,

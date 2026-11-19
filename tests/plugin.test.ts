@@ -268,6 +268,9 @@ for (const transition of ["on/off", "disable", "remove"]) {
 
 
 test("install.sh copies a runtime tree without the authoring payload", async () => {
+  // Developer-only material stays out of the copy. The skill tree is not
+  // tracked; the exclude still covers a local .agents directory.
+  expect(readFileSync(join(root, "install.sh"), "utf8")).toContain("--exclude .agents");
   const missing = ["rsync", "jq", "python3"].filter((name) => !Bun.which(name));
   if (missing.length) {
     console.log(`skipping install.sh copy test: ${missing.join(", ")} not on PATH`);
@@ -280,8 +283,6 @@ test("install.sh copies a runtime tree without the authoring payload", async () 
     for (const path of ["manifest.json", "Service.qml", "bin/omastoic"]) {
       expect(existsSync(join(s.plugin, path))).toBe(true);
     }
-    // Developer-only material stays in the checkout: a copied .agents/ tree
-    // would ship agent skills (and their AGENTS.md instructions) to users.
     expect(existsSync(join(s.plugin, ".agents"))).toBe(false);
     expect(existsSync(join(s.plugin, "assets/local"))).toBe(false);
   } finally { s.cleanup(); }

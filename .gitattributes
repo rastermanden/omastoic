@@ -1,1 +1,2 @@
+# A locally reintroduced .agents tree stays out of source archives.
 .agents export-ignore

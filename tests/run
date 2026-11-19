@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Portable checks for this checkout. On an Omarchy machine, `omarchy plugin
+# validate` is also run when that command is installed. It does not replace a
+# live shell acceptance test.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+if ! command -v bun >/dev/null 2>&1; then
+  printf 'tests/run: bun is required (tested with 1.4.4).\n' >&2
+  exit 1
+fi
+
+# The suite includes tests/qml.test.ts, which lints the manifest's QML entry
+# points when a host kit and qmllint are present and skips that check otherwise.
+bun test tests
+
+shopt -s nullglob
+shell_scripts=(
+  install.sh
+  uninstall.sh
+  bin/omastoic
+  completions/omastoic.bash
+  scripts/*.sh
+  tests/fixtures/*.sh
+  tests/run
+)
+for script in "${shell_scripts[@]}"; do
+  bash -n "$script"
+done
+
+if command -v omarchy >/dev/null 2>&1; then
+  omarchy plugin validate "$root"
+fi
+
+printf 'All portable plugin checks passed.\n'

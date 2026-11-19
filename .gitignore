@@ -1,6 +1,11 @@
 node_modules/
 .host/
 
+# Authoring skills are not part of the plugin. `omarchy plugin add` clones
+# this tree, and release preflight scans it. Install build-omarchy-plugins
+# outside the checkout; do not put a .agents directory here.
+.agents/
+
 # Commons sources are re-downloadable, so they stay out of the repo.
 # assets/local/ is deliberately NOT ignored: those images cannot be
 # fetched from anywhere, and art/ could not be rebuilt without them.

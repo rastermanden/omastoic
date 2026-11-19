@@ -22,7 +22,7 @@ jobs:
             bin
             shell/plugins/menu
             default/omarchy
-      - name: Test in an isolated home
+      - name: Portable checks
         env:
           OMARCHY_TEST_ROOT: ${{ github.workspace }}/.host
         run: |
@@ -31,12 +31,7 @@ jobs:
           export XDG_DATA_HOME="$HOME/.local/share" XDG_CACHE_HOME="$HOME/.cache"
           export TMPDIR="$RUNNER_TEMP/omastoic-tmp"
           mkdir -p "$HOME" "$TMPDIR"
-          bun test tests
-      - name: Bash syntax
-        run: |
-          for script in install.sh uninstall.sh bin/omastoic completions/omastoic.bash scripts/*.sh tests/fixtures/*.sh; do
-            bash -n "$script"
-          done
+          ./tests/run
       - name: Validate with the real Omarchy CLI
         run: |
           mkdir -p "$RUNNER_TEMP/omastoic-plugin"

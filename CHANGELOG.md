@@ -10,6 +10,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Plugin installs no longer include vendored agent skills. `omarchy plugin add`
+  clones this tree, so `.agents/` and `LOOM.md` were part of every install.
+  Keep build-omarchy-plugins outside the checkout. `./install.sh` still skips a
+  local `.agents/` directory.
 - The native Omarchy screensaver is supported. `omarchy-launch-screensaver`
   on the dev channel execs `omarchy-screensaver`, which reads its text once
   at start. Omastoic keeps the next quote in the branding file, passes that
@@ -37,6 +41,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `./tests/run` runs the portable Bun suite, including the QML lint, and checks
+  shell syntax.
 - Five further cited quotes from the same public-domain editions: Marcus
   *Meditations* III.4 and IV.49, Seneca *Letters* 7.8 and 20.1, and Epictetus
   *Discourses* I.15. They are appended as `q80`–`q84`, preserving existing IDs.
