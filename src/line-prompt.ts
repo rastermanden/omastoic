@@ -3,7 +3,7 @@
 // The text block ends on ctrl-d; no editor is ever launched, so a headless
 // terminal can still finish the flow.
 
-import { ChunkSource, rawTtyUsable, type PickerIo } from "./author-picker.ts";
+import { ChunkSource, rawTtyUsable, writeTerminal, type PickerIo } from "./author-picker.ts";
 
 export type LinePrompt = { header: string; value?: string; charLimit?: number };
 
@@ -64,7 +64,7 @@ function startFrame(io: PickerIo, redraw: () => void): Frame {
       if (ownsSource) source.close();
       try {
         const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
-        output.write(`${up}\r\x1b[J${SHOW_CURSOR}`);
+        writeTerminal(output, `${up}\r\x1b[J${SHOW_CURSOR}`);
       } catch { /* the tty is already gone */ }
       if (!wasRaw) {
         try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }

@@ -2,7 +2,7 @@
 // picker uses, plus a filter line and paging for a Stoic's whole book. The quote
 // id is the key, so a choice survives a re-filter, a redraw and a config write.
 
-import { ChunkSource, rawTtyUsable, type PickOptions, type PickerIo } from "./author-picker.ts";
+import { ChunkSource, rawTtyUsable, writeTerminal, type PickOptions, type PickerIo } from "./author-picker.ts";
 
 export type QuoteRow = { id: string; citation: string; text: string };
 
@@ -322,7 +322,7 @@ export async function pickQuotesTui(
   } finally {
     if (ownsSource) source.close();
     else source.unshift(buffer);
-    try { output.write(`${clearFrame()}${SHOW_CURSOR}`); } catch { /* the tty is already gone */ }
+    writeTerminal(output, `${clearFrame()}${SHOW_CURSOR}`);
     if (!wasRaw) {
       try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }
     }

@@ -1,5 +1,6 @@
 // The Stoic checklist for `omastoic config`: a small raw-mode picker with a
 // plain numbered fallback, so a pipe or a dumb terminal still gets to choose.
+import { writeSync } from "node:fs";
 
 export type AuthorRow = { slug: string; name: string };
 
@@ -17,11 +18,20 @@ export type PickerInput = AsyncIterable<unknown> & {
 
 export type PickerOutput = {
   write(chunk: string): unknown;
+  fd?: number;
   isTTY?: boolean;
   columns?: number;
   on?(event: string, listener: () => void): unknown;
   off?(event: string, listener: () => void): unknown;
 };
+
+/** Put bytes on the tty before a fatal signal is re-raised. A normal write can still be sitting in a buffer when the process dies. */
+export function writeTerminal(output: PickerOutput, text: string): void {
+  if (typeof output.fd === "number") {
+    try { writeSync(output.fd, text); return; } catch { /* the tty is already gone */ }
+  }
+  try { output.write(text); } catch { /* the tty is already gone */ }
+}
 
 export type PickerSignals = {
   on(event: string, listener: () => void): unknown;
@@ -312,7 +322,7 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
   } finally {
     if (ownsSource) source.close();
     else source.unshift(buffer);
-    try { output.write(`${clearFrame()}${SHOW_CURSOR}`); } catch { /* the tty is already gone */ }
+    writeTerminal(output, `${clearFrame()}${SHOW_CURSOR}`);
     if (!wasRaw) {
       try { input.setRawMode?.(false); } catch { /* the tty is already gone */ }
     }
