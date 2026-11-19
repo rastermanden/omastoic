@@ -170,6 +170,29 @@ test("uninstall preserves replaced completions, units, backups and foreign symli
   } finally { s.cleanup(); }
 });
 
+test("uninstall keeps quotes and drops runtime state except the lock file", async () => {
+  const s = sandbox();
+  const quotes = join(s.config, "omastoic/quotes.tsv");
+  const settings = join(s.config, "omastoic/config.json");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(quotes, "marcus\tNote\tA line that must survive uninstall.\n");
+    s.put(settings, JSON.stringify({ interval: 90 }));
+    s.put(join(s.state, "cell.json"), "{}\n");
+    s.put(join(s.state, "launch.err"), "err\n");
+    s.put(join(s.state, "recent.json"), "[]\n");
+    expect(existsSync(join(s.home, ".local/lib/omastoic/prune.sh"))).toBe(true);
+    expect((await s.cli(["uninstall"])).code).toBe(0);
+    expect(readFileSync(quotes, "utf8")).toContain("A line that must survive uninstall.");
+    expect(JSON.parse(readFileSync(settings, "utf8")).interval).toBe(90);
+    for (const name of ["cell.json", "launch.err", "recent.json", "installed", "owned"]) {
+      expect(existsSync(join(s.state, name))).toBe(false);
+    }
+    expect(existsSync(join(s.state, "transaction.flock"))).toBe(true);
+    expect(existsSync(join(s.home, ".local/lib/omastoic"))).toBe(false);
+  } finally { s.cleanup(); }
+});
+
 test("concurrent setup and quote writers serialize and leave valid owned state", async () => {
   const s = sandbox();
   try {
@@ -268,6 +291,9 @@ for (const transition of ["on/off", "disable", "remove"]) {
 
 
 test("install.sh copies a runtime tree without the authoring payload", async () => {
+  // Developer-only material stays out of the copy. The skill tree is not
+  // tracked; the exclude still covers a local .agents directory.
+  expect(readFileSync(join(root, "install.sh"), "utf8")).toContain("--exclude .agents");
   const missing = ["rsync", "jq", "python3"].filter((name) => !Bun.which(name));
   if (missing.length) {
     console.log(`skipping install.sh copy test: ${missing.join(", ")} not on PATH`);
@@ -280,8 +306,6 @@ test("install.sh copies a runtime tree without the authoring payload", async () 
     for (const path of ["manifest.json", "Service.qml", "bin/omastoic"]) {
       expect(existsSync(join(s.plugin, path))).toBe(true);
     }
-    // Developer-only material stays in the checkout: a copied .agents/ tree
-    // would ship agent skills (and their AGENTS.md instructions) to users.
     expect(existsSync(join(s.plugin, ".agents"))).toBe(false);
     expect(existsSync(join(s.plugin, "assets/local"))).toBe(false);
   } finally { s.cleanup(); }

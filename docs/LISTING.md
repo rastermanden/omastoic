@@ -8,11 +8,11 @@ repository, and release posts.
 | Field | Value |
 | --- | --- |
 | Name | Omastoic |
-| Category | Look & Feel |
+| Category | Appearance |
 | Short description | The Stoics on your Omarchy screensaver: braille portraits and cited quotes from Marcus Aurelius, Seneca, Epictetus and the founders of the school. |
 | Repository | <https://github.com/rastermanden/omastoic> |
 | License | MIT |
-| Tags | `screensaver`, `stoic`, `quotes`, `branding`, `bun` |
+| Tags | Quickshell, Hyprland |
 | Suggested GitHub topics | `omarchy`, `omarchy-plugin`, `screensaver`, `stoicism`, `bun` |
 
 ## Long description
@@ -48,8 +48,11 @@ some other way and the Stoics stand aside.
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
 ```
 
-Needs Bun (`omarchy pkg add bun`). The native screensaver does not need `ttfx`;
-the older terminal saver does (`omarchy pkg add ttfx`). Then
+Needs Bun (`omarchy pkg add bun`), a user systemd session, `jq` and Python 3.
+The native screensaver is the optional `omarchy-screensaver` package
+(`omarchy pkg add omarchy-screensaver`, tested at 1.3.1) and does not need
+`ttfx`. The older terminal saver needs `ttfx` instead (`omarchy pkg add ttfx`).
+Then
 `omastoic preview` selects Stoics and launches the saver; `omastoic show` is a
 read-only text export. Update Git-managed installs with
 `omarchy plugin update io.github.rastermanden.omastoic`.
@@ -70,10 +73,12 @@ slot Omarchy already reads.
 
 ## Artwork
 
-Listing still: [preview.png](../preview.png). README motion and the longer clip
-are [release assets](https://github.com/rastermanden/omastoic/releases/latest)
-(`preview.gif`, `demo.mp4`) so `omarchy plugin add` does not clone ~4.5MB of
-video.
+Listing still: [preview.png](../preview.png). It is a live colorshift capture
+from 19 November 2026 on Omarchy dev `d54cde78f` (x86_64),
+`omarchy-screensaver` 1.3.1, Tokyo Night, plugin `eae779c`: Marcus Aurelius,
+Meditations VII.34. Further stills are in
+[docs/screenshots](screenshots). Older `preview.gif` and `demo.mp4` on the
+latest GitHub release are generated plates, not these captures.
 
 ## Disclosures
 

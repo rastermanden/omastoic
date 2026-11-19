@@ -40,13 +40,16 @@ for (const hadArt of [true, false]) {
     if (hadArt) s.put(branding, "original art\n");
     try {
       expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      s.put(join(s.state, "cell.json"), "{}\n");
+      s.put(join(s.state, "recent.json"), "[]\n");
       rmSync(s.plugin, { recursive: true });
       const result = await s.prune();
       expect(result.code).toBe(0);
       expect(result.stderr).toBe("");
       expect(s.log()).toContain("disable --now omastoic.service");
       expect(s.log()).toContain("disable --now omastoic-prune.path");
-      for (const path of [join(s.home, ".local/bin/omastoic"), join(s.config, "systemd/user/omastoic.service"), join(s.data, "bash-completion/completions/omastoic"), join(s.state, "installed")]) expect(existsSync(path)).toBe(false);
+      for (const path of [join(s.home, ".local/bin/omastoic"), join(s.config, "systemd/user/omastoic.service"), join(s.data, "bash-completion/completions/omastoic"), join(s.state, "installed"), join(s.state, "cell.json"), join(s.state, "recent.json"), join(s.state, "owned"), join(s.home, ".local/lib/omastoic")]) expect(existsSync(path)).toBe(false);
+      expect(existsSync(join(s.state, "transaction.flock"))).toBe(true);
       expect(readFileSync(menu, "utf8")).toBe(original);
       if (hadArt) expect(readFileSync(branding, "utf8")).toBe("original art\n");
       else expect(existsSync(branding)).toBe(false);

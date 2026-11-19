@@ -17,7 +17,7 @@
 // ran `omarchy branding screensaver image`, say — it stands aside instead of
 // clobbering the new art.
 
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
@@ -72,7 +72,8 @@ const PLUGIN_HOME_LEGACY = join(CONFIG_HOME, "omarchy/plugins", LEGACY_PLUGIN_ID
 const DATA_HOME = process.env.XDG_DATA_HOME ?? join(HOME, ".local/share");
 const BASH_COMPLETION = join(DATA_HOME, "bash-completion/completions/omastoic");
 const FISH_COMPLETION = join(DATA_HOME, "fish/vendor_completions.d/omastoic.fish");
-const PRUNE_SCRIPT = join(HOME, ".local/lib/omastoic/prune.sh");
+const PRUNE_LIB = join(HOME, ".local/lib/omastoic");
+const PRUNE_SCRIPT = join(PRUNE_LIB, "prune.sh");
 const PRUNE_UNIT = join(CONFIG_HOME, "systemd/user/omastoic-prune.service");
 const PRUNE_PATH = join(CONFIG_HOME, "systemd/user/omastoic-prune.path");
 const PLUGINS_DIR = join(CONFIG_HOME, "omarchy/plugins");
@@ -629,7 +630,6 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
 
   if (opts.purge) {
     rmSync(USER_CONFIG, { recursive: true, force: true });
-    for (const name of readdirSync(STATE)) if (name !== "transaction.flock") rmSync(join(STATE, name), { recursive: true, force: true });
     rmSync(PREVIEWS, { recursive: true, force: true });
     console.log(`→ removed ${USER_CONFIG}`);
   }
@@ -649,7 +649,20 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
       return 1;
     }
   }
+  // Runtime files are not user quotes. The lock file stays: this command is
+  // holding it until it exits, and replacing it would change the inode.
+  sweepRuntimeState();
   return 0;
+}
+
+function sweepRuntimeState(): void {
+  if (existsSync(STATE)) {
+    for (const name of readdirSync(STATE)) {
+      if (name === "transaction.flock") continue;
+      rmSync(join(STATE, name), { recursive: true, force: true });
+    }
+  }
+  try { rmdirSync(PRUNE_LIB); } catch { /* missing, or the user left something else there */ }
 }
 
 // --- the rotation service -----------------------------------------------------
@@ -1278,6 +1291,45 @@ async function requireOn(): Promise<boolean> {
   return false;
 }
 
+function usage(): string {
+  return `omastoic — the Stoics on your Omarchy screensaver
+
+  omastoic toggle      hand the screensaver to the Stoics, or give it back
+  omastoic next        write another quote, only if the Stoics still own the slot
+  omastoic preview     write a new canvas and start the screensaver now
+                       (native: passes that file with --input)
+  omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
+  omastoic config      choose Stoics, their quotes, and seconds, or add a quote
+                       (--plain asks for numbers instead of keys)
+  omastoic ui          open the settings panel in the Omarchy shell
+  omastoic status      who has the screensaver, and what is in the quote book
+  omastoic uninstall   take the service, menu row and plugin back out
+
+  omastoic --help      print this and do nothing
+  omastoic <command> --help   same, for any command (-h works too)
+
+Install:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
+Remove:   omastoic uninstall
+          omarchy plugin remove ${PLUGIN_ID}
+
+Appearance → Branding → Screensaver → Stoics is the same toggle. Edit Text, Set From Image
+and Restore Default stay Omarchy's; if they write the slot, the Stoics
+stand aside.
+
+The native screensaver reads the canvas once per start. The next quote is
+written when that start ends. The terminal screensaver still changes quote
+on the interval while it is up. The native program is not on PATH; Omarchy's
+launcher starts it.
+
+Quotes:   ${join(USER_CONFIG, "quotes.tsv")}
+Settings: ${join(USER_CONFIG, "config.json")}`;
+}
+
+function helpRequested(argv: string[]): boolean {
+  if (argv.length === 0 || argv[0] === "help") return true;
+  return argv.some((arg) => arg === "--help" || arg === "-h");
+}
+
 async function main(): Promise<number> {
   const [command = "help", ...rest] = Bun.argv.slice(2);
   const flag = (name: string) => {
@@ -1390,40 +1442,20 @@ async function main(): Promise<number> {
       return 0;
     }
     default:
-      console.log(`omastoic — the Stoics on your Omarchy screensaver
-
-  omastoic toggle      hand the screensaver to the Stoics, or give it back
-  omastoic next        write another quote, only if the Stoics still own the slot
-  omastoic preview     write a new canvas and start the screensaver now
-                       (native: passes that file with --input)
-  omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
-  omastoic config      choose Stoics, their quotes, and seconds, or add a quote
-                       (--plain asks for numbers instead of keys)
-  omastoic ui          open the settings panel in the Omarchy shell
-  omastoic status      who has the screensaver, and what is in the quote book
-  omastoic uninstall   take the service, menu row and plugin back out
-
-Install:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
-Remove:   omastoic uninstall
-
-Appearance → Branding → Screensaver → Stoics is the same toggle. Edit Text, Set From Image
-and Restore Default stay Omarchy's; if they write the slot, the Stoics
-stand aside.
-
-The native screensaver reads the canvas once per start. The next quote is
-written when that start ends. The terminal screensaver still changes quote
-on the interval while it is up.
-
-Quotes:   ${join(USER_CONFIG, "quotes.tsv")}
-Settings: ${join(USER_CONFIG, "config.json")}`);
-      return command === "help" || command === "--help" || command === "-h" ? 0 : 1;
+      console.log(usage());
+      return 1;
   }
 }
 
 try {
-  const command = Bun.argv[2];
+  const argv = Bun.argv.slice(2);
+  if (helpRequested(argv)) {
+    console.log(usage());
+    process.exit(0);
+  }
+  const command = argv[0];
   const mutating = ["on", "off", "toggle", "next", "preview", "setup", "install", "uninstall", "config", "configure"].includes(command)
-    || (command === "panel" && Bun.argv[3] === "apply");
+    || (command === "panel" && argv[1] === "apply");
   process.exit(await (mutating ? locked(STATE, main) : main()));
 } catch (error) {
   console.error(`omastoic: ${(error as Error).message}`);

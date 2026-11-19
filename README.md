@@ -1,231 +1,241 @@
 # Omastoic
 
-**The Stoics on your Omarchy screensaver.** One braille portrait, one thought,
-and a quiet label with its source. Six Stoics and 84 entries from public-domain
-US translations, reviewed against the editions in [CREDITS.md](CREDITS.md).
+**The Stoics on your Omarchy screensaver.** One braille portrait, one cited thought.
 
-![Omastoic on the Omarchy screensaver](https://github.com/rastermanden/omastoic/releases/latest/download/preview.gif)
+![Marcus Aurelius, Meditations VII.34, on the native Omarchy screensaver](preview.png)
 
-[Longer clip](https://github.com/rastermanden/omastoic/releases/latest/download/demo.mp4)
+Live capture, 19 November 2026, on Omarchy dev `d54cde78f` (x86_64),
+`omarchy-screensaver` 1.3.1, Tokyo Night, plugin `eae779c`. Colorshift is the
+screensaver's effect. The portrait and the quote are the canvas Omastoic wrote.
 
-## Compatibility
+## Which screensaver
 
-Omastoic follows the screensaver Omarchy actually launches.
+Omastoic writes the file Omarchy already reads,
+`~/.config/omarchy/branding/screensaver.txt`. It does not replace the launcher.
 
-**Native (Omarchy dev, `omarchy-screensaver` 1.3.1).** `omarchy-launch-screensaver`
-execs `/usr/lib/omarchy-screensaver/omarchy-screensaver`. That program reads its
-text once, at start, from `--input` or else
-`~/.config/omarchy/branding/screensaver.txt`. Idle and *System → Screensaver*
-call the launcher with no arguments, so they show the branding file. Omastoic
-keeps the next quote in that file. When the saver process exits, the service
-writes a different quote for the following start. `omastoic preview` writes a
-quote and starts the saver with `--input` pointed at that same file. The quote
-does not change while the overlay is up. Turning the Stoics off restores the
-branding that was displaced; the user's file is not left overwritten.
+**Native (current Omarchy dev).** The package `omarchy-screensaver` (tested at
+1.3.1, `omarchy pkg add omarchy-screensaver`) provides
+`/usr/lib/omarchy-screensaver/omarchy-screensaver`. That path is not on `PATH`.
+`omarchy-launch-screensaver` execs it. Idle and *System → Screensaver* pass no
+arguments, so they show the branding file. The program reads its text once, at
+start. Omastoic leaves the next quote there and writes a different one when
+that process exits. `omastoic preview` is the launch Omastoic does itself: it
+passes `--input` pointed at the same file. The quote does not change while the
+overlay is up. This path does not need `ttfx`.
 
-**Terminal/ttfx (older Omarchy).** The saver rereads the branding file between
-effects. The service swaps the quote on the interval while a screensaver
-window is open. This path was audited on Omarchy **4.5.0rc3**, with regression
-tests against the **4.5.0** host parser and branding CLI. It needs `ttfx`
-(`omarchy pkg add ttfx`).
+**Terminal (older Omarchy).** The saver rereads the branding file between
+effects, and the service swaps the quote on your interval while a screensaver
+window is open. Audited on Omarchy 4.5.0rc3 against host
+`5eb922f137422ff32a90869a9ba47525a428792d`. This path needs `ttfx`
+(`omarchy pkg add ttfx`) and does not need `omarchy-screensaver`.
 
-Both paths need [Bun](https://bun.sh) (tested with **1.4.4**, `omarchy pkg add bun`),
-systemd, `jq` and Python 3. The native path does not need `ttfx`. No network
-is used at runtime. The automated suite is sandboxed and does not open a
-Wayland overlay. On a machine that has the package, one test also runs
-`omarchy-screensaver --headless`.
+Both need [Bun](https://bun.sh) (tested with 1.4.4, `omarchy pkg add bun`), a
+user systemd session, `jq`, and Python 3. Nothing is fetched at runtime.
 
-## Install and update
+## Install
 
 ```bash
 omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
-omarchy plugin update io.github.rastermanden.omastoic
 ```
 
-Enabling the plugin runs setup inside the existing Omarchy shell. On first
-successful setup it preserves your branding, writes a canvas, links the
-`omastoic` **terminal command**, installs completions and user units, and adds
-exactly one menu row:
+`omarchy plugin add` does not install packages. Install Bun first, and either
+`omarchy-screensaver` (native) or `ttfx` (terminal).
+
+Enabling runs setup in the existing Omarchy shell. The first successful setup
+keeps your current branding, writes a canvas, links the `omastoic` command,
+installs completions and user units, and adds one menu row:
 
 **Appearance → Branding → Screensaver → Stoics**
 
-The row toggles Stoics on/off and is checked while selected. There is no app
-launcher/.desktop entry and no Configure menu row. Old plugin-owned
-`style.screensaver.*` rows are migrated within our marked block only. Text,
-Image and Restore Default remain Omarchy's commands.
+The row turns the Stoics on and off. There is no application launcher and no
+Configure row. Text, Image, and Restore Default stay Omarchy's. Old
+plugin-owned `style.screensaver.*` rows move only inside our marked block.
 
-Defaults are **all six authors and 60 seconds per quote**, with no setup wizard.
-On the native screensaver that interval is stored but not applied: each start
-shows one quote, and the next start shows another. On the terminal screensaver
-the service keeps each canvas for that many seconds while the saver is up.
-`ttfx` rereads the file at its next effect boundary, so the gap is not a
-guarantee of exactly that many uninterrupted seconds on screen.
+Defaults are all six Stoics and 60 seconds per quote. On the native saver that
+number is stored and not applied: each start shows one quote, and the next
+start shows another. On the terminal saver the service holds each canvas for
+that many seconds while the saver is up. `ttfx` rereads at its next effect, so
+the wait is not a promise of that many uninterrupted seconds.
 
-Setup failures return a non-zero status and leave no successful-install marker.
-Fix the reported dependency/user-session error, then retry `omastoic setup`.
-An unchanged setup is idempotent; code/data updates restart an enabled daemon.
-Setup does not steal the slot back after `off` or plugin disable.
+A failed setup returns non-zero and writes no install marker. Fix the command
+it names, then run `omastoic setup`. Setup does not turn the Stoics back on
+after `off` or after the plugin is disabled.
 
-For a manual copy from a checkout:
+From a checkout, `./install.sh` checks those dependencies (and `rsync`) and
+copies into the plugins directory. The copy is not a Git checkout: update the
+source and run `./install.sh` again. `omarchy plugin update` only updates
+Git-managed installs. The copy refuses a linked plugin, a Git checkout, or an
+unrelated directory. Coming from the 1.x id `omastoic`, remove that plugin
+before adding this one.
+
+## Update
 
 ```bash
-./install.sh
+omarchy plugin update io.github.rastermanden.omastoic
 ```
 
-This preflights dependencies before copying. **Manual copies are not Git
-checkouts:** update your source checkout and rerun `./install.sh`; `omarchy
-plugin update` only updates Git-managed installs. The installer refuses to
-copy over a linked or Git-managed plugin. Coming from 1.x, uninstall the old
-`omastoic` plugin ID before adding the current one.
+`~/.config/omastoic/` sits outside the plugin tree, so an update does not
+replace `config.json` or `quotes.tsv`. A live upgrade from `2c9a0e9` kept both.
 
 ## Use
 
 ```bash
-omastoic toggle                # select Stoics, or restore displaced art
-omastoic next                  # another quote, only if we still own the slot
-omastoic preview               # MUTATING: select Stoics and launch the saver
-                               # native: --input is the canvas just written
-omastoic show --cols 92 --rows 25  # read-only text export; no desktop/state writes
+omastoic toggle                 # Stoics on, or give the slot back
+omastoic next                   # another quote, only while we still own it
+omastoic preview                # select Stoics if needed, and start the saver
+omastoic show --cols 92 --rows 25
 omastoic status
-omastoic config                # Stoics, their quotes, the interval, and a new quote
-omastoic ui                    # same settings in a Quickshell panel
-omastoic config --plain        # same, but the pickers are numbered prompts
-omastoic config --authors marcus,seneca --interval 90
-omastoic config --authors all --interval 60
-omastoic config --quotes marcus=q01,q02
-omastoic config --quotes marcus=none --quotes seneca=all
-omastoic config --add          # author, citation, and text
-omastoic config --add $'marcus\tMeditations IX.1\tYour line.'
-omastoic config --list
+omastoic config                 # Stoics, quotes, seconds, and one of your own
+omastoic config --plain         # numbered prompts instead of keys
+omastoic ui                     # the same settings in a Quickshell panel
+omastoic --help                 # help, and nothing else
 ```
 
-**Omarchy's branding commands win.** Edit Text, Set From Image and Restore
-Default hand the slot back, including while idle. The reconciler turns Stoics
-off without overwriting the new art. Select Stoics again to opt back in; turning
-them off then restores that newly displaced art.
+`--help` and `-h` do that for every command, including `omastoic uninstall --help`.
 
-Disabling the shell plugin stops **and disables** its rotation service and
-restores branding only if it is still ours. QML hot reload does not count as a
-disable. Re-enable the plugin, then select Stoics again when wanted.
+Omarchy's branding commands win. Edit Text, Set From Image, and Restore
+Default hand the slot back, including while idle. Choose Stoics again to opt
+back in.
 
-### Settings and custom quotes
+Disabling the plugin stops and disables its user service, and restores
+branding only when the canvas is still ours. Reloading QML is not a disable.
 
-Settings are in `~/.config/omastoic/config.json` (or `$XDG_CONFIG_HOME/omastoic/`):
+### Settings
+
+`omastoic ui` opens the panel in a running Omarchy shell. The same choices are
+`omastoic config`.
+
+![Stoics settings: authors, seconds per quote, and a custom quote](docs/screenshots/settings.webp)
+
+`~/.config/omastoic/config.json` (or `$XDG_CONFIG_HOME/omastoic/`):
 
 ```json
 {
   "interval": 60,
-  "authors": ["marcus", "epictetus"]
-}
-```
-
-`interval` is a whole number of seconds from **1 to 3600**. Omit `authors` for
-all six. Invalid/null/type-wrong hand-edited settings fall back to defaults;
-the next interval is read from the file at each rotation. `omastoic config`
-validates and saves the same settings, restarting the daemon if selected.
-
-`quotes` chooses which **bundled** lines stay in rotation, per Stoic. Ids are
-`q01`, `q02`, … in `data/quotes.tsv` order (`omastoic config --list` prints
-them). A missing Stoic means every bundled line of theirs. `[]`
-means none of their bundled lines. Listing every id for a Stoic is stored as
-the default and the key is omitted. `omastoic config --quotes marcus=q01,q02`
-writes that list; `--quotes marcus=all` and `--quotes all` clear restrictions.
-With `omastoic config`, each selected Stoic gets one quote checklist, every line
-ticked until you change it, and then it asks whether to add one of your own
-quotes. Nothing outside omastoic is required.
-
-The Stoics and their quotes are small built-in checklists, not a gum prompt:
-space, `x` or Tab toggles the focused row, `1`–`6` (Stoics) or `1`–`9` (the quotes on
-screen) toggle that numbered row, arrows or `j`/`k` move, `/` types a filter over
-the quote id, citation and text that Enter applies, `a` selects every shown row,
-`n` none, Enter saves, and `q`, Esc or Ctrl-C cancels without writing. The quote
-list pages with PgUp/PgDn or ←/→ and shows the page in its status line.
-Unticking every Stoic keeps all six in rotation, as leaving `authors` out does.
-`omastoic config --plain`, a non-raw terminal or a pipe uses numbered prompts
-instead: enter `1 3`, ids, `all`, `none`, or an empty line to keep the current
-set; end of input cancels.
-
-```json
-{
   "authors": ["marcus", "seneca"],
   "quotes": { "marcus": ["q01", "q04"] }
 }
 ```
 
-Your own `quotes.tsv` in that directory adds entries to the bundled book.
-Each quote is `c01`, `c02`, … in file order. `omastoic config --list` stars the
-ones in rotation, and the quote checklist shows them checked while they
-stay in rotation. A bundled-only id list still keeps every custom line, so a
-new quote shows up without typing its id. Unchecking it in the checkbox then
-leaves it out (`c00` clears every custom line for that Stoic).
-The file lives only under `~/.config/omastoic/`, never in the plugin checkout,
-so `omarchy plugin update` cannot overwrite it or `config.json`. Uninstall
-leaves both in place; `omastoic uninstall --purge` removes them.
+`interval` is a whole number of seconds from 1 to 3600. Leave out `authors`
+for all six. `quotes` limits bundled lines per Stoic. Ids are `q01`, `q02`, …
+in `data/quotes.tsv` order (`omastoic config --list`). A missing Stoic means
+every bundled line of theirs. An empty list means none of them. Listing every
+id is stored as the default and the key is dropped.
 
-`omastoic config --add` in a terminal asks for the author slug, the citation,
-and the text. The first two are single lines, prefilled with an editable example
-(`marcus`, `Meditations IX.1`); Ctrl-U clears a line, Enter accepts it. The text
-is a block: Enter starts a new line and Ctrl-D finishes it. `omastoic config`
-offers the same three questions after the pickers. From a script, or with stdin
-redirected, pass one tab-separated line, or edit the file: **author slug,
-citation, text**. Slugs contain lowercase
-letters, digits, `_` or `-` (64 characters maximum). Custom files are limited to 1 MiB,
-citations to 256 characters and quote text to 4096; terminal control escapes
-are rejected. An unknown author renders without a portrait. A quote selection
-that matches nothing is ignored. The selected Stoics' lines are used when an
-author list is set; otherwise the whole book is. An author list that still
-matches nothing uses the whole book. Custom lines left unchecked stay out of
-both.
+```bash
+omastoic config --authors marcus,seneca --interval 90
+omastoic config --quotes marcus=q01,q02
+omastoic config --quotes marcus=all
+```
 
-The shared canvas uses the smallest measured terminal/monitor grid. Portraits
-are hidden when either dimension cannot fit. Wrapping accounts for CJK,
-combining marks, emoji and long words. All bundled entries fit **40×24** and
-the audit's larger grids. In a **20×8** reading area, an entry that cannot fit
-in full shows **“Resize to read quote” plus its citation**, never a truncated
-quotation. Grids too small even for that return a clear error.
+In a terminal the pickers are checklists. Space, `x`, or Tab toggles the
+focused row. `1`–`9` toggle the numbered row on screen. Arrows or `j`/`k`
+move. `/` filters quotes. `a` selects the rows on screen, `n` clears them,
+Enter saves, and `q`, Esc, or Ctrl-C cancels. `--plain`, a pipe, or a terminal
+that cannot go raw asks for numbers, ids, `all`, `none`, or an empty line to
+keep the current set.
 
-The portraits in this release remain **AI-imagined illustrations**, not
-historical photographs. Rebuild details are in [docs/ART.md](docs/ART.md).
+### Your own quotes
+
+`omastoic config --add` appends to `~/.config/omastoic/quotes.tsv`. It asks for
+a slug, a citation, and the text. A script can pass one tab-separated line:
+
+```bash
+omastoic config --add $'marcus\tMeditations IX.1\tYour line.'
+```
+
+A slug is lowercase letters, digits, `_`, or `-`, at most 64 characters.
+Citations stop at 256 characters, quote text at 4096, and the file at 1 MiB.
+Terminal control escapes are rejected. Custom lines are `c01`, `c02`, … in
+file order. A bundled-only id list still keeps them until you uncheck them
+(`c00` clears every custom line for that Stoic). An unknown author has no
+portrait. The file is never inside the plugin checkout.
+
+### On screen
+
+The canvas uses the smallest measured terminal or monitor. Portraits drop out
+when they cannot fit. In a 20×8 reading area, a quote that cannot fit whole
+shows “Resize to read quote” and its citation, never a cut sentence. The
+portraits are AI-imagined illustrations, not photographs.
+[docs/ART.md](docs/ART.md) is how they were made.
+[CREDITS.md](CREDITS.md) names the translations.
+
+### Other native effects
+
+Same kind of canvas, other effects from that `omarchy-screensaver` 1.3.1
+session. Captured with the plugin at `eae779c`.
+
+![Colorshift, Meditations VII.71](docs/screenshots/colorshift-vii71.png)
+
+![Waves, Meditations VII.22](docs/screenshots/waves-vii22.png)
+
+![Highlight, Meditations VI.6](docs/screenshots/highlight-vi6.png)
 
 ## Remove
 
 ```bash
 omastoic uninstall
-# Or use Omarchy's normal removal:
 omarchy plugin remove io.github.rastermanden.omastoic
 ```
 
-CLI uninstall stops/disables the service, restores owned branding, removes its
-menu block and owned plumbing, and asks Omarchy to remove the plugin. Host
-removal also triggers the independent Bash cleanup watcher. Quotes/settings
-remain; `omastoic uninstall --purge` removes those too. Changed/unrelated
-launchers, completions, unit files and art are not overwritten or deleted.
-Conflicts are reported instead of hidden. A failed/partial setup can be retried
-or removed with the same commands (or `./uninstall.sh` from the checkout).
+Both stop and disable the user service, restore branding when it is still
+ours, and remove the menu block, the `omastoic` link, completions, user units,
+and the prune script. `omastoic uninstall` also asks Omarchy to remove the
+plugin. Removing it from Omarchy runs the same cleanup.
 
-Implementation details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Kept on purpose: `~/.config/omastoic/` (`config.json` and `quotes.tsv`).
+`omastoic uninstall --purge` deletes that directory too.
+
+Also removed: the other files under `~/.local/state/omastoic/` (`cell.json`,
+`launch.err`, `recent.json`, `owned/`) and an empty `~/.local/lib/omastoic/`.
+`transaction.flock` can remain. It is the lock that uninstall holds until the
+process exits. A launcher, completion, unit, or piece of art that is not ours
+is left alone and reported instead of overwritten.
+
+A partial setup can be retried or removed with the same commands, or with
+`./uninstall.sh` from a checkout.
+
+## If something fails
+
+- `no screensaver backend` means the package for this machine is missing.
+  Current dev: `omarchy pkg add omarchy-screensaver`. Older terminal saver:
+  `omarchy pkg add ttfx`.
+- Do not run a command named `omarchy-screensaver`. The program is
+  `/usr/lib/omarchy-screensaver/omarchy-screensaver`, and Omarchy starts it
+  through `omarchy-launch-screensaver`. Use idle, *System → Screensaver*, or
+  `omastoic preview`.
+- `omastoic preview` while a native saver is already up does not restart it.
+  The canvas just written is what the next start reads.
+- Setup prints the missing command and leaves no install marker. Install that
+  command, then `omastoic setup`.
+- `omastoic ui` needs `omarchy-shell` running. If it is not, the command prints
+  the toggle to run once the shell is up.
 
 ## Tests
 
 ```bash
-bun test tests
-omarchy plugin validate .
+./tests/run
 ```
 
-Tests require the real Omarchy host parser, defaults and branding reset command.
-On an Omarchy desktop they are read from `/usr/share/omarchy`; elsewhere set
-`OMARCHY_TEST_ROOT` to a checkout of the audited host revision
-`5eb922f137422ff32a90869a9ba47525a428792d`. GitHub Actions uses that pinned host,
-Bun 1.4.4, sandboxed HOME/XDG directories, the Bun suite, Bash syntax checks and
-`omarchy plugin validate`. No test launches a real saver or changes installed
-plugins, shell config, services or branding.
+That runs the Bun suite, including the QML lint (skipped when this machine has
+no host kit or `qmllint`), then `bash -n` on the shell scripts. When `omarchy`
+is on `PATH` it also runs `omarchy plugin validate`.
 
-Coverage includes the actual host menu parser/parent graph, migration and
-comment-preserving round trips, every quote across the audit size grid,
-config/file ownership, setup failure/retry, concurrent writes, host disable and
-remove/re-add, Restore Default, fragmented socket events and reconnect snapshots.
-The offline source-ledger checks protect the reviewed citations and wording;
-they are not a claim that software can verify ancient authorship.
+The suite needs Omarchy's menu parser and branding reset. On a desktop those
+come from `/usr/share/omarchy`. Elsewhere set `OMARCHY_TEST_ROOT` to host
+revision `5eb922f137422ff32a90869a9ba47525a428792d`. GitHub Actions uses that
+pin, Bun 1.4.4, a sandbox home, `./tests/run`, and `omarchy plugin validate`
+on a `git archive` of HEAD. The suite does not launch a real saver or change
+an installed desktop. One test runs
+`/usr/lib/omarchy-screensaver/omarchy-screensaver --headless` when that file
+exists. It does not call the bare name.
 
-MIT licensed code. Translation editions and artwork provenance:
-[CREDITS.md](CREDITS.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+Release preflight is
+[build-omarchy-plugins](https://github.com/tcballard/build-omarchy-plugins) at
+`edc72aa3b3762e20ca543df8b472ba1a3b7f52c7`, kept outside this checkout.
+`omarchy plugin add` clones every tracked file.
+
+MIT license. Translations and portraits: [CREDITS.md](CREDITS.md).
+History: [CHANGELOG.md](CHANGELOG.md).
+Vulnerabilities: [SECURITY.md](SECURITY.md).
