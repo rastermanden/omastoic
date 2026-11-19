@@ -51,13 +51,20 @@ test("native preview writes a fresh canvas and launches with --input", async () 
 
 test("native preview explains a missing screensaver binary", async () => {
   const s = sandbox();
-  s.stub("omarchy-launch-screensaver", "exec /usr/lib/omarchy-screensaver/omarchy-screensaver \"$@\"");
+  // The installed package lives at /usr/lib/omarchy-screensaver/omarchy-screensaver.
+  // Execing that path runs the real binary, which then fails with a Wayland
+  // error when no compositor is up. A basename of omarchy-screensaver that is
+  // not that file still produces bash's missing-exec message, and never the
+  // package.
+  const missing = join(s.home, "missing/omarchy-screensaver");
+  nativeLauncher(s, `exec ${missing} "$@"`);
   try {
     const result = await s.cli(["preview"]);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("omarchy pkg add omarchy-screensaver");
     expect(result.stderr).not.toContain("No such file or directory");
     expect(result.stderr).not.toContain("not found");
+    expect(result.stderr).not.toContain("wayland");
   } finally { s.cleanup(); }
 });
 
