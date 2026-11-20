@@ -35,6 +35,7 @@ Item {
   property string notice: ""
   property string error: ""
   property bool quoteOpen: false
+  onQuoteOpenChanged: if (quoteOpen) Qt.callLater(function() { root.reveal(quoteForm) })
   property bool listOpen: false
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
   readonly property string statusText: error !== "" ? error : notice
@@ -69,6 +70,15 @@ Item {
   }
 
   function close() { opened = false }
+
+  function reveal(item) {
+    if (!item) return
+    var pos = item.mapToItem(scroller.contentItem, 0, 0)
+    var top = pos.y
+    var bottom = pos.y + item.height
+    if (top < scroller.contentY) scroller.contentY = Math.max(0, top - 8)
+    else if (bottom > scroller.contentY + scroller.height) scroller.contentY = Math.max(0, bottom - scroller.height + 8)
+  }
 
   function dismiss() {
     if (shell && typeof shell.hide === "function") shell.hide(root.pluginId)
@@ -250,6 +260,7 @@ Item {
       bordered: true
       foreground: root.ink
       onClicked: host.activated()
+      onActiveFocusChanged: if (activeFocus) root.reveal(host)
     }
     Rectangle {
       anchors.fill: inner
@@ -341,6 +352,7 @@ Item {
         MouseArea { anchors.fill: parent; onClicked: {} }
 
         Flickable {
+          id: scroller
           anchors.fill: parent
           anchors.margins: Style.spacing.popupPadding
           contentHeight: content.implicitHeight
@@ -528,6 +540,7 @@ Item {
                 stepSize: 5
                 foreground: root.ink
                 onModified: function(value) { root.interval = value; root.scheduleApply() }
+                onActiveFocusChanged: if (activeFocus) root.reveal(secondsField)
               }
               Rectangle {
                 anchors.fill: parent
@@ -548,6 +561,7 @@ Item {
             }
 
             Column {
+              id: quoteForm
               width: parent.width
               visible: root.quoteOpen
               spacing: Style.space(8)
@@ -584,6 +598,7 @@ Item {
                   foreground: root.ink
                   onTextChanged: root.newCitation = text
                   Keys.onReturnPressed: root.addQuote()
+                  onActiveFocusChanged: if (activeFocus) root.reveal(citationField)
                 }
                 Rectangle {
                   anchors.fill: parent
@@ -612,6 +627,7 @@ Item {
                   foreground: root.ink
                   onTextChanged: root.newText = text
                   Keys.onReturnPressed: root.addQuote()
+                  onActiveFocusChanged: if (activeFocus) root.reveal(textField)
                 }
                 Rectangle {
                   anchors.fill: parent
