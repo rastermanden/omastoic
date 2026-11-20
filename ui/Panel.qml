@@ -25,6 +25,8 @@ Item {
 
   property var settings: ({})
   property var samples: []
+  property int portraitFont: 8
+  property real portraitLine: 13.592
   property var custom: []
   property bool intervalApplied: true
   property bool adopting: false
@@ -149,6 +151,8 @@ Item {
     var saved = parsed.settings && parsed.settings.authors instanceof Array ? parsed.settings.authors : []
     settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
     samples = parsed.samples instanceof Array ? parsed.samples : []
+    portraitFont = Number(parsed.portraitFont) || 8
+    portraitLine = Number(parsed.portraitLine) || 13.592
     custom = parsed.custom instanceof Array ? parsed.custom : []
     intervalApplied = parsed.intervalApplied !== false
     interval = Number(settings.interval) || 60
@@ -406,9 +410,9 @@ Item {
                   text: root.preview ? root.preview.portrait : ""
                   color: root.ink
                   font.family: Style.font.family
-                  font.pixelSize: root.preview && root.preview.portraitFont ? root.preview.portraitFont : 8
+                  font.pixelSize: root.portraitFont
                   lineHeightMode: Text.FixedHeight
-                  lineHeight: root.preview && root.preview.portraitLine ? root.preview.portraitLine : 13.592
+                  lineHeight: root.portraitLine
                   wrapMode: Text.NoWrap
                 }
               }
