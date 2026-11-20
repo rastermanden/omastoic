@@ -69,3 +69,19 @@ Skill folders (58):
 - `typescript-best-practices`
 - `unslop`
 - `why`
+
+## Owner's own skills, not vendored
+
+These folders are the owner's own skills, not vendored. They are not copied from pstack.
+
+- `issue-fra-observation`
+- `projekt-workflow`
+
+## TypeSafe
+
+Copied unchanged from the official skill.
+
+- Source: https://github.com/typesafe-ai/skills/tree/302eea662c54bca6730873fe245bec1d69ebc23d/skills/typesafe-ai
+- Commit: `302eea662c54bca6730873fe245bec1d69ebc23d` (Release v0.6.2, 2026-10-23)
+- License: MIT. The notice is `typesafe-ai/LICENSE`. Copyright (c) 2026 TypeSafe AI.
+- Files: `SKILL.md` and `LICENSE`.
