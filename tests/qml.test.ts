@@ -36,6 +36,8 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain('text: "Omastoic"');
   expect(source).toContain('label: "Preview"');
   expect(source).toContain("height: Style.font.body * 1.35 * 3");
+  expect(source).toContain("fontSizeMode: Text.Fit");
+  expect(source).toContain("width: Style.space(88)");
   expect(source).not.toContain("maximumLineCount: 4");
   expect(source).toContain("focusable: true");
   expect(source).toContain("component RingButton");

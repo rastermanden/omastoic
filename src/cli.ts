@@ -1269,7 +1269,7 @@ async function panelState(): Promise<string> {
       id: quote?.id ?? "",
       citation: quote?.citation ?? "",
       text: quote?.text ?? "",
-      portrait: portraitDownscale(block, 6, 8),
+      portrait: portraitDownscale(block, 18, 24),
     });
   }
   return JSON.stringify(

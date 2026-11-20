@@ -381,6 +381,7 @@ Item {
               spacing: Style.space(14)
 
               Item {
+                id: portraitSlot
                 width: Style.space(88)
                 height: Style.font.caption * 6
                 clip: true
@@ -389,7 +390,11 @@ Item {
                   text: root.preview ? root.preview.portrait : ""
                   color: root.ink
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: portraitSlot.width
+                  fontSizeMode: Text.Fit
+                  minimumPixelSize: 1
+                  horizontalAlignment: Text.AlignHCenter
+                  verticalAlignment: Text.AlignVCenter
                   lineHeight: 0.9
                   wrapMode: Text.NoWrap
                   clip: true

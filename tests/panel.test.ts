@@ -159,6 +159,15 @@ test("panel state includes a cited sample, the backend, and no writes", async ()
     expect(state.samples[0].text).toBe("It is peculiar to man to love even those who do wrong.");
     expect(state.samples[0].text).not.toContain("…");
     expect(state.samples[0].portrait).toMatch(/\S/);
+    const grid = (art: string) => {
+      const lines = art.split("\n");
+      return { rows: lines.length, cols: Math.max(...lines.map((line) => [...line].length)) };
+    };
+    const marcus = state.samples.find((sample: { slug: string }) => sample.slug === "marcus");
+    const seneca = state.samples.find((sample: { slug: string }) => sample.slug === "seneca");
+    expect(grid(marcus.portrait)).toEqual({ rows: 18, cols: 24 });
+    expect(grid(seneca.portrait)).toEqual({ rows: 18, cols: 24 });
+    expect(marcus.portrait).not.toBe(seneca.portrait);
     expect(["native", "terminal", "missing"]).toContain(state.backend);
     expect(typeof state.intervalApplied).toBe("boolean");
     expect(state.custom).toEqual([]);
