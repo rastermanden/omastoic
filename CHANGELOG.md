@@ -8,6 +8,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 2.4.1 - 2026-11-20
+
+### Fixed
+
+- Years on a selected Stoic stay readable over the selected-row tint. The date
+  colour clears 4.5:1 on that tint in Tokyo Night and Catppuccin Latte.
+- Arrow keys move through the author chips when you add a quote. Left and
+  right stay on the row, and up and down move a row. The move starts from the
+  chip that has focus. Enter and Space still pick that chip.
+- Opening the settings panel no longer errors while focusing the preview.
+
 ## 2.4.0 - 2026-11-20
 
 ### Changed
