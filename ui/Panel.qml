@@ -306,8 +306,20 @@ Item {
       onStreamFinished: { if (String(text || "").trim() !== "") root.error = root.plainError(text, "Could not open the preview.") }
     }
     onExited: function(exitCode) {
-      if (exitCode === 0) { root.error = ""; root.notice = "Preview opened." }
+      if (exitCode === 0) {
+        root.error = ""
+        root.notice = "Preview opened."
+        previewTimer.restart()
+      } else if (root.notice === "Opening preview…") {
+        root.notice = ""
+      }
     }
+  }
+
+  Timer {
+    id: previewTimer
+    interval: 2500
+    onTriggered: { if (root.notice === "Preview opened.") root.notice = "" }
   }
 
   PanelWindow {
