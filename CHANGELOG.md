@@ -23,8 +23,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   accent wash, and its label is ink at least 4.5:1. A portrait that would
   be cut off while scrolling is hidden. A focused field still scrolls into
   view. A disabled Add quote button does not change colour under the pointer.
-- Builder skills in `.cursor/skills` stay out of `git archive` and out of
-  `install.sh`. `omarchy plugin add` does not install them.
+- Builder skills in `.cursor/skills` are left out of `git archive`, and
+  `install.sh` does not copy them. `omarchy plugin add` clones the
+  repository, so the files are in that clone. The shell loads the manifest
+  entry points, not those skills.
 
 ### Fixed
 
