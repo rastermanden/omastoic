@@ -74,3 +74,17 @@ Map this loop onto pstack:
 9. End the run with a handoff kept outside the repo: TASK, STATUS, OUTPUT,
    SOURCES, REVIEWS, DONE-EVIDENCE (raw command output), DECISIONS,
    UNCERTAINTIES, DO-NOT-ASSUME.
+
+## Lessons
+
+Rules from past corrections, each with what enforces it.
+
+- A QML method must not reuse an Item property name. `Item.focus` is a
+  property, so a `function focus()` does not shadow it and calling it throws.
+  `tests/qml.test.ts` fails if a `function focus()` reappears.
+- A QML delegate that declares any required property and reads `index` must
+  also declare `required property int index`. Without that declaration
+  `index` is undefined and every row acts as row 0. `tests/qml.test.ts` fails
+  when a delegate does that.
+- Green `bun run verify` and green CI are not done on their own. The working
+  loop above is part of done, and its review and unslop steps are not optional.

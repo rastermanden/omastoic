@@ -62,13 +62,17 @@ Item {
   // Placeholders stay lower so they read as hints, not as typed text.
   readonly property color quiet: Qt.rgba(ink.r, ink.g, ink.b, 0.88)
   readonly property color hint: Qt.rgba(ink.r, ink.g, ink.b, 0.7)
+  // The roster dates sit on the selected-row accent wash (0.16). `quiet` at
+  // 0.88 drops below 4.5:1 over that wash in Catppuccin Latte, so the dates get
+  // a stronger ink that still reads quieter than the author's name.
+  readonly property color dates: Qt.rgba(ink.r, ink.g, ink.b, 0.92)
 
   function open(payloadJson) {
     opened = true
     quoteOpen = false
     listOpen = false
     reload()
-    Qt.callLater(function() { if (root.opened) previewButton.focus() })
+    Qt.callLater(function() { if (root.opened) previewButton.takeFocus() })
   }
 
   function close() { opened = false }
@@ -256,7 +260,9 @@ Item {
     implicitWidth: labelText.implicitWidth + Style.space(28)
     implicitHeight: labelText.implicitHeight + Style.space(16)
     opacity: available ? 1 : 0.45
-    function focus() { inner.forceActiveFocus() }
+    // Do not name this `focus`. Item already has a `focus` property, and a
+    // method of the same name does not shadow it, so `.focus()` would throw.
+    function takeFocus() { inner.forceActiveFocus() }
     HoverHandler {
       id: buttonHover
       cursorShape: host.available ? Qt.PointingHandCursor : Qt.ArrowCursor
@@ -558,7 +564,7 @@ Item {
                     }
                     Text {
                       text: modelData.dates
-                      color: root.quiet
+                      color: root.dates
                       font.family: Style.font.family
                       font.pixelSize: Style.font.bodySmall
                     }
@@ -636,18 +642,37 @@ Item {
                 font.pixelSize: Style.font.bodySmall
               }
               Grid {
+                id: authorGrid
                 width: parent.width
                 columns: 3
                 rowSpacing: Style.space(6)
                 columnSpacing: Style.space(6)
                 Repeater {
+                  id: authorChips
                   model: root.samples
                   delegate: RingButton {
                     required property var modelData
-                    width: Math.floor((parent.width - Style.space(12)) / 3)
+                    required property int index
+                    property int chipIndex: index
+                    width: Math.floor((authorGrid.width - Style.space(12)) / 3)
                     label: modelData.name
                     picked: root.newAuthor === modelData.slug
                     onActivated: root.newAuthor = modelData.slug
+                    Keys.onPressed: function(event) {
+                      var key = event.key
+                      if (key !== Qt.Key_Left && key !== Qt.Key_Right && key !== Qt.Key_Up && key !== Qt.Key_Down) return
+                      event.accepted = true
+                      var columns = authorGrid.columns
+                      var target = -1
+                      if (key === Qt.Key_Left && chipIndex % columns > 0) target = chipIndex - 1
+                      else if (key === Qt.Key_Right && chipIndex % columns < columns - 1) target = chipIndex + 1
+                      else if (key === Qt.Key_Up) target = chipIndex - columns
+                      else if (key === Qt.Key_Down) target = chipIndex + columns
+                      if (target >= 0 && target < root.samples.length) {
+                        var chip = authorChips.itemAt(target)
+                        if (chip) chip.takeFocus()
+                      }
+                    }
                   }
                 }
               }
