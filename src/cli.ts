@@ -20,7 +20,8 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
+import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type BundledQuote, type Quote } from "./canvas.ts";
+import { headerPortraitLayout, padPortrait, portraitDownscale } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
@@ -322,32 +323,41 @@ function brandingStillOurs(): boolean {
   }
 }
 
-async function render(size?: { cols: number; rows: number }, remember = true): Promise<string> {
+async function renderQuote(size?: { cols: number; rows: number }, forced?: Quote): Promise<{ text: string; recent: number[] }> {
   const quotes = await quoteBook();
   if (!quotes.length) throw new Error("the quote book is empty");
 
-  const chosen = pick(quotes, await recent());
-  if (remember) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
-
+  const chosen = forced ? { quote: forced, recent: await recent() } : pick(quotes, await recent());
   const grid = size ?? (await screensaverSize());
   const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
-  return compose(chosen.quote, (await authors()).get(chosen.quote.author), {
-    cols: grid.cols,
-    rows: grid.rows,
-    art,
-  });
+  return {
+    text: compose(chosen.quote, (await authors()).get(chosen.quote.author), {
+      cols: grid.cols,
+      rows: grid.rows,
+      art,
+    }),
+    recent: chosen.recent,
+  };
+}
+
+async function render(size?: { cols: number; rows: number }, remember = true, forced?: Quote): Promise<string> {
+  const drawn = await renderQuote(size, forced);
+  if (remember && !forced) atomicWrite(join(STATE, "recent.json"), JSON.stringify(drawn.recent));
+  return drawn.text;
 }
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
-async function writeBranding(takeSlot = false): Promise<boolean> {
+async function writeBranding(takeSlot = false, forced?: Quote): Promise<boolean> {
   // Recheck after rendering too: a user's branding command may run while we
   // measure terminals. All our writers hold the transaction lock.
   const before = await Bun.file(BRANDING).text().catch(() => null);
   if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
-  const canvas = `${await render()}\n`;
+  const drawn = await renderQuote(undefined, forced);
+  const canvas = `${drawn.text}\n`;
   if ((await Bun.file(BRANDING).text().catch(() => null)) !== before) { standAside(); return false; }
   atomicWrite(BRANDING, canvas);
   await rememberWrite(canvas);
+  if (!forced) atomicWrite(join(STATE, "recent.json"), JSON.stringify(drawn.recent));
   return true;
 }
 
@@ -1249,21 +1259,55 @@ async function configure(rest: string[]): Promise<number> {
 async function panelState(): Promise<string> {
   const roster = await authors();
   const settings = await config();
+  const bundled = await bundledBook();
   const custom = await indexedCustom();
-  const catalog = [...choicesOf(await bundledBook()), ...choicesOf(custom.quotes)];
+  const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   const selected = settings.authors?.length ? settings.authors : [...roster.keys()];
+  const backend = await installedBackend();
+  const header = headerPortraitLayout();
+  const samples = [];
+  for (const author of roster.values()) {
+    const quote = bundled
+      .filter((row) => row.author === author.slug)
+      .sort((a, b) => a.text.length - b.text.length || a.id.localeCompare(b.id))[0];
+    const art = await loadArt(join(ROOT, "art"), author.slug);
+    const block = art?.join("\n") ?? "";
+    samples.push({
+      slug: author.slug,
+      name: author.name,
+      dates: author.dates,
+      id: quote?.id ?? "",
+      citation: quote?.citation ?? "",
+      text: quote?.text ?? "",
+      portrait: padPortrait(portraitDownscale(block, header.rows, header.cols), header.rows, header.cols),
+    });
+  }
   return JSON.stringify(
     {
       settings,
       summary: describeSettings(settings, roster, catalog),
       allAuthors: !settings.authors?.length,
+      backend,
+      intervalApplied: backend !== "native",
       authors: [...roster.values()].map((author) => ({
         slug: author.slug,
         name: author.name,
         dates: author.dates,
         selected: selected.includes(author.slug),
       })),
+      samples,
+      portraitFont: header.fontPx,
+      portraitLine: header.cellHeight,
+      portraitWidth: header.width,
+      portraitHeight: header.height,
       customQuotes: custom.quotes.length,
+      custom: custom.quotes.map((quote) => ({
+        id: quote.id,
+        author: quote.author,
+        name: roster.get(quote.author)?.name ?? quote.author,
+        citation: quote.citation,
+        text: quote.text,
+      })),
       customQuotesError: custom.error ?? "",
       configPath: SETTINGS_FILE,
       quotesPath: join(USER_CONFIG, "quotes.tsv"),
@@ -1271,6 +1315,33 @@ async function panelState(): Promise<string> {
     null,
     2,
   );
+}
+
+/** Drop one custom row and renumber the ids that settings still name. */
+function withoutCustomQuote(quotes: Quote[], id: string): { quotes: Quote[]; removed: Quote } | { error: string } {
+  const canonical = canonicalQuoteId(id);
+  if (!canonical || canonical === "c00" || !canonical.startsWith("c")) return { error: "Only a quote you added can be removed." };
+  const indexed = indexCustom(quotes);
+  const hit = indexed.find((quote) => quote.id === canonical);
+  if (!hit) return { error: "That quote is not one of yours." };
+  return { quotes: quotes.filter((quote) => !(quote.author === hit.author && quote.citation === hit.citation && quote.text === hit.text)), removed: hit };
+}
+
+function remapRemovedQuote(settings: Settings, before: BundledQuote[], removedId: string): Settings {
+  if (!settings.quotes) return settings;
+  const remaining = before.filter((quote) => quote.id !== removedId);
+  const renumbered = indexCustom(remaining);
+  const nextId = new Map(remaining.map((quote, index) => [quote.id, renumbered[index].id]));
+  const quotes: Record<string, string[]> = {};
+  for (const [author, ids] of Object.entries(settings.quotes)) {
+    const mapped = ids.flatMap((kept) => {
+      if (kept === removedId) return [];
+      if (kept.startsWith("c") && kept !== "c00") return nextId.has(kept) ? [nextId.get(kept)!] : [];
+      return [kept];
+    });
+    quotes[author] = mapped;
+  }
+  return { ...settings, quotes };
 }
 
 /** Collapse a panel field so it stays one quotes.tsv row, exactly like the prompts. */
@@ -1312,7 +1383,7 @@ async function panelApply(raw: string): Promise<number> {
     console.error(`omastoic: ${(error as Error).message}`);
     return 1;
   }
-  let settingsTouched = false;
+  const savedBefore = compactSettings(next, slugs, catalog, custom.readable);
 
   if (Object.hasOwn(value, "interval")) {
     const seconds =
@@ -1322,7 +1393,6 @@ async function panelApply(raw: string): Promise<number> {
       return 1;
     }
     next.interval = seconds;
-    settingsTouched = true;
   }
 
   if (Object.hasOwn(value, "authors")) {
@@ -1333,11 +1403,10 @@ async function panelApply(raw: string): Promise<number> {
     const wanted = [...new Set(value.authors as string[])];
     const unknown = wanted.find((slug) => !slugs.includes(slug));
     if (unknown) {
-      console.error(`omastoic: unknown author ${unknown} — try: ${slugs.join(", ")} (or an empty list for all six)`);
+      console.error("omastoic: That is not one of the Stoics. Pick a name from the list.");
       return 1;
     }
     next.authors = wanted;
-    settingsTouched = true;
   }
 
   let added: Quote | null = null;
@@ -1347,10 +1416,55 @@ async function panelApply(raw: string): Promise<number> {
       console.error(`omastoic: ${quote.error}`);
       return 1;
     }
+    if (!slugs.includes(quote.quote.author)) {
+      console.error("omastoic: That is not one of the Stoics. Pick a name from the list.");
+      return 1;
+    }
     added = quote.quote;
   }
 
+  let removedId = "";
+  let pendingQuoteFile: { path: string; body: string } | null = null;
+  if (Object.hasOwn(value, "removeQuote")) {
+    if (typeof value.removeQuote !== "string") {
+      console.error("omastoic: Only a quote you added can be removed.");
+      return 1;
+    }
+    const gone = withoutCustomQuote(custom.quotes, value.removeQuote);
+    if ("error" in gone) {
+      console.error(`omastoic: ${gone.error}`);
+      return 1;
+    }
+    removedId = value.removeQuote.trim().toLowerCase();
+    const path = join(USER_CONFIG, "quotes.tsv");
+    const read = readExisting(path);
+    if (read.missing) {
+      console.error("omastoic: That quote is not one of yours.");
+      return 1;
+    }
+    let dropped = false;
+    const body = read.text.split("\n").filter((line) => {
+      if (dropped || !line.trim() || line.startsWith("#")) return true;
+      const [author, citation, ...rest] = line.split("\t");
+      const same = author?.trim() === gone.removed.author && citation?.trim() === gone.removed.citation && rest.join(" ").trim() === gone.removed.text;
+      if (same) { dropped = true; return false; }
+      return true;
+    }).join("\n");
+    if (!dropped) {
+      console.error("omastoic: That quote is not one of yours.");
+      return 1;
+    }
+    // Settings are saved before this write. A failed save leaves the quote file intact.
+    pendingQuoteFile = { path, body: body.endsWith("\n") || body === "" ? body : `${body}\n` };
+    next = remapRemovedQuote(next, custom.quotes, canonicalQuoteId(removedId) ?? removedId);
+    catalog = [...choicesOf(bundled), ...choicesOf(indexCustom(gone.quotes))];
+  }
+
   let selectionTouched = false;
+  if (added && pendingQuoteFile) {
+    console.error("omastoic: Add or remove one quote at a time.");
+    return 1;
+  }
   if (added) {
     const code = await appendQuotes([quoteRow(added)], true);
     if (code !== 0) return code;
@@ -1363,8 +1477,11 @@ async function panelApply(raw: string): Promise<number> {
     }
   }
 
-  if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog, custom.readable);
-  if (settingsTouched || added) await restartDaemon();
+  const after = compactSettings(next, slugs, catalog, custom.readable);
+  const settingsChanged = JSON.stringify(savedBefore) !== JSON.stringify(after) || selectionTouched;
+  if (settingsChanged) await saveSettings(next, slugs, catalog, custom.readable);
+  if (pendingQuoteFile) atomicWrite(pendingQuoteFile.path, pendingQuoteFile.body);
+  if (settingsChanged || added || removedId) await restartDaemon();
   console.log(await panelState());
   return 0;
 }
@@ -1495,10 +1612,24 @@ async function main(): Promise<number> {
       }
       return 0;
     case "preview": {
-      if (!enabled()) {
+      let forced: Quote | undefined;
+      if (rest[0] === "--quote") {
+        const id = canonicalQuoteId(rest[1] ?? "");
+        const found = id ? [...(await bundledBook()), ...(await indexedCustom()).quotes].find((quote) => quote.id === id) : undefined;
+        if (!found) {
+          console.error("omastoic: That quote is not in the book.");
+          return 1;
+        }
+        forced = found;
+      }
+      const wasEnabled = enabled();
+      if (!wasEnabled) {
         const code = await on();
         if (code) return code;
-      } else if (!(await writeBranding())) return 1;
+      }
+      if (forced || wasEnabled) {
+        if (!(await writeBranding(false, forced))) return 1;
+      }
       const backend = await installedBackend();
       if (backend === "missing") {
         console.error("omastoic: no screensaver backend — install omarchy-screensaver, or ttfx for the older terminal saver (omarchy pkg add ttfx)");
@@ -1514,7 +1645,7 @@ async function main(): Promise<number> {
       const code = await launchScreensaver(backend);
       if (backend === "terminal") {
         await waitForLiveGrid();
-        if (!(await writeBranding())) return 1;
+        if (!(await writeBranding(false, forced))) return 1;
       }
       return code;
     }

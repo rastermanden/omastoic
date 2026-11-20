@@ -31,6 +31,77 @@ test("the panel changes settings only through the CLI bridge", () => {
   expect(source).toContain('"panel", "apply"');
 });
 
+test("the settings panel applies changes itself and shows the quote", () => {
+  const source = panel();
+  expect(source).toContain('text: "Omastoic"');
+  expect(source).toContain('label: "Preview"');
+  expect(source).toContain("id: quoteSlot");
+  expect(source).toContain("height: Style.font.body * 1.35 * 3");
+  expect(source).toContain("anchors.verticalCenter: quoteSlot.verticalCenter");
+  expect(source).not.toContain("fontSizeMode");
+  expect(source).toContain("lineHeightMode: Text.FixedHeight");
+  expect(source).toContain("font.pixelSize: root.portraitFont");
+  expect(source).toContain("lineHeight: root.portraitLine");
+  expect(source).toContain("portraitFont = Number(parsed.portraitFont)");
+  expect(source).not.toContain("preview.portraitFont");
+  expect(source).not.toContain("preview.portraitLine");
+  expect(source).not.toContain("maximumLineCount: 4");
+  expect(source).toContain("focusable: true");
+  expect(source).toContain("component RingButton");
+  expect(source).toContain("border.color: Commons.Color.accent");
+  expect(source).toContain("Every ");
+  expect(source).toContain("seconds");
+  expect(source).toContain("Add your own quote");
+  expect(source).toContain("removeQuote");
+  expect(source).toContain("intervalApplied");
+  expect(source).toContain("placeholderTextColor");
+  expect(source).toContain("Commons.Color.accent");
+  expect(source).not.toContain("Qt.darker");
+  expect(source).not.toContain("MultiSelect");
+  expect(source).not.toContain("Toggle {");
+  expect(source).not.toContain('text: "Save"');
+  expect(source).not.toContain('text: "Reload"');
+  expect(source).not.toContain("Search");
+  expect(source).not.toContain("Author slug");
+  expect(source).toContain("anchors.top: parent.top");
+  expect(source).toContain("restoreCommitted");
+  expect(source).toContain("previewTimer");
+  expect(source).toContain("implicitHeight: Style.font.bodySmall * 2");
+});
+
+function portraitFullyVisible(top: number, height: number, contentY: number, viewport: number) {
+  return top >= contentY - 0.5 && top + height <= contentY + viewport + 0.5;
+}
+
+test("a partial portrait is hidden and focused fields still scroll into view", () => {
+  expect(portraitFullyVisible(0, 80, 0, 400)).toBe(true);
+  expect(portraitFullyVisible(0, 80, 4, 400)).toBe(false);
+  expect(portraitFullyVisible(0, 80, 80, 400)).toBe(false);
+  expect(portraitFullyVisible(100, 80, 100, 400)).toBe(true);
+  const source = panel();
+  expect(source).toContain("function portraitFullyVisible(top, height, contentY, viewport)");
+  expect(source).toContain("return top >= contentY - 0.5 && top + height <= contentY + viewport + 0.5");
+  expect(source).toContain("opacity: portraitFullyVisible(");
+  expect(source).toContain("scroller.contentY = Math.max(0, bottom - scroller.height + 8)");
+});
+
+test("hover stays distinct from focus and from the selected tint", () => {
+  const source = panel();
+  expect(source).toContain("hoverEnabled: true");
+  expect(source).toContain("cursorShape: Qt.PointingHandCursor");
+  expect(source).toContain("HoverHandler");
+  expect(source).toContain("Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16)");
+  expect(source).toContain("Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08)");
+  expect(source).toContain("border.color: activeFocus ? Commons.Color.accent : root.ink");
+  expect(source).toContain("border.color: inner.activeFocus ? Commons.Color.accent : root.ink");
+  expect(source).toContain("buttonHover.hovered && host.available");
+  expect(source).toContain("enabled: !host.available");
+  expect(source).toContain("selected: false");
+  expect(source).toContain("Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.25)");
+  expect(source).toContain("id: labelText");
+  expect(source).toContain("color: root.ink");
+});
+
 test("import rewriting only touches the qs prefix", () => {
   expect(lintableSource("import qs.Ui\nimport qs.Commons as Commons\nimport Quickshell\n")).toBe(
     "import Ui\nimport Commons\nimport Quickshell\n",

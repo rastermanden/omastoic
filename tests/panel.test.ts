@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sandbox } from "./sandbox.ts";
+import { headerPortraitLayout } from "../src/portrait.ts";
 
 type Sandbox = ReturnType<typeof sandbox>;
 
@@ -146,6 +147,105 @@ test("panel apply reads the same JSON from stdin", async () => {
     expect(code).toBe(0);
     expect(JSON.parse(stdout).settings).toEqual({ interval: 15, authors: ["zeno"] });
     expect(saved(s)).toEqual({ interval: 15, authors: ["zeno"] });
+  } finally { s.cleanup(); }
+});
+
+test("panel state includes a cited sample, the backend, and no writes", async () => {
+  const s = sandbox();
+  try {
+    const state = stateOf(await s.cli(["panel", "state"]));
+    expect(state.samples).toHaveLength(6);
+    expect(state.samples[0].slug).toBe("marcus");
+    expect(state.samples[0].citation).toBe("Meditations VII.22");
+    expect(state.samples[0].text).toBe("It is peculiar to man to love even those who do wrong.");
+    expect(state.samples[0].text).not.toContain("…");
+    expect(state.samples[0].portrait).toMatch(/\S/);
+    const grid = (art: string) => {
+      const lines = art.split("\n");
+      return { rows: lines.length, cols: Math.max(...lines.map((line) => [...line].length)) };
+    };
+    const layout = headerPortraitLayout();
+    const marcus = state.samples.find((sample: { slug: string }) => sample.slug === "marcus");
+    const seneca = state.samples.find((sample: { slug: string }) => sample.slug === "seneca");
+    expect(layout.fontPx).toBe(8);
+    expect(layout.cellWidth).toBeGreaterThanOrEqual(5);
+    expect(layout.dotPitch).toBeCloseTo(layout.cellWidth / 2);
+    expect(layout.dotPitch).toBeCloseTo(layout.cellHeight / 4);
+    expect(layout.dotPitch).toBeGreaterThanOrEqual(2);
+    expect(layout.width).toBeGreaterThanOrEqual(80);
+    expect(layout.width).toBeLessThanOrEqual(96);
+    expect(layout.height).toBeGreaterThanOrEqual(80);
+    expect(layout.height).toBeLessThanOrEqual(96);
+    expect(state.portraitFont).toBe(layout.fontPx);
+    expect(state.portraitLine).toBe(layout.cellHeight);
+    expect(state.portraitWidth).toBe(layout.width);
+    expect(state.portraitHeight).toBe(layout.height);
+    expect(grid(marcus.portrait)).toEqual({ rows: layout.rows, cols: layout.cols });
+    expect(grid(seneca.portrait)).toEqual({ rows: layout.rows, cols: layout.cols });
+    expect(marcus.portrait).not.toBe(seneca.portrait);
+    expect(["native", "terminal", "missing"]).toContain(state.backend);
+    expect(typeof state.intervalApplied).toBe("boolean");
+    expect(state.custom).toEqual([]);
+  } finally { s.cleanup(); }
+});
+
+test("preview --quote writes that same line", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  s.put(branding, "art before the Stoics\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const sample = stateOf(await s.cli(["panel", "state"])).samples[0];
+    const shown = await s.cli(["preview", "--quote", sample.id]);
+    expect(shown.code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toContain(sample.citation);
+    expect(readFileSync(branding, "utf8")).toContain("love even those who do");
+    const missing = await s.cli(["preview", "--quote", "q99"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("not in the book");
+  } finally { s.cleanup(); }
+});
+
+test("panel apply leaves the daemon alone when nothing changed", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  s.put(branding, "my art\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect((await s.cli(["on"])).code).toBe(0);
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["panel", "apply", JSON.stringify({ interval: 120, authors: ["marcus"] })])).code).toBe(0);
+    expect(s.log()).toContain("restart omastoic.service");
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["panel", "apply", JSON.stringify({ interval: 120, authors: ["marcus"] })])).code).toBe(0);
+    expect(s.log()).not.toContain("restart");
+    expect(saved(s)).toEqual({ interval: 120, authors: ["marcus"] });
+  } finally { s.cleanup(); }
+});
+
+test("panel apply removes one custom quote and refuses a bundled id", async () => {
+  const s = sandbox();
+  try {
+    expect((await s.cli(["panel", "apply", JSON.stringify({
+      addQuote: { author: "marcus", citation: "Meditations IX.1", text: "First added line." },
+    })])).code).toBe(0);
+    expect((await s.cli(["panel", "apply", JSON.stringify({
+      addQuote: { author: "seneca", citation: "Letters 1.1", text: "Second added line." },
+    })])).code).toBe(0);
+    const bundled = await s.cli(["panel", "apply", JSON.stringify({ removeQuote: "q01" })]);
+    expect(bundled.code).toBe(1);
+    expect(bundled.stderr).toContain("Only a quote you added");
+    expect(readFileSync(quotesPath(s), "utf8")).toContain("Second added line.");
+
+    const removed = await s.cli(["panel", "apply", JSON.stringify({ removeQuote: "c01" })]);
+    expect(removed.code).toBe(0);
+    const state = stateOf(removed);
+    expect(state.custom.map((quote: { text: string }) => quote.text)).toEqual(["Second added line."]);
+    expect(state.custom[0].id).toBe("c01");
+    expect(readFileSync(quotesPath(s), "utf8")).not.toContain("First added line.");
+    const unknown = await s.cli(["panel", "apply", JSON.stringify({ removeQuote: "c09" })]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain("not one of yours");
   } finally { s.cleanup(); }
 });
 

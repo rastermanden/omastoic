@@ -8,6 +8,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- The settings panel applies each change itself. It shows a portrait and a
+  cited quote, lists the six Stoics as rows, and keeps a quote you add behind
+  an add button. On the native screensaver it explains that seconds are not
+  used. Colours come from the Omarchy theme.
+
 ## 2.3.3 - 2026-11-20
 
 ### Fixed
