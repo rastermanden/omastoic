@@ -8,9 +8,12 @@ is documentation. The same line in a shipped file is still an error.
 
 from __future__ import annotations
 
+import sys
+
+sys.dont_write_bytecode = True
+
 import json
 import re
-import sys
 from pathlib import Path, PurePosixPath
 
 CURL_PIPE_SHELL = re.compile(

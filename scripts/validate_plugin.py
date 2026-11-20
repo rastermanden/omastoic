@@ -7,9 +7,12 @@ replaces its file walk. The scan rules stay the upstream ones.
 
 from __future__ import annotations
 
+import sys
+
+sys.dont_write_bytecode = True
+
 import importlib.util
 import os
-import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -21,6 +24,7 @@ def load_upstream(path: Path):
     if spec is None or spec.loader is None:
         raise SystemExit(f"cannot load validator: {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
