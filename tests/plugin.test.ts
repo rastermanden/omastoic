@@ -291,11 +291,12 @@ for (const transition of ["on/off", "disable", "remove"]) {
 
 
 test("install.sh copies a runtime tree without the authoring payload", async () => {
-  // Developer-only material stays out of the copy: a local .agents tree and
-  // the vendored builder skills.
+  // Developer-only material stays out of the copy: the agent skills, their
+  // mirror, and the pointer files.
   const install = readFileSync(join(root, "install.sh"), "utf8");
-  expect(install).toContain("--exclude .agents");
-  expect(install).toContain("--exclude .cursor/skills");
+  for (const path of [".agents", ".claude", ".cursor", ".gemini", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"]) {
+    expect(install).toContain(`--exclude ${path}`);
+  }
   const missing = ["rsync", "jq", "python3"].filter((name) => !Bun.which(name));
   if (missing.length) {
     console.log(`skipping install.sh copy test: ${missing.join(", ")} not on PATH`);
@@ -308,7 +309,10 @@ test("install.sh copies a runtime tree without the authoring payload", async () 
     for (const path of ["manifest.json", "Service.qml", "bin/omastoic"]) {
       expect(existsSync(join(s.plugin, path))).toBe(true);
     }
-    expect(existsSync(join(s.plugin, ".agents"))).toBe(false);
+    for (const path of [".agents", ".claude", ".cursor", ".gemini", "AGENTS.md", "CLAUDE.md", "GEMINI.md"]) {
+      expect(existsSync(join(s.plugin, path))).toBe(false);
+    }
+    expect(existsSync(join(s.plugin, ".github/copilot-instructions.md"))).toBe(false);
     expect(existsSync(join(s.plugin, "assets/local"))).toBe(false);
   } finally { s.cleanup(); }
 });

@@ -2,7 +2,7 @@
 """Security scan used by release preflight, skipping export-ignore paths.
 
 The upstream validator walks every file in the checkout. Builder skills under
-.cursor/skills are export-ignore and are not installed. A download piped to a shell there
+.agents/skills are export-ignore and are not installed. A download piped to a shell there
 is documentation. The same line in a shipped file is still an error.
 """
 
@@ -58,8 +58,6 @@ def _pattern_covers(relative: PurePosixPath, pattern: str) -> bool:
 
 def is_export_ignored(relative: str, patterns: list[str]) -> bool:
     path = PurePosixPath(relative)
-    if path.parts[:2] == (".cursor", "skills"):
-        return True
     return any(_pattern_covers(path, pattern) for pattern in patterns)
 
 

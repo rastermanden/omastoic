@@ -1,10 +1,9 @@
 node_modules/
 .host/
 
-# Authoring skills are not part of the plugin. `omarchy plugin add` clones
-# this tree, and release preflight scans it. Install build-omarchy-plugins
-# outside the checkout; do not put a .agents directory here.
-.agents/
+# `.agents/skills` is the canonical skills directory, committed and shared by
+# every coding agent. It stays out of the installed plugin via `.gitattributes`
+# export-ignore and `install.sh` --exclude, not via this ignore.
 
 # Commons sources are re-downloadable, so they stay out of the repo.
 # assets/local/ is deliberately NOT ignored: those images cannot be
