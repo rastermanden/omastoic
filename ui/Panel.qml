@@ -320,14 +320,20 @@ Item {
               width: parent.width
               spacing: Style.space(14)
 
-              Text {
-                width: Style.space(96)
-                text: root.preview ? root.preview.portrait : ""
-                color: root.ink
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-                lineHeight: 0.9
-                wrapMode: Text.NoWrap
+              Item {
+                width: Style.space(88)
+                height: Style.font.caption * 6
+                clip: true
+                Text {
+                  anchors.fill: parent
+                  text: root.preview ? root.preview.portrait : ""
+                  color: root.ink
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  lineHeight: 0.9
+                  wrapMode: Text.NoWrap
+                  clip: true
+                }
               }
 
               Column {
