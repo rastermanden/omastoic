@@ -323,12 +323,12 @@ function brandingStillOurs(): boolean {
   }
 }
 
-async function render(size?: { cols: number; rows: number }, remember = true): Promise<string> {
+async function render(size?: { cols: number; rows: number }, remember = true, forced?: Quote): Promise<string> {
   const quotes = await quoteBook();
   if (!quotes.length) throw new Error("the quote book is empty");
 
-  const chosen = pick(quotes, await recent());
-  if (remember) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
+  const chosen = forced ? { quote: forced, recent: await recent() } : pick(quotes, await recent());
+  if (remember && !forced) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
 
   const grid = size ?? (await screensaverSize());
   const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
@@ -340,12 +340,12 @@ async function render(size?: { cols: number; rows: number }, remember = true): P
 }
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
-async function writeBranding(takeSlot = false): Promise<boolean> {
+async function writeBranding(takeSlot = false, forced?: Quote): Promise<boolean> {
   // Recheck after rendering too: a user's branding command may run while we
   // measure terminals. All our writers hold the transaction lock.
   const before = await Bun.file(BRANDING).text().catch(() => null);
   if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
-  const canvas = `${await render()}\n`;
+  const canvas = `${await render(undefined, true, forced)}\n`;
   if ((await Bun.file(BRANDING).text().catch(() => null)) !== before) { standAside(); return false; }
   atomicWrite(BRANDING, canvas);
   await rememberWrite(canvas);
@@ -1598,10 +1598,24 @@ async function main(): Promise<number> {
       }
       return 0;
     case "preview": {
-      if (!enabled()) {
+      let forced: Quote | undefined;
+      if (rest[0] === "--quote") {
+        const id = canonicalQuoteId(rest[1] ?? "");
+        const found = id ? [...(await bundledBook()), ...(await indexedCustom()).quotes].find((quote) => quote.id === id) : undefined;
+        if (!found) {
+          console.error("omastoic: That quote is not in the book.");
+          return 1;
+        }
+        forced = found;
+      }
+      const wasEnabled = enabled();
+      if (!wasEnabled) {
         const code = await on();
         if (code) return code;
-      } else if (!(await writeBranding())) return 1;
+      }
+      if (forced || wasEnabled) {
+        if (!(await writeBranding(false, forced))) return 1;
+      }
       const backend = await installedBackend();
       if (backend === "missing") {
         console.error("omastoic: no screensaver backend — install omarchy-screensaver, or ttfx for the older terminal saver (omarchy pkg add ttfx)");
@@ -1617,7 +1631,7 @@ async function main(): Promise<number> {
       const code = await launchScreensaver(backend);
       if (backend === "terminal") {
         await waitForLiveGrid();
-        if (!(await writeBranding())) return 1;
+        if (!(await writeBranding(false, forced))) return 1;
       }
       return code;
     }

@@ -414,7 +414,9 @@ Item {
                     onActivated: {
                       root.error = ""
                       root.notice = "Opening preview…"
-                      previewProcess.command = [root.command, "preview"]
+                      previewProcess.command = root.preview && root.preview.id
+                        ? [root.command, "preview", "--quote", root.preview.id]
+                        : [root.command, "preview"]
                       previewProcess.running = true
                     }
                   }
@@ -422,13 +424,14 @@ Item {
 
                 Text {
                   width: parent.width
+                  height: Style.font.body * 1.35 * 3
                   text: root.preview ? root.preview.text : "Pick at least one Stoic."
                   color: root.ink
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
+                  lineHeight: 1.35
                   wrapMode: Text.WordWrap
-                  maximumLineCount: 4
-                  elide: Text.ElideRight
+                  clip: true
                 }
                 Text {
                   width: parent.width

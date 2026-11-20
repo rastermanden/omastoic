@@ -34,7 +34,9 @@ test("the panel changes settings only through the CLI bridge", () => {
 test("the settings panel applies changes itself and shows the quote", () => {
   const source = panel();
   expect(source).toContain('text: "Omastoic"');
-  expect(source).toContain('text: "Preview"');
+  expect(source).toContain('label: "Preview"');
+  expect(source).toContain("height: Style.font.body * 1.35 * 3");
+  expect(source).not.toContain("maximumLineCount: 4");
   expect(source).toContain("focusable: true");
   expect(source).toContain("component RingButton");
   expect(source).toContain("border.color: Commons.Color.accent");

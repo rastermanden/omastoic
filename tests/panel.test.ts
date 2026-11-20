@@ -155,12 +155,30 @@ test("panel state includes a cited sample, the backend, and no writes", async ()
     const state = stateOf(await s.cli(["panel", "state"]));
     expect(state.samples).toHaveLength(6);
     expect(state.samples[0].slug).toBe("marcus");
-    expect(state.samples[0].citation.length).toBeGreaterThan(0);
-    expect(state.samples[0].text.length).toBeGreaterThan(0);
+    expect(state.samples[0].citation).toBe("Meditations VII.22");
+    expect(state.samples[0].text).toBe("It is peculiar to man to love even those who do wrong.");
+    expect(state.samples[0].text).not.toContain("…");
     expect(state.samples[0].portrait).toMatch(/\S/);
     expect(["native", "terminal", "missing"]).toContain(state.backend);
     expect(typeof state.intervalApplied).toBe("boolean");
     expect(state.custom).toEqual([]);
+  } finally { s.cleanup(); }
+});
+
+test("preview --quote writes that same line", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  s.put(branding, "art before the Stoics\n");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    const sample = stateOf(await s.cli(["panel", "state"])).samples[0];
+    const shown = await s.cli(["preview", "--quote", sample.id]);
+    expect(shown.code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toContain(sample.citation);
+    expect(readFileSync(branding, "utf8")).toContain("love even those who do");
+    const missing = await s.cli(["preview", "--quote", "q99"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("not in the book");
   } finally { s.cleanup(); }
 });
 
