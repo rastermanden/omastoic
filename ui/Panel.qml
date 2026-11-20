@@ -475,11 +475,23 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   anchors.margins: Style.space(6)
                   spacing: Style.space(8)
-                  Text {
-                    text: modelData.mark
-                    color: root.ink
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
+                  Rectangle {
+                    width: Style.space(16)
+                    height: Style.space(16)
+                    radius: Style.space(3)
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: root.selectedAuthors.indexOf(modelData.slug) !== -1 ? Commons.Color.accent : "transparent"
+                    border.width: Math.max(1, Style.space(1))
+                    border.color: root.selectedAuthors.indexOf(modelData.slug) !== -1 ? Commons.Color.accent : root.ink
+                    Text {
+                      anchors.centerIn: parent
+                      visible: root.selectedAuthors.indexOf(modelData.slug) !== -1
+                      text: "✓"
+                      color: Commons.Color.popups.background
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                      font.bold: true
+                    }
                   }
                   Column {
                     width: parent.width - Style.space(80)
