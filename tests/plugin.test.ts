@@ -291,9 +291,11 @@ for (const transition of ["on/off", "disable", "remove"]) {
 
 
 test("install.sh copies a runtime tree without the authoring payload", async () => {
-  // Developer-only material stays out of the copy. The skill tree is not
-  // tracked; the exclude still covers a local .agents directory.
-  expect(readFileSync(join(root, "install.sh"), "utf8")).toContain("--exclude .agents");
+  // Developer-only material stays out of the copy: a local .agents tree and
+  // the vendored builder skills.
+  const install = readFileSync(join(root, "install.sh"), "utf8");
+  expect(install).toContain("--exclude .agents");
+  expect(install).toContain("--exclude .cursor/skills");
   const missing = ["rsync", "jq", "python3"].filter((name) => !Bun.which(name));
   if (missing.length) {
     console.log(`skipping install.sh copy test: ${missing.join(", ")} not on PATH`);

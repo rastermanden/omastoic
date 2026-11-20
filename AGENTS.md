@@ -31,6 +31,30 @@ Do not merge, tag, or release.
 - Putting personal names, email addresses, home paths, or tokens in code or
   commits.
 
+## Working mode
+The builder works in `/poteto-mode`. Read
+`.cursor/skills/poteto-mode/SKILL.md` first, then follow its principles and
+playbooks. These skills sit next to pstack.
+
+- `issue-fra-observation` turns a loose observation into a GitHub issue.
+- `projekt-workflow` is the loop for each change.
+- `typesafe-ai` is the optional TypeSafe judge. Use it only when the owner runs
+  a judge call.
+
+The owner's rules win over poteto-mode's Autonomy section. Never merge, tag,
+release, push to main, or comment on the Omarchy marketplace issue without the
+owner's explicit approval. Open pull requests only.
+
+`TYPESAFE_API_KEY` and any other API key stay out of the repo, CI, and commits.
+Judge calls run only from the owner's operator, not in CI.
+
+Map this loop onto pstack:
+- `/blast-radius` before building
+- `/unslop` on user-facing text
+- `/interrogate` for an independent review
+- `/correct` after each review round
+- `show-me-your-work` for a long run
+
 ## Working loop
 1. Start from an issue with Problem, Expected, Done-check, and a vision fit.
 2. Before building, write down the blast radius: files, user data, and what
