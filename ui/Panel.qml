@@ -254,7 +254,7 @@ Item {
     function focus() { inner.forceActiveFocus() }
     HoverHandler {
       id: buttonHover
-      cursorShape: Qt.PointingHandCursor
+      cursorShape: host.available ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
     Button {
       id: inner
@@ -275,9 +275,9 @@ Item {
       anchors.margins: -2
       z: 1
       enabled: false
-      color: buttonHover.hovered ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, host.picked ? 0.14 : 0.08) : "transparent"
+      color: buttonHover.hovered && host.available ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, host.picked ? 0.14 : 0.08) : "transparent"
       radius: Style.cornerRadius
-      border.width: inner.activeFocus ? 2 : (buttonHover.hovered ? 1 : 0)
+      border.width: inner.activeFocus ? 2 : (buttonHover.hovered && host.available ? 1 : 0)
       border.color: inner.activeFocus ? Commons.Color.accent : root.ink
     }
   }
