@@ -72,7 +72,7 @@ Item {
     quoteOpen = false
     listOpen = false
     reload()
-    Qt.callLater(function() { if (root.opened) previewButton.focus() })
+    Qt.callLater(function() { if (root.opened) previewButton.takeFocus() })
   }
 
   function close() { opened = false }
@@ -260,7 +260,9 @@ Item {
     implicitWidth: labelText.implicitWidth + Style.space(28)
     implicitHeight: labelText.implicitHeight + Style.space(16)
     opacity: available ? 1 : 0.45
-    function focus() { inner.forceActiveFocus() }
+    // Do not name this `focus`. Item already has a `focus` property, and a
+    // method of the same name does not shadow it, so `.focus()` would throw.
+    function takeFocus() { inner.forceActiveFocus() }
     HoverHandler {
       id: buttonHover
       cursorShape: host.available ? Qt.PointingHandCursor : Qt.ArrowCursor
@@ -667,7 +669,7 @@ Item {
                       else if (key === Qt.Key_Down) target = chipIndex + columns
                       if (target >= 0 && target < root.samples.length) {
                         var chip = authorChips.itemAt(target)
-                        if (chip) chip.focus()
+                        if (chip) chip.takeFocus()
                       }
                     }
                   }

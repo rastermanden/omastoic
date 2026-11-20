@@ -111,12 +111,18 @@ test("author chips move focus with the arrow keys and never leave the grid", () 
   for (const key of ["Qt.Key_Left", "Qt.Key_Right", "Qt.Key_Up", "Qt.Key_Down"]) {
     expect(source).toContain(key);
   }
-  // Movement stays inside the grid: the modulo guard keeps left/right in the
-  // row, the target index stays within the model, and focus lands on the chip.
+  // Movement stays inside the grid. The modulo guard keeps left and right in
+  // the row, the target index stays within the model, and focus lands on the
+  // chip through a method whose name does not collide with Item.focus.
   expect(source).toContain("chipIndex % columns");
   expect(source).toContain("target < root.samples.length");
   expect(source).toContain("authorChips.itemAt(target)");
-  expect(source).toContain("chip.focus()");
+  expect(source).toContain("chip.takeFocus()");
+  expect(source).toContain("function takeFocus() { inner.forceActiveFocus() }");
+  // `function focus()` on an Item-derived component does not shadow Item.focus,
+  // so calling `.focus()` throws. The guard below fails the test if that name
+  // ever comes back.
+  expect(source).not.toContain("function focus()");
 });
 
 test("import rewriting only touches the qs prefix", () => {
