@@ -1,0 +1,35 @@
+name: Feature
+description: A change someone needs
+title: "[Feature] "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing or hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What the change should do.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done-check
+      description: Checks that prove the change is done. Use a list.
+      placeholder: |
+        - [ ] …
+    validations:
+      required: true
+  - type: checkboxes
+    id: vision
+    attributes:
+      label: Fits VISION.md?
+      options:
+        - label: I checked this against VISION.md. If it breaks a principle, say which one and why the file should change first.
+          required: true

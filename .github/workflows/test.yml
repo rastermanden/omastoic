@@ -22,7 +22,7 @@ jobs:
             bin
             shell/plugins/menu
             default/omarchy
-      - name: Portable checks
+      - name: Verify
         env:
           OMARCHY_TEST_ROOT: ${{ github.workspace }}/.host
         run: |
@@ -31,9 +31,4 @@ jobs:
           export XDG_DATA_HOME="$HOME/.local/share" XDG_CACHE_HOME="$HOME/.cache"
           export TMPDIR="$RUNNER_TEMP/omastoic-tmp"
           mkdir -p "$HOME" "$TMPDIR"
-          ./tests/run
-      - name: Validate with the real Omarchy CLI
-        run: |
-          mkdir -p "$RUNNER_TEMP/omastoic-plugin"
-          git archive HEAD | tar -xf - -C "$RUNNER_TEMP/omastoic-plugin"
-          .host/bin/omarchy plugin validate "$RUNNER_TEMP/omastoic-plugin"
+          bun run verify
