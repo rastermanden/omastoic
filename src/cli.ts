@@ -20,7 +20,8 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
+import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type BundledQuote, type Quote } from "./canvas.ts";
+import { portraitCrop } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
@@ -1249,21 +1250,48 @@ async function configure(rest: string[]): Promise<number> {
 async function panelState(): Promise<string> {
   const roster = await authors();
   const settings = await config();
+  const bundled = await bundledBook();
   const custom = await indexedCustom();
-  const catalog = [...choicesOf(await bundledBook()), ...choicesOf(custom.quotes)];
+  const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   const selected = settings.authors?.length ? settings.authors : [...roster.keys()];
+  const backend = await installedBackend();
+  const samples = [];
+  for (const author of roster.values()) {
+    const quote = bundled.find((row) => row.author === author.slug);
+    const art = await loadArt(join(ROOT, "art"), author.slug);
+    const block = art?.join("\n") ?? "";
+    samples.push({
+      slug: author.slug,
+      name: author.name,
+      dates: author.dates,
+      citation: quote?.citation ?? "",
+      text: quote?.text ?? "",
+      portrait: portraitCrop(block, 8, 18),
+      mark: portraitCrop(block, 3, 6),
+    });
+  }
   return JSON.stringify(
     {
       settings,
       summary: describeSettings(settings, roster, catalog),
       allAuthors: !settings.authors?.length,
+      backend,
+      intervalApplied: backend !== "native",
       authors: [...roster.values()].map((author) => ({
         slug: author.slug,
         name: author.name,
         dates: author.dates,
         selected: selected.includes(author.slug),
       })),
+      samples,
       customQuotes: custom.quotes.length,
+      custom: custom.quotes.map((quote) => ({
+        id: quote.id,
+        author: quote.author,
+        name: roster.get(quote.author)?.name ?? quote.author,
+        citation: quote.citation,
+        text: quote.text,
+      })),
       customQuotesError: custom.error ?? "",
       configPath: SETTINGS_FILE,
       quotesPath: join(USER_CONFIG, "quotes.tsv"),
@@ -1271,6 +1299,33 @@ async function panelState(): Promise<string> {
     null,
     2,
   );
+}
+
+/** Drop one custom row and renumber the ids that settings still name. */
+function withoutCustomQuote(quotes: Quote[], id: string): { quotes: Quote[]; removed: Quote } | { error: string } {
+  const canonical = canonicalQuoteId(id);
+  if (!canonical || canonical === "c00" || !canonical.startsWith("c")) return { error: "Only a quote you added can be removed." };
+  const indexed = indexCustom(quotes);
+  const hit = indexed.find((quote) => quote.id === canonical);
+  if (!hit) return { error: "That quote is not one of yours." };
+  return { quotes: quotes.filter((quote) => !(quote.author === hit.author && quote.citation === hit.citation && quote.text === hit.text)), removed: hit };
+}
+
+function remapRemovedQuote(settings: Settings, before: BundledQuote[], removedId: string): Settings {
+  if (!settings.quotes) return settings;
+  const remaining = before.filter((quote) => quote.id !== removedId);
+  const renumbered = indexCustom(remaining);
+  const nextId = new Map(remaining.map((quote, index) => [quote.id, renumbered[index].id]));
+  const quotes: Record<string, string[]> = {};
+  for (const [author, ids] of Object.entries(settings.quotes)) {
+    const mapped = ids.flatMap((kept) => {
+      if (kept === removedId) return [];
+      if (kept.startsWith("c") && kept !== "c00") return nextId.has(kept) ? [nextId.get(kept)!] : [];
+      return [kept];
+    });
+    quotes[author] = mapped;
+  }
+  return { ...settings, quotes };
 }
 
 /** Collapse a panel field so it stays one quotes.tsv row, exactly like the prompts. */
@@ -1312,7 +1367,7 @@ async function panelApply(raw: string): Promise<number> {
     console.error(`omastoic: ${(error as Error).message}`);
     return 1;
   }
-  let settingsTouched = false;
+  const savedBefore = compactSettings(next, slugs, catalog, custom.readable);
 
   if (Object.hasOwn(value, "interval")) {
     const seconds =
@@ -1322,7 +1377,6 @@ async function panelApply(raw: string): Promise<number> {
       return 1;
     }
     next.interval = seconds;
-    settingsTouched = true;
   }
 
   if (Object.hasOwn(value, "authors")) {
@@ -1333,11 +1387,10 @@ async function panelApply(raw: string): Promise<number> {
     const wanted = [...new Set(value.authors as string[])];
     const unknown = wanted.find((slug) => !slugs.includes(slug));
     if (unknown) {
-      console.error(`omastoic: unknown author ${unknown} — try: ${slugs.join(", ")} (or an empty list for all six)`);
+      console.error("omastoic: That is not one of the Stoics. Pick a name from the list.");
       return 1;
     }
     next.authors = wanted;
-    settingsTouched = true;
   }
 
   let added: Quote | null = null;
@@ -1347,7 +1400,45 @@ async function panelApply(raw: string): Promise<number> {
       console.error(`omastoic: ${quote.error}`);
       return 1;
     }
+    if (!slugs.includes(quote.quote.author)) {
+      console.error("omastoic: That is not one of the Stoics. Pick a name from the list.");
+      return 1;
+    }
     added = quote.quote;
+  }
+
+  let removedId = "";
+  if (Object.hasOwn(value, "removeQuote")) {
+    if (typeof value.removeQuote !== "string") {
+      console.error("omastoic: Only a quote you added can be removed.");
+      return 1;
+    }
+    const gone = withoutCustomQuote(custom.quotes, value.removeQuote);
+    if ("error" in gone) {
+      console.error(`omastoic: ${gone.error}`);
+      return 1;
+    }
+    removedId = value.removeQuote.trim().toLowerCase();
+    const path = join(USER_CONFIG, "quotes.tsv");
+    const read = readExisting(path);
+    if (read.missing) {
+      console.error("omastoic: That quote is not one of yours.");
+      return 1;
+    }
+    let dropped = false;
+    const body = read.text.split("\n").filter((line) => {
+      if (dropped || !line.trim() || line.startsWith("#")) return true;
+      const [author, citation, ...rest] = line.split("\t");
+      const same = author?.trim() === gone.removed.author && citation?.trim() === gone.removed.citation && rest.join(" ").trim() === gone.removed.text;
+      if (same) { dropped = true; return false; }
+      return true;
+    }).join("\n");
+    if (!dropped) {
+      console.error("omastoic: That quote is not one of yours.");
+      return 1;
+    }
+    atomicWrite(path, body.endsWith("\n") || body === "" ? body : `${body}\n`);
+    next = remapRemovedQuote(next, custom.quotes, canonicalQuoteId(removedId) ?? removedId);
   }
 
   let selectionTouched = false;
@@ -1361,10 +1452,14 @@ async function panelApply(raw: string): Promise<number> {
       next = remembered;
       selectionTouched = true;
     }
+  } else if (removedId) {
+    catalog = [...choicesOf(bundled), ...choicesOf(indexCustom(await customQuotes()))];
   }
 
-  if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog, custom.readable);
-  if (settingsTouched || added) await restartDaemon();
+  const after = compactSettings(next, slugs, catalog, custom.readable);
+  const settingsChanged = JSON.stringify(savedBefore) !== JSON.stringify(after) || selectionTouched;
+  if (settingsChanged) await saveSettings(next, slugs, catalog, custom.readable);
+  if (settingsChanged || added || removedId) await restartDaemon();
   console.log(await panelState());
   return 0;
 }
