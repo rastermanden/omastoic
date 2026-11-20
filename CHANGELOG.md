@@ -8,6 +8,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 2.3.3 - 2026-11-20
+
+### Fixed
+
+- Removing Omastoic from a screensaver slot that was empty at setup removes a
+  later symlink when that link still points at the canvas we wrote. The file
+  it names stays, so the link is not left dangling. A link that points
+  somewhere else is left alone. Noted by HANCORE-linux on marketplace review
+  15412.
+
 ## 2.3.2 - 2026-11-19
 
 ### Fixed

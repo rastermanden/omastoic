@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { sandbox } from "./sandbox.ts";
 
@@ -83,6 +83,48 @@ test("failed activation preserves an already enabled selection and owned canvas"
     expect((await s.cli(["off"])).code).toBe(0);
     expect(readFileSync(branding, "utf8")).toBe("original art\n");
   } finally { s.cleanup(); }
+});
+
+test("removal of an empty slot unlinks a later symlink to the generated canvas and keeps the target", async () => {
+  for (const stop of ["off", "uninstall", "cleanup"] as const) {
+    const s = sandbox();
+    const branding = join(s.config, "omarchy/branding/screensaver.txt");
+    const target = join(s.home, "kept-canvas.txt");
+    try {
+      expect(existsSync(branding)).toBe(false);
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      const canvas = readFileSync(branding, "utf8");
+      renameSync(branding, target);
+      symlinkSync(target, branding);
+      if (stop === "cleanup") s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+      const result = stop === "cleanup" ? await s.prune() : await s.cli([stop]);
+      expect(result.code).toBe(0);
+      expect(() => lstatSync(branding)).toThrow();
+      expect(readFileSync(target, "utf8")).toBe(canvas);
+    } finally { s.cleanup(); }
+  }
+});
+
+test("removal leaves a symlink alone when it no longer points at the generated canvas", async () => {
+  for (const stop of ["off", "cleanup"] as const) {
+    const s = sandbox();
+    const branding = join(s.config, "omarchy/branding/screensaver.txt");
+    const target = join(s.home, "other-art.txt");
+    try {
+      expect(existsSync(branding)).toBe(false);
+      expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+      rmSync(branding);
+      s.put(target, "art the user chose\n");
+      symlinkSync(target, branding);
+      if (stop === "cleanup") s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+      const result = stop === "cleanup" ? await s.prune() : await s.cli([stop]);
+      expect(result.code).toBe(0);
+      expect(lstatSync(branding).isSymbolicLink()).toBe(true);
+      expect(readFileSync(branding, "utf8")).toBe("art the user chose\n");
+      expect(readFileSync(target, "utf8")).toBe("art the user chose\n");
+      expect(readFileSync(join(s.state, "written.sha"), "utf8").length).toBeGreaterThan(0);
+    } finally { s.cleanup(); }
+  }
 });
 
 for (const firstStop of ["off", "uninstall", "cleanup"]) {

@@ -130,9 +130,25 @@ clear_branding() {
     return 1
   fi
   if [[ -L $BRANDING ]]; then
-    rm -f -- "$(readlink -f -- "$BRANDING")"
-  else
-    rm -f -- "$BRANDING"
+    # Remove the link, not the file it names. Deleting that file would leave
+    # the link dangling and could remove a canvas the user moved aside.
+    if ! still_ours; then
+      echo "omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup" >&2
+      return 1
+    fi
+    if ! rm -f -- "$BRANDING"; then
+      echo "omastoic: could not remove the screensaver link — leaving it in place" >&2
+      return 2
+    fi
+    return
+  fi
+  if [[ -e $BRANDING && ! -f $BRANDING ]]; then
+    echo "omastoic: screensaver path is not a regular file — leaving it in place" >&2
+    return 1
+  fi
+  if ! rm -f -- "$BRANDING"; then
+    echo "omastoic: could not remove the screensaver file — leaving it in place" >&2
+    return 2
   fi
 }
 
@@ -144,7 +160,12 @@ if [[ -f $STATE/written.sha ]]; then
     restored=1
   elif still_ours; then
     if [[ $kind == absent ]]; then
-      clear_branding && restored=1
+      if clear_branding; then
+        restored=1
+      else
+        rc=$?
+        if [[ $rc -ne 1 ]]; then exit "$rc"; fi
+      fi
     elif owns backup "$BACKUP"; then
       if commit_branding "$BACKUP"; then
         restored=1
