@@ -522,16 +522,6 @@ Item {
 
             Text {
               width: parent.width
-              visible: !root.intervalApplied
-              text: "The screensaver shows a new quote each time it starts. Seconds are not used."
-              color: root.quiet
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-              wrapMode: Text.WordWrap
-            }
-
-            Text {
-              width: parent.width
               visible: root.intervalApplied
               text: "Seconds each quote stays up"
               color: root.quiet
