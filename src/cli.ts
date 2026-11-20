@@ -17,7 +17,7 @@
 // ran `omarchy branding screensaver image`, say — it stands aside instead of
 // clobbering the new art.
 
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, type BundledQuote, type Quote } from "./canvas.ts";
@@ -390,11 +390,10 @@ async function restoreSlot(): Promise<void> {
   const kind = await Bun.file(DISPLACED).text().catch(() => "legacy");
   let restored = false;
   if (kind === "absent") {
-    if (!brandingStillOurs()) {
+    if (!discardBranding()) {
       leaveChangedBranding();
       return;
     }
-    discardBranding();
     restored = true;
   } else if (existsSync(BACKUP) && owned.owns("backup", BACKUP)) {
     const text = restorationText(BACKUP);
@@ -419,16 +418,35 @@ async function restoreSlot(): Promise<void> {
   rmSync(WRITTEN, { force: true });
 }
 
-/** Remove the canvas we wrote without unlinking a symlink the user put at this path. */
-function discardBranding(): void {
+/**
+ * Remove the canvas we wrote into an empty slot. A symlink is removed itself
+ * when it still resolves to those exact bytes, so the link cannot dangle and
+ * the file it names is left alone. Any other path is left untouched.
+ */
+function discardBranding(): boolean {
+  const absent = (error: unknown): boolean => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
+  };
   let stat;
   try { stat = lstatSync(BRANDING); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+  catch (error) { return absent(error); }
+  if (!brandingStillOurs()) return false;
   if (stat.isSymbolicLink()) {
-    rmSync(realpathSync(BRANDING), { force: true });
-    return;
+    let again;
+    try { again = lstatSync(BRANDING); }
+    catch (error) { return absent(error); }
+    if (!again.isSymbolicLink() || !brandingStillOurs()) return false;
+    unlinkSync(BRANDING);
+    return true;
   }
-  rmSync(BRANDING, { force: true });
+  if (!stat.isFile()) return false;
+  let again;
+  try { again = lstatSync(BRANDING); }
+  catch (error) { return absent(error); }
+  if (!again.isFile() || !brandingStillOurs()) return false;
+  rmSync(BRANDING);
+  return true;
 }
 
 async function stopDaemon(): Promise<void> {
