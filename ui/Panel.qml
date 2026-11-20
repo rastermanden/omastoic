@@ -584,13 +584,20 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
               }
-              Repeater {
-                model: root.samples
-                delegate: RingButton {
-                  required property var modelData
-                  label: modelData.name
-                  picked: root.newAuthor === modelData.slug
-                  onActivated: root.newAuthor = modelData.slug
+              Grid {
+                width: parent.width
+                columns: 3
+                rowSpacing: Style.space(6)
+                columnSpacing: Style.space(6)
+                Repeater {
+                  model: root.samples
+                  delegate: RingButton {
+                    required property var modelData
+                    width: Math.floor((parent.width - Style.space(12)) / 3)
+                    label: modelData.name
+                    picked: root.newAuthor === modelData.slug
+                    onActivated: root.newAuthor = modelData.slug
+                  }
                 }
               }
               Text {
