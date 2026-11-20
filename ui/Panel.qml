@@ -80,6 +80,10 @@ Item {
     else if (bottom > scroller.contentY + scroller.height) scroller.contentY = Math.max(0, bottom - scroller.height + 8)
   }
 
+  function portraitFullyVisible(top, height, contentY, viewport) {
+    return top >= contentY - 0.5 && top + height <= contentY + viewport + 0.5
+  }
+
   function dismiss() {
     if (shell && typeof shell.hide === "function") shell.hide(root.pluginId)
     else close()
@@ -389,6 +393,7 @@ Item {
                 width: Style.space(88)
                 height: Style.font.caption * 6
                 clip: true
+                opacity: portraitFullyVisible(portraitSlot.mapToItem(scroller.contentItem, 0, 0).y, portraitSlot.height, scroller.contentY, scroller.height) ? 1 : 0
                 Text {
                   anchors.fill: parent
                   text: root.preview ? root.preview.portrait : ""

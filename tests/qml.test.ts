@@ -64,6 +64,22 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("implicitHeight: Style.font.bodySmall * 2");
 });
 
+function portraitFullyVisible(top: number, height: number, contentY: number, viewport: number) {
+  return top >= contentY - 0.5 && top + height <= contentY + viewport + 0.5;
+}
+
+test("a partial portrait is hidden and focused fields still scroll into view", () => {
+  expect(portraitFullyVisible(0, 80, 0, 400)).toBe(true);
+  expect(portraitFullyVisible(0, 80, 4, 400)).toBe(false);
+  expect(portraitFullyVisible(0, 80, 80, 400)).toBe(false);
+  expect(portraitFullyVisible(100, 80, 100, 400)).toBe(true);
+  const source = panel();
+  expect(source).toContain("function portraitFullyVisible(top, height, contentY, viewport)");
+  expect(source).toContain("return top >= contentY - 0.5 && top + height <= contentY + viewport + 0.5");
+  expect(source).toContain("opacity: portraitFullyVisible(");
+  expect(source).toContain("scroller.contentY = Math.max(0, bottom - scroller.height + 8)");
+});
+
 test("hover stays distinct from focus and from the selected tint", () => {
   const source = panel();
   expect(source).toContain("hoverEnabled: true");
