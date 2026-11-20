@@ -21,7 +21,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type BundledQuote, type Quote } from "./canvas.ts";
-import { portraitCrop } from "./portrait.ts";
+import { portraitDownscale } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
@@ -1257,17 +1257,19 @@ async function panelState(): Promise<string> {
   const backend = await installedBackend();
   const samples = [];
   for (const author of roster.values()) {
-    const quote = bundled.find((row) => row.author === author.slug);
+    const quote = bundled
+      .filter((row) => row.author === author.slug)
+      .sort((a, b) => a.text.length - b.text.length || a.id.localeCompare(b.id))[0];
     const art = await loadArt(join(ROOT, "art"), author.slug);
     const block = art?.join("\n") ?? "";
     samples.push({
       slug: author.slug,
       name: author.name,
       dates: author.dates,
+      id: quote?.id ?? "",
       citation: quote?.citation ?? "",
       text: quote?.text ?? "",
-      portrait: portraitCrop(block, 8, 18),
-      mark: portraitCrop(block, 3, 6),
+      portrait: portraitDownscale(block, 6, 8),
     });
   }
   return JSON.stringify(
