@@ -36,6 +36,8 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain('text: "Omastoic"');
   expect(source).toContain('text: "Preview"');
   expect(source).toContain("focusable: true");
+  expect(source).toContain("component RingButton");
+  expect(source).toContain("border.color: Commons.Color.accent");
   expect(source).toContain("Every ");
   expect(source).toContain("seconds");
   expect(source).toContain("Add your own quote");

@@ -63,7 +63,7 @@ Item {
     quoteOpen = false
     listOpen = false
     reload()
-    Qt.callLater(function() { if (root.opened) previewButton.forceActiveFocus() })
+    Qt.callLater(function() { if (root.opened) previewButton.focus() })
   }
 
   function close() { opened = false }
@@ -227,6 +227,40 @@ Item {
     applyNow()
   }
 
+  component RingButton: Item {
+    id: host
+    property string label: ""
+    property bool picked: false
+    property bool available: true
+    signal activated()
+    implicitWidth: inner.implicitWidth
+    implicitHeight: inner.implicitHeight
+    function focus() { inner.forceActiveFocus() }
+    Button {
+      id: inner
+      width: host.width
+      height: host.height
+      text: host.label
+      selected: host.picked
+      enabled: host.available
+      opacity: host.available ? 1 : 0.45
+      focusable: true
+      bordered: true
+      foreground: root.ink
+      onClicked: host.activated()
+    }
+    Rectangle {
+      anchors.fill: inner
+      anchors.margins: -2
+      z: 1
+      enabled: false
+      color: "transparent"
+      radius: Style.cornerRadius
+      border.width: inner.activeFocus ? 2 : 0
+      border.color: Commons.Color.accent
+    }
+  }
+
   Timer { id: applyTimer; interval: 300; onTriggered: root.applyNow() }
   Timer {
     id: savedTimer
@@ -360,13 +394,10 @@ Item {
                       font.pixelSize: Style.font.bodySmall
                     }
                   }
-                  Button {
+                  RingButton {
                     id: previewButton
-                    text: "Preview"
-                    focusable: true
-                    bordered: true
-                    foreground: root.ink
-                    onClicked: {
+                    label: "Preview"
+                    onActivated: {
                       root.error = ""
                       root.notice = "Opening preview…"
                       previewProcess.command = [root.command, "preview"]
@@ -482,26 +513,36 @@ Item {
               font.pixelSize: Style.font.bodySmall
             }
 
-            NumberField {
-              id: secondsField
+            Item {
+              width: secondsField.implicitWidth
+              height: secondsField.implicitHeight
               visible: root.intervalApplied
-              label: ""
-              value: root.interval
-              from: 5
-              to: 3600
-              stepSize: 5
-              foreground: root.ink
-              onModified: function(value) { root.interval = value; root.scheduleApply() }
+              NumberField {
+                id: secondsField
+                label: ""
+                value: root.interval
+                from: 5
+                to: 3600
+                stepSize: 5
+                foreground: root.ink
+                onModified: function(value) { root.interval = value; root.scheduleApply() }
+              }
+              Rectangle {
+                anchors.fill: parent
+                anchors.margins: -2
+                enabled: false
+                color: "transparent"
+                radius: Style.cornerRadius
+                border.width: secondsField.field && secondsField.field.activeFocus ? 2 : 0
+                border.color: Commons.Color.accent
+              }
             }
 
             PanelSeparator { foreground: root.ink }
 
-            Button {
-              text: root.quoteOpen ? "Close" : "Add your own quote"
-              focusable: true
-              bordered: true
-              foreground: root.ink
-              onClicked: root.quoteOpen = !root.quoteOpen
+            RingButton {
+              label: root.quoteOpen ? "Close" : "Add your own quote"
+              onActivated: root.quoteOpen = !root.quoteOpen
             }
 
             Column {
@@ -517,14 +558,11 @@ Item {
               }
               Repeater {
                 model: root.samples
-                delegate: Button {
+                delegate: RingButton {
                   required property var modelData
-                  text: modelData.name
-                  focusable: true
-                  bordered: true
-                  selected: root.newAuthor === modelData.slug
-                  foreground: root.ink
-                  onClicked: root.newAuthor = modelData.slug
+                  label: modelData.name
+                  picked: root.newAuthor === modelData.slug
+                  onActivated: root.newAuthor = modelData.slug
                 }
               }
               Text {
@@ -533,14 +571,27 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
               }
-              TextField {
-                id: citationField
+              Item {
                 width: parent.width
-                placeholderText: "Meditations IV.17"
-                placeholderTextColor: root.hint
-                foreground: root.ink
-                onTextChanged: root.newCitation = text
-                Keys.onReturnPressed: root.addQuote()
+                height: citationField.implicitHeight
+                TextField {
+                  id: citationField
+                  width: parent.width
+                  placeholderText: "Meditations IV.17"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: root.newCitation = text
+                  Keys.onReturnPressed: root.addQuote()
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: citationField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
               }
               Text {
                 text: "Quote"
@@ -548,14 +599,27 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
               }
-              TextField {
-                id: textField
+              Item {
                 width: parent.width
-                placeholderText: "The line itself"
-                placeholderTextColor: root.hint
-                foreground: root.ink
-                onTextChanged: root.newText = text
-                Keys.onReturnPressed: root.addQuote()
+                height: textField.implicitHeight
+                TextField {
+                  id: textField
+                  width: parent.width
+                  placeholderText: "The line itself"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: root.newText = text
+                  Keys.onReturnPressed: root.addQuote()
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: textField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
               }
               Text {
                 width: parent.width
@@ -574,24 +638,17 @@ Item {
                 font.pixelSize: Style.font.body
                 wrapMode: Text.WordWrap
               }
-              Button {
-                text: "Add quote"
-                focusable: true
-                bordered: true
-                enabled: root.quoteReady && !root.busy
-                opacity: enabled ? 1 : 0.45
-                foreground: root.ink
-                onClicked: root.addQuote()
+              RingButton {
+                label: "Add quote"
+                available: root.quoteReady && !root.busy
+                onActivated: root.addQuote()
               }
             }
 
-            Button {
+            RingButton {
               visible: root.custom.length > 0
-              text: root.custom.length === 1 ? "1 of your own" : (root.custom.length + " of your own")
-              focusable: true
-              bordered: true
-              foreground: root.ink
-              onClicked: root.listOpen = !root.listOpen
+              label: root.custom.length === 1 ? "1 of your own" : (root.custom.length + " of your own")
+              onActivated: root.listOpen = !root.listOpen
             }
 
             Column {
@@ -612,12 +669,9 @@ Item {
                     font.pixelSize: Style.font.bodySmall
                     elide: Text.ElideRight
                   }
-                  Button {
-                    text: "Remove"
-                    focusable: true
-                    bordered: true
-                    foreground: root.ink
-                    onClicked: root.removeQuote(modelData.id)
+                  RingButton {
+                    label: "Remove"
+                    onActivated: root.removeQuote(modelData.id)
                   }
                 }
               }
