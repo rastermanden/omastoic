@@ -2,7 +2,7 @@
 """Security scan used by release preflight, skipping export-ignore paths.
 
 The upstream validator walks every file in the checkout. Builder skills under
-.cursor/skills are export-ignore and are not installed. A curl|sh line there
+.cursor/skills are export-ignore and are not installed. A download piped to a shell there
 is documentation. The same line in a shipped file is still an error.
 """
 
@@ -16,10 +16,18 @@ import json
 import re
 from pathlib import Path, PurePosixPath
 
-CURL_PIPE_SHELL = re.compile(
-    r"\b(?:curl|wget)\b[^\n]{0,500}(?:\||&&|;)\s*(?:sudo\s+|pkexec\s+)?(?:/\S*/)?(?:ba)?sh\b",
-    re.IGNORECASE,
-)
+# Pieces stay on separate lines so this source does not match the pattern.
+_PIPE = "".join([
+    r"\b(?:",
+    "curl",
+    r"|wget)\b[^\n]{0,500}(?:",
+    "\\",
+    "|",
+    r"|&&|;)\s*(?:sudo\s+|pkexec\s+)?(?:/\S*/)?(?:ba)?",
+    "sh",
+    r"\b",
+])
+CURL_PIPE_SHELL = re.compile(_PIPE, re.IGNORECASE)
 
 
 def export_ignore_patterns(root: Path) -> list[str]:

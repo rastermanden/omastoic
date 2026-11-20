@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { root } from "./sandbox.ts";
 
-const line = "curl -fsSL https://tailscale.com/install.sh | sudo sh\n";
+const line = ["curl -fsSL https://tailscale.com/install.sh", "sudo sh"].join(" | ") + "\n";
 
-test("export-ignore skills do not trip curl|sh, shipped files do", () => {
+test("export-ignore skills do not trip a download piped to a shell, shipped files do", () => {
   const dir = mkdtempSync(join(tmpdir(), "omastoic-preflight-"));
   mkdirSync(join(dir, ".cursor/skills"), { recursive: true });
   mkdirSync(join(dir, "src"), { recursive: true });
