@@ -5,7 +5,7 @@ import { sandbox } from "./sandbox.ts";
 
 const commands = [
   "show", "on", "off", "toggle", "next", "preview", "daemon", "setup", "install",
-  "uninstall", "status", "config", "configure", "panel", "ui", "render-png",
+  "uninstall", "status", "version", "config", "configure", "panel", "ui", "render-png",
 ];
 
 test("--help and -h print usage for every command and do not run it", async () => {
