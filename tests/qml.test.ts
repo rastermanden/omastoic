@@ -97,7 +97,9 @@ test("hover stays distinct from focus and from the selected tint", () => {
   expect(source).toContain("buttonHover.hovered && host.available");
   expect(source).toContain("enabled: !host.available");
   expect(source).toContain("selected: false");
-  expect(source).toContain("Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.45)");
+  expect(source).toContain("Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.25)");
+  expect(source).toContain("id: labelText");
+  expect(source).toContain("color: root.ink");
 });
 
 test("import rewriting only touches the qs prefix", () => {

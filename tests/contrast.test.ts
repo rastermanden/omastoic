@@ -5,8 +5,8 @@ import { join } from "node:path";
 // Omarchy theme foreground on the popup background. The panel mixes the text
 // colour over that background; these pairs are the two themes the panel must hold.
 const themes = {
-  "Tokyo Night": ["#a9b1d6", "#1a1b26"],
-  "Catppuccin Latte": ["#4c4f69", "#eff1f5"],
+  "Tokyo Night": { ink: "#a9b1d6", background: "#1a1b26", accent: "#7aa2f7" },
+  "Catppuccin Latte": { ink: "#4c4f69", background: "#eff1f5", accent: "#1e66f5" },
 } as const;
 
 const channel = (hex: string) => [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
@@ -36,10 +36,14 @@ test("small panel text stays at 4.5:1 and placeholders stay fainter", () => {
   const hint = Number(source.match(/readonly property color hint: Qt\.rgba\(ink\.r, ink\.g, ink\.b, (0\.\d+)\)/)?.[1]);
   expect(quiet).toBeGreaterThan(hint);
   expect(hint).toBeGreaterThan(0);
-  for (const [name, [foreground, background]] of Object.entries(themes)) {
-    expect(contrast(mix(foreground, background, quiet), background), name).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(mix(foreground, background, 1), background), `${name} typed`).toBeGreaterThan(
-      contrast(mix(foreground, background, hint), background),
+  const chip = Number(source.match(/host\.picked\s*\?\s*Qt\.rgba\(Commons\.Color\.accent\.r, Commons\.Color\.accent\.g, Commons\.Color\.accent\.b, (0\.\d+)\)/)?.[1]);
+  expect(chip).toBeGreaterThan(0);
+  for (const [name, theme] of Object.entries(themes)) {
+    expect(contrast(mix(theme.ink, theme.background, quiet), theme.background), name).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(mix(theme.ink, theme.background, 1), theme.background), `${name} typed`).toBeGreaterThan(
+      contrast(mix(theme.ink, theme.background, hint), theme.background),
     );
+    const fill = mix(theme.accent, theme.background, chip);
+    expect(contrast(theme.ink, fill), `${name} selected chip`).toBeGreaterThanOrEqual(4.5);
   }
 });

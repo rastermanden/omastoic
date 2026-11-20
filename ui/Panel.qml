@@ -253,8 +253,9 @@ Item {
     property bool picked: false
     property bool available: true
     signal activated()
-    implicitWidth: inner.implicitWidth
-    implicitHeight: inner.implicitHeight
+    implicitWidth: labelText.implicitWidth + Style.space(28)
+    implicitHeight: labelText.implicitHeight + Style.space(16)
+    opacity: available ? 1 : 0.45
     function focus() { inner.forceActiveFocus() }
     HoverHandler {
       id: buttonHover
@@ -262,23 +263,15 @@ Item {
     }
     Button {
       id: inner
-      width: host.width
-      height: host.height
-      text: host.label
+      anchors.fill: parent
+      text: ""
       selected: false
       enabled: host.available
-      opacity: host.available ? 1 : 0.45
       focusable: true
       bordered: true
       foreground: root.ink
       onClicked: host.activated()
       onActiveFocusChanged: if (activeFocus) root.reveal(host)
-    }
-    MouseArea {
-      anchors.fill: inner
-      z: 2
-      enabled: !host.available
-      hoverEnabled: true
     }
     Rectangle {
       anchors.fill: inner
@@ -286,11 +279,26 @@ Item {
       z: 1
       enabled: false
       color: host.picked
-        ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.45)
+        ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.25)
         : (buttonHover.hovered && host.available ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08) : "transparent")
       radius: Style.cornerRadius
       border.width: inner.activeFocus ? 2 : (buttonHover.hovered && host.available ? 1 : 0)
       border.color: inner.activeFocus ? Commons.Color.accent : root.ink
+    }
+    Text {
+      id: labelText
+      z: 3
+      anchors.centerIn: parent
+      text: host.label
+      color: root.ink
+      font.family: Style.font.family
+      font.pixelSize: Style.font.body
+    }
+    MouseArea {
+      anchors.fill: parent
+      z: 4
+      enabled: !host.available
+      hoverEnabled: true
     }
   }
 
