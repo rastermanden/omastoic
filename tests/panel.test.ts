@@ -169,6 +169,9 @@ test("panel state includes a cited sample, the backend, and no writes", async ()
     const seneca = state.samples.find((sample: { slug: string }) => sample.slug === "seneca");
     expect(layout.fontPx).toBe(8);
     expect(layout.cellWidth).toBeGreaterThanOrEqual(5);
+    expect(layout.dotPitch).toBeCloseTo(layout.cellWidth / 2);
+    expect(layout.dotPitch).toBeCloseTo(layout.cellHeight / 4);
+    expect(layout.dotPitch).toBeGreaterThanOrEqual(2);
     expect(layout.width).toBeGreaterThanOrEqual(80);
     expect(layout.width).toBeLessThanOrEqual(96);
     expect(layout.height).toBeGreaterThanOrEqual(80);

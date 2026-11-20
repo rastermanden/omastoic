@@ -65,16 +65,39 @@ export const BRAILLE_LINE_EM = 1699 / 1000;
 export const HEADER_SLOT_PX = 88;
 export const HEADER_FONT_PX = 8;
 
-/** Cell count for a fixed legible font so the block fills the header slot. */
+/**
+ * Cell count for a fixed legible font so the block fills the header slot.
+ * A cell is 2 dots wide and 4 dots tall, so the line is two advances high
+ * and the dot pitch is the same in both directions.
+ */
 export function headerPortraitLayout(
   slotPx = HEADER_SLOT_PX,
   fontPx = HEADER_FONT_PX,
-): { fontPx: number; rows: number; cols: number; cellWidth: number; cellHeight: number; width: number; height: number } {
+): {
+  fontPx: number;
+  rows: number;
+  cols: number;
+  cellWidth: number;
+  cellHeight: number;
+  dotPitch: number;
+  width: number;
+  height: number;
+} {
   const cellWidth = fontPx * BRAILLE_ADVANCE_EM;
-  const cellHeight = fontPx * BRAILLE_LINE_EM;
+  const cellHeight = cellWidth * 2;
   const cols = Math.max(1, Math.round(slotPx / cellWidth));
   const rows = Math.max(1, Math.round(slotPx / cellHeight));
-  return { fontPx, rows, cols, cellWidth, cellHeight, width: cols * cellWidth, height: rows * cellHeight };
+  const dotPitch = cellWidth / 2;
+  return {
+    fontPx,
+    rows,
+    cols,
+    cellWidth,
+    cellHeight,
+    dotPitch,
+    width: cols * cellWidth,
+    height: rows * cellHeight,
+  };
 }
 
 /** Keep every cell, including blank ones, so the rendered block stays the computed size. */

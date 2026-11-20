@@ -26,7 +26,7 @@ Item {
   property var settings: ({})
   property var samples: []
   property int portraitFont: 8
-  property real portraitLine: 13.592
+  property real portraitLine: 11.2
   property var custom: []
   property bool intervalApplied: true
   property bool adopting: false
@@ -152,7 +152,7 @@ Item {
     settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
     samples = parsed.samples instanceof Array ? parsed.samples : []
     portraitFont = Number(parsed.portraitFont) || 8
-    portraitLine = Number(parsed.portraitLine) || 13.592
+    portraitLine = Number(parsed.portraitLine) || 11.2
     custom = parsed.custom instanceof Array ? parsed.custom : []
     intervalApplied = parsed.intervalApplied !== false
     interval = Number(settings.interval) || 60
