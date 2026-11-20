@@ -45,20 +45,20 @@ with its own idea of the format.
    (the smoke harness) falls back to the file's own directory.
 
 3. **Host components reused** from `/usr/share/omarchy/shell`:
-   `qs.Ui.MultiSelect` (the Stoic roster), `qs.Ui.Toggle` (every Stoic on/off),
-   `qs.Ui.NumberField` (seconds per quote), `qs.Ui.TextField` (author,
-   citation, quote text), `qs.Ui.Button`, `qs.Ui.PanelHero`,
-   `qs.Ui.PanelSectionHeader`, and `qs.Commons.Style` / `Commons.Color` for
-   every color, size and font. The `qs.Ui.Panel` base is *not* reused: it is the
-   bar-widget popup base and needs a live bar instance plus an anchor item, and a
-   summoned overlay has neither.
+   `qs.Ui.NumberField` (seconds, on the terminal saver only), `qs.Ui.TextField`
+   (citation and quote text), `qs.Ui.Button`, `qs.Ui.PanelSectionHeader`, and
+   `qs.Commons.Style` / `Commons.Color` for every color, size and font. The six
+   Stoics are rows in the panel, not a `MultiSelect`. The `qs.Ui.Panel` base is
+   *not* reused: it is the bar-widget popup base and needs a live bar instance
+   plus an anchor item, and a summoned overlay has neither.
 
-4. **Save refuses what the CLI would misread.** An empty pick means "every
-   Stoic" to the CLI, so the panel never sends one: with the toggle off and
-   nobody picked, Save is disabled and a hint says why. A quote with a citation
-   or text but a missing field also disables Save and keeps what was typed. CLI
-   stderr is shown only when the command failed; a successful run may still
-   warn there.
+4. **Changes apply immediately.** There is no Save or Reload. An empty pick is
+   not sent: the CLI would read it as every Stoic, so the last Stoic stays
+   selected and the panel says to pick at least one. A quote is added only when
+   the citation and the words are both filled, and the author is chosen from
+   the roster. `panel apply` restarts the daemon only when the saved settings
+   or the quote file actually changed. CLI stderr is shown only when the
+   command failed, with the `omastoic:` prefix removed.
 
 5. **Opening.** `omastoic ui` runs `omarchy-shell shell toggle <plugin id>`, so a
    Hyprland keybind or a terminal can open and close the panel. The same works
@@ -100,8 +100,8 @@ whose URL the engine already knows.
 
 - Per-quote checklists and the full author/quote pickers stay in
   `omastoic config` in a terminal.
-- Editing or removing an existing custom quote is out of scope for the first
-  version; the panel only adds.
+- Editing the words of an existing custom quote stays in `omastoic config`.
+  The panel can remove one.
 - No bar-widget entry point and no installed keybind: the panel opens by
   command. Bind `omastoic ui` in `~/.config/hypr/bindings.conf` for a key.
 - Strings are English literals; the host kit's `I18n` is not used yet.

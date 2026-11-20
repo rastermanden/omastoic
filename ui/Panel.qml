@@ -6,28 +6,16 @@ import qs.Commons
 import qs.Ui
 import qs.Commons as Commons
 
-// Settings panel for the forms `omastoic config` already owns: which Stoics are
-// in rotation, seconds per quote, and one of your own quotes.
-//
-// The host mounts this as the plugin's `panel` entry point and injects `shell`
-// and `manifest`; `omarchy-shell shell toggle <id>` (or `omastoic ui`) reaches
-// open()/close(). Nothing here reads or writes ~/.config/omastoic: every read is
-// `omastoic panel state` and every write is `omastoic panel apply <json>`, so the
-// CLI keeps its one validator, one lock and one daemon restart.
+// Settings for the choices `omastoic config` already owns.
+// Every read is `panel state` and every write is `panel apply`, so the CLI
+// stays the only validator. Changes apply on their own. There is no Save.
 Item {
   id: root
 
   property var shell: null
   property var manifest: null
-
   property bool opened: false
 
-  // The plugin's own CLI wrapper lives at <plugin>/bin/omastoic, one level up
-  // from this file. The host keeps `__sourceDir` on the manifest it hands a
-  // third-party plugin ("keep __sourceDir: third-party plugins find their
-  // bundled scripts through it"), so the panel does not have to guess the
-  // install path. A bare `Panel` outside the host (the smoke harness) falls
-  // back to the file's own location.
   readonly property string command: {
     var dir = manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
     if (dir !== "") return dir.replace(/\/+$/, "") + "/bin/omastoic"
@@ -35,56 +23,48 @@ Item {
   }
   readonly property string pluginId: (manifest && manifest.id) ? String(manifest.id) : "io.github.rastermanden.omastoic"
 
-  // Saved state as `panel state` reports it.
   property var settings: ({})
-  property var roster: []
-  property string summary: ""
-  property int customQuotes: 0
-  property string busyLabel: ""
-  readonly property bool busy: busyLabel !== ""
+  property var samples: []
+  property var custom: []
+  property bool intervalApplied: true
+  property bool adopting: false
+  property bool saving: false
+  property bool applyQueued: false
+  property var pendingQuote: null
+  property string pendingRemove: ""
+  property string notice: ""
   property string error: ""
+  property bool quoteOpen: false
+  property bool listOpen: false
+  readonly property bool busy: notice === "Loading…" || notice === "Saving…"
+  readonly property string statusText: error !== "" ? error : notice
 
-  // Edits, written only when Save is pressed.
   property var selectedAuthors: []
   property int interval: 60
   property string newAuthor: "marcus"
   property string newCitation: ""
   property string newText: ""
 
-  readonly property bool quoteStarted: newCitation.trim() !== "" || newText.trim() !== ""
-  readonly property bool quoteReady: newAuthor.trim() !== "" && newCitation.trim() !== "" && newText.trim() !== ""
-
-  readonly property var allSlugs: roster.map(function(author) { return author.slug })
-  readonly property bool allPicked: roster.length > 0 && allSlugs.every(function(slug) { return selectedAuthors.indexOf(slug) !== -1 })
-
-  // Why Save would be refused, or "" when it can go. An empty pick is not
-  // "all": the CLI reads an empty list as every Stoic, so the panel never sends one.
-  readonly property string blocker: {
-    var missing = []
-    if (selectedAuthors.length === 0) return "Pick at least one Stoic, or turn on all of them."
-    if (quoteStarted && !quoteReady) {
-      if (newAuthor.trim() === "") missing.push("author")
-      if (newCitation.trim() === "") missing.push("citation")
-      if (newText.trim() === "") missing.push("quote text")
-      return "Your quote needs " + missing.join(" and ") + ", or clear it to save without one."
+  readonly property bool quoteReady: newAuthor !== "" && newCitation.trim() !== "" && newText.trim() !== ""
+  readonly property var preview: {
+    for (var i = 0; i < samples.length; i++) {
+      if (selectedAuthors.indexOf(samples[i].slug) !== -1) return samples[i]
     }
-    return ""
+    return null
   }
-
-  function setAuthors(list) {
-    selectedAuthors = list
-    stoicsPicker.values = list
-  }
+  readonly property color ink: Commons.Color.popups.text
+  readonly property color quiet: Qt.rgba(ink.r, ink.g, ink.b, 0.62)
+  readonly property color hint: Qt.rgba(ink.r, ink.g, ink.b, 0.45)
 
   function open(payloadJson) {
     opened = true
+    quoteOpen = false
+    listOpen = false
     reload()
-    Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
+    Qt.callLater(function() { if (root.opened) previewButton.forceActiveFocus() })
   }
 
-  function close() {
-    opened = false
-  }
+  function close() { opened = false }
 
   function dismiss() {
     if (shell && typeof shell.hide === "function") shell.hide(root.pluginId)
@@ -92,16 +72,14 @@ Item {
   }
 
   function reload() {
-    if (busy) return
-    busyLabel = "Loading…"
+    if (notice === "Saving…") return
+    saving = false
     error = ""
+    notice = "Loading…"
     resetRun(stateRun)
     stateProcess.running = true
   }
 
-  // A run is done once it has exited and both streams have been read;
-  // Quickshell does not promise the order. Only a failed run shows its stderr:
-  // a successful one may still warn there (an unreadable settings file, say).
   function resetRun(run) {
     run.exited = false
     run.exitCode = 0
@@ -110,119 +88,170 @@ Item {
     run.streamsLeft = 2
   }
 
-  function settleRun(run, fallback) {
-    if (!run.exited || run.streamsLeft > 0) return
-    busyLabel = ""
-    if (run.exitCode !== 0) error = run.stderr.trim() !== "" ? run.stderr.trim() : fallback
-    else error = adoptState(run.stdout) ? "" : "Could not read the omastoic state."
+  function plainError(text, fallback) {
+    var line = String(text || "").trim().split("\n")[0].replace(/^omastoic:\s*/, "")
+    return line !== "" ? line : fallback
   }
 
-  // One saved state, rendered. Called for `panel state` and for the state that
-  // `panel apply` echoes back, so the panel never shows an unsaved value.
-  //
-  // The kit's inputs keep their own copy of the value and drop an incoming
-  // binding the first time the user edits them, so the saved state is pushed
-  // into them imperatively instead of bound.
+  function settleRun(run, fallback) {
+    if (!run.exited || run.streamsLeft > 0) return
+    if (run.exitCode !== 0) {
+      notice = ""
+      error = plainError(run.stderr, fallback)
+    } else if (!adoptState(run.stdout)) {
+      notice = ""
+      error = "Could not read the settings."
+    } else {
+      error = ""
+      notice = saving ? "Saved" : ""
+      if (saving) savedTimer.restart()
+    }
+    saving = false
+    if (applyQueued) {
+      applyQueued = false
+      applyNow()
+    }
+  }
+
   function adoptState(text) {
     var parsed
-    try {
-      parsed = JSON.parse(String(text || ""))
-    } catch (failure) {
-      return false
-    }
+    try { parsed = JSON.parse(String(text || "")) }
+    catch (failure) { return false }
     if (!parsed || typeof parsed !== "object") return false
+    adopting = true
     var saved = parsed.settings && parsed.settings.authors instanceof Array ? parsed.settings.authors : []
     settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
-    roster = parsed.authors instanceof Array ? parsed.authors : []
-    summary = String(parsed.summary || "")
-    customQuotes = Number(parsed.customQuotes) || 0
+    samples = parsed.samples instanceof Array ? parsed.samples : []
+    custom = parsed.custom instanceof Array ? parsed.custom : []
+    intervalApplied = parsed.intervalApplied !== false
     interval = Number(settings.interval) || 60
-    newCitation = ""
-    newText = ""
-    if (roster.length && !roster.some(function(author) { return author.slug === root.newAuthor }))
-      newAuthor = roster[0].slug
-
-    setAuthors(saved.length ? saved.slice() : allSlugs)
-    secondsField.field.value = interval
-    authorField.text = newAuthor
+    var slugs = []
+    var pool = saved.length ? saved : samples.map(function(author) { return author.slug })
+    for (var i = 0; i < samples.length; i++) {
+      if (pool.indexOf(samples[i].slug) !== -1) slugs.push(samples[i].slug)
+    }
+    selectedAuthors = slugs
+    if (samples.length && !samples.some(function(author) { return author.slug === root.newAuthor }))
+      newAuthor = samples[0].slug
     citationField.text = ""
     textField.text = ""
+    if (secondsField.field) secondsField.field.value = interval
+    adopting = false
     return true
   }
 
-  function toggleAll() {
-    setAuthors(allPicked ? [] : allSlugs)
+  function toggleAuthor(slug) {
+    var next = []
+    var found = false
+    for (var i = 0; i < samples.length; i++) {
+      var id = samples[i].slug
+      var on = selectedAuthors.indexOf(id) !== -1
+      if (id === slug) on = !on
+      if (on) next.push(id)
+      if (id === slug) found = true
+    }
+    if (!found) return
+    if (!next.length) {
+      error = ""
+      notice = "Pick at least one Stoic."
+      return
+    }
+    selectedAuthors = next
+    scheduleApply()
   }
 
-  function save() {
-    if (busy || blocker !== "") return
-    var payload = { interval: interval, authors: selectedAuthors }
-    if (quoteReady) {
-      payload.addQuote = { author: newAuthor, citation: newCitation, text: newText }
-    }
-    busyLabel = "Saving…"
+  function commitInterval() {
+    if (!intervalApplied || !secondsField.field || !secondsField.field.contentItem) return
+    var typed = parseInt(String(secondsField.field.contentItem.text), 10)
+    if (typed >= 1 && typed <= 3600) interval = typed
+  }
+
+  function scheduleApply() {
+    if (adopting || !opened) return
     error = ""
+    applyTimer.restart()
+  }
+
+  function applyNow() {
+    if (!opened) return
+    commitInterval()
+    if (!selectedAuthors.length) {
+      error = ""
+      notice = "Pick at least one Stoic."
+      return
+    }
+    if (busy) { applyQueued = true; return }
+    var payload = { authors: selectedAuthors }
+    if (intervalApplied) payload.interval = interval
+    if (pendingQuote) {
+      payload.addQuote = pendingQuote
+      pendingQuote = null
+    }
+    if (pendingRemove !== "") {
+      payload.removeQuote = pendingRemove
+      pendingRemove = ""
+    }
+    saving = true
+    error = ""
+    notice = "Saving…"
     resetRun(applyRun)
     applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
     applyProcess.running = true
   }
 
-  QtObject {
-    id: stateRun
-    property bool exited: false
-    property int exitCode: 0
-    property string stdout: ""
-    property string stderr: ""
-    property int streamsLeft: 0
+  function addQuote() {
+    if (!quoteReady) {
+      notice = "A quote needs a citation and the words."
+      return
+    }
+    pendingQuote = { author: newAuthor, citation: newCitation.trim(), text: newText.trim() }
+    quoteOpen = false
+    applyNow()
   }
 
-  QtObject {
-    id: applyRun
-    property bool exited: false
-    property int exitCode: 0
-    property string stdout: ""
-    property string stderr: ""
-    property int streamsLeft: 0
+  function removeQuote(id) {
+    pendingRemove = id
+    applyNow()
   }
+
+  Timer { id: applyTimer; interval: 300; onTriggered: root.applyNow() }
+  Timer {
+    id: savedTimer
+    interval: 2200
+    onTriggered: { if (root.notice === "Saved") root.notice = "" }
+  }
+
+  QtObject { id: stateRun; property bool exited: false; property int exitCode: 0; property string stdout: ""; property string stderr: ""; property int streamsLeft: 0 }
+  QtObject { id: applyRun; property bool exited: false; property int exitCode: 0; property string stdout: ""; property string stderr: ""; property int streamsLeft: 0 }
 
   Process {
     id: stateProcess
     command: [root.command, "panel", "state"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: { stateRun.stdout = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "omastoic panel state failed.") }
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: { stateRun.stderr = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "omastoic panel state failed.") }
-    }
-    onExited: function(exitCode) {
-      stateRun.exitCode = exitCode
-      stateRun.exited = true
-      root.settleRun(stateRun, "omastoic panel state failed.")
-    }
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: { stateRun.stdout = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "Could not load settings.") } }
+    stderr: StdioCollector { waitForEnd: true; onStreamFinished: { stateRun.stderr = String(text || ""); stateRun.streamsLeft--; root.settleRun(stateRun, "Could not load settings.") } }
+    onExited: function(exitCode) { stateRun.exitCode = exitCode; stateRun.exited = true; root.settleRun(stateRun, "Could not load settings.") }
   }
 
   Process {
     id: applyProcess
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: { applyRun.stdout = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "omastoic panel apply failed.") }
-    }
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: { applyRun.stdout = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "Could not save that.") } }
+    stderr: StdioCollector { waitForEnd: true; onStreamFinished: { applyRun.stderr = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "Could not save that.") } }
+    onExited: function(exitCode) { applyRun.exitCode = exitCode; applyRun.exited = true; root.settleRun(applyRun, "Could not save that.") }
+  }
+
+  Process {
+    id: previewProcess
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: { applyRun.stderr = String(text || ""); applyRun.streamsLeft--; root.settleRun(applyRun, "omastoic panel apply failed.") }
+      onStreamFinished: { if (String(text || "").trim() !== "") root.error = root.plainError(text, "Could not open the preview.") }
     }
     onExited: function(exitCode) {
-      applyRun.exitCode = exitCode
-      applyRun.exited = true
-      root.settleRun(applyRun, "omastoic panel apply failed.")
+      if (exitCode === 0) { root.error = ""; root.notice = "Preview opened." }
     }
   }
 
   PanelWindow {
     id: window
-
     visible: root.opened
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
@@ -233,161 +262,362 @@ Item {
 
     Rectangle {
       anchors.fill: parent
-      color: Qt.rgba(0, 0, 0, 0.55)
-
-      MouseArea {
-        anchors.fill: parent
-        onClicked: root.dismiss()
-      }
+      color: Commons.Color.menu.scrim
+      MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
     }
 
     Item {
       id: keyCatcher
       anchors.fill: parent
       focus: true
-
       Keys.onEscapePressed: root.dismiss()
+      Keys.onPressed: function(event) {
+        if ((event.key === Qt.Key_S) && (event.modifiers & Qt.ControlModifier)) {
+          root.applyNow()
+          event.accepted = true
+        }
+      }
 
       Rectangle {
         id: card
-
-        anchors.centerIn: parent
-        width: Math.min(Style.space(460), keyCatcher.width - Style.space(48))
-        height: content.implicitHeight + Style.spacing.popupPadding * 2
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(32)
+        width: Math.min(Style.space(520), keyCatcher.width - Style.space(48))
+        height: Math.min(content.implicitHeight + Style.spacing.popupPadding * 2, keyCatcher.height - Style.space(64))
         radius: Style.cornerRadius
         color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
         border.color: Commons.Color.popups.border
-
-        // Only the scrim outside the card dismisses the panel.
         MouseArea { anchors.fill: parent; onClicked: {} }
 
-        Column {
-          id: content
-
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.top: parent.top
+        Flickable {
+          anchors.fill: parent
           anchors.margins: Style.spacing.popupPadding
-          spacing: Style.space(12)
+          contentHeight: content.implicitHeight
+          clip: true
+          flickableDirection: Flickable.VerticalFlick
 
-          PanelHero {
+          Column {
+            id: content
             width: parent.width
-            title: "Stoics"
-            meta: root.summary
-            detail: root.busy ? root.busyLabel : "Screensaver settings"
-            foreground: Commons.Color.popups.text
-          }
+            spacing: Style.space(12)
 
-          PanelSeparator { foreground: Commons.Color.popups.text }
+            Row {
+              width: parent.width
+              spacing: Style.space(14)
 
-          PanelSectionHeader {
-            text: "In rotation"
-            foreground: Commons.Color.popups.text
-          }
+              Text {
+                width: Style.space(96)
+                text: root.preview ? root.preview.portrait : ""
+                color: root.ink
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                lineHeight: 0.9
+                wrapMode: Text.NoWrap
+              }
 
-          Toggle {
-            width: parent.width
-            label: root.roster.length ? "All " + root.roster.length + " Stoics" : "All Stoics"
-            description: "Off keeps only the Stoics picked below."
-            checked: root.allPicked
-            foreground: Commons.Color.popups.text
-            onClicked: root.toggleAll()
-          }
+              Column {
+                width: parent.width - Style.space(110)
+                spacing: Style.space(4)
 
-          MultiSelect {
-            id: stoicsPicker
-            width: parent.width
-            label: "Stoics"
-            values: root.selectedAuthors
-            options: root.roster.map(function(author) {
-              return { value: author.slug, label: author.name, description: author.dates }
-            })
-            noSelectionText: "None picked"
-            onChanged: function(values) { root.selectedAuthors = values }
-          }
+                Row {
+                  width: parent.width
+                  spacing: Style.space(8)
+                  Column {
+                    width: parent.width - previewButton.implicitWidth - Style.space(8)
+                    spacing: Style.space(2)
+                    Text {
+                      text: "Omastoic"
+                      color: root.ink
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.heading
+                      font.bold: true
+                    }
+                    Text {
+                      text: "Screensaver"
+                      color: root.quiet
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                    }
+                  }
+                  Button {
+                    id: previewButton
+                    text: "Preview"
+                    focusable: true
+                    bordered: true
+                    foreground: root.ink
+                    onClicked: {
+                      root.error = ""
+                      root.notice = "Opening preview…"
+                      previewProcess.command = [root.command, "preview"]
+                      previewProcess.running = true
+                    }
+                  }
+                }
 
-          NumberField {
-            id: secondsField
-            label: "Seconds per quote"
-            value: root.interval
-            from: 1
-            to: 3600
-            stepSize: 5
-            foreground: Commons.Color.popups.text
-            onModified: function(value) { root.interval = value }
-          }
+                Text {
+                  width: parent.width
+                  text: root.preview ? root.preview.text : "Pick at least one Stoic."
+                  color: root.ink
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                  maximumLineCount: 4
+                  elide: Text.ElideRight
+                }
+                Text {
+                  width: parent.width
+                  visible: root.preview !== null
+                  text: root.preview ? (root.preview.name + ", " + root.preview.citation) : ""
+                  color: root.quiet
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  wrapMode: Text.WordWrap
+                }
+                Text {
+                  width: parent.width
+                  text: root.intervalApplied ? ("Every " + root.interval + " seconds") : "A new quote each time the screensaver starts"
+                  color: root.quiet
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  wrapMode: Text.WordWrap
+                }
+              }
+            }
 
-          PanelSeparator { foreground: Commons.Color.popups.text }
+            PanelSeparator { foreground: root.ink }
 
-          PanelSectionHeader {
-            text: "Your own quote" + (root.customQuotes > 0 ? " · " + root.customQuotes + " added" : "")
-            foreground: Commons.Color.popups.text
-          }
+            PanelSectionHeader { text: "Who is in rotation"; foreground: root.ink }
 
-          TextField {
-            id: authorField
-            width: parent.width
-            placeholderText: "Author slug, for example marcus"
-            text: "marcus"
-            foreground: Commons.Color.popups.text
-            onTextChanged: root.newAuthor = text
-          }
+            Repeater {
+              model: root.samples
+              delegate: Rectangle {
+                required property var modelData
+                width: parent.width
+                implicitHeight: row.implicitHeight + Style.space(8)
+                radius: Style.cornerRadius
+                color: (root.selectedAuthors.indexOf(modelData.slug) !== -1) ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16) : "transparent"
+                border.width: activeFocus ? Math.max(2, Style.space(2)) : 0
+                border.color: Commons.Color.accent
+                activeFocusOnTab: true
+                Accessible.name: modelData.name
+                Accessible.role: Accessible.CheckBox
 
-          TextField {
-            id: citationField
-            width: parent.width
-            placeholderText: "Citation, for example Meditations IX.1"
-            foreground: Commons.Color.popups.text
-            onTextChanged: root.newCitation = text
-          }
+                Row {
+                  id: row
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.margins: Style.space(6)
+                  spacing: Style.space(8)
+                  Text {
+                    text: modelData.mark
+                    color: root.ink
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                  Column {
+                    width: parent.width - Style.space(80)
+                    Text {
+                      text: modelData.name
+                      color: root.ink
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+                    }
+                    Text {
+                      text: modelData.dates
+                      color: root.quiet
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                    }
+                  }
+                }
 
-          TextField {
-            id: textField
-            width: parent.width
-            placeholderText: "The line itself"
-            foreground: Commons.Color.popups.text
-            onTextChanged: root.newText = text
-          }
+                MouseArea { anchors.fill: parent; onClicked: root.toggleAuthor(modelData.slug) }
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    root.toggleAuthor(modelData.slug)
+                    event.accepted = true
+                  }
+                }
+              }
+            }
 
-          Row {
-            spacing: Style.space(10)
+            Text {
+              width: parent.width
+              visible: !root.intervalApplied
+              text: "The screensaver shows a new quote each time it starts. Seconds are not used."
+              color: root.quiet
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              width: parent.width
+              visible: root.intervalApplied
+              text: "Seconds each quote stays up"
+              color: root.quiet
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            NumberField {
+              id: secondsField
+              visible: root.intervalApplied
+              label: ""
+              value: root.interval
+              from: 5
+              to: 3600
+              stepSize: 5
+              foreground: root.ink
+              onModified: function(value) { root.interval = value; root.scheduleApply() }
+            }
+
+            PanelSeparator { foreground: root.ink }
 
             Button {
-              text: "Save"
+              text: root.quoteOpen ? "Close" : "Add your own quote"
+              focusable: true
               bordered: true
-              enabled: !root.busy && root.blocker === ""
-              foreground: Commons.Color.popups.text
-              onClicked: root.save()
+              foreground: root.ink
+              onClicked: root.quoteOpen = !root.quoteOpen
+            }
+
+            Column {
+              width: parent.width
+              visible: root.quoteOpen
+              spacing: Style.space(8)
+
+              Text {
+                text: "Who said it"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              Repeater {
+                model: root.samples
+                delegate: Button {
+                  required property var modelData
+                  text: modelData.name
+                  focusable: true
+                  bordered: true
+                  selected: root.newAuthor === modelData.slug
+                  foreground: root.ink
+                  onClicked: root.newAuthor = modelData.slug
+                }
+              }
+              Text {
+                text: "Citation"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              TextField {
+                id: citationField
+                width: parent.width
+                placeholderText: "Meditations IV.17"
+                placeholderTextColor: root.hint
+                foreground: root.ink
+                onTextChanged: root.newCitation = text
+                Keys.onReturnPressed: root.addQuote()
+              }
+              Text {
+                text: "Quote"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              TextField {
+                id: textField
+                width: parent.width
+                placeholderText: "The line itself"
+                placeholderTextColor: root.hint
+                foreground: root.ink
+                onTextChanged: root.newText = text
+                Keys.onReturnPressed: root.addQuote()
+              }
+              Text {
+                width: parent.width
+                visible: root.newCitation.trim() !== "" || root.newText.trim() !== ""
+                text: {
+                  var who = ""
+                  for (var i = 0; i < root.samples.length; i++) {
+                    if (root.samples[i].slug === root.newAuthor) who = root.samples[i].name
+                  }
+                  var cite = root.newCitation.trim()
+                  var line = root.newText.trim()
+                  return who + (cite !== "" ? ", " + cite : "") + (line !== "" ? " — " + line : "")
+                }
+                color: root.ink
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WordWrap
+              }
+              Button {
+                text: "Add quote"
+                focusable: true
+                bordered: true
+                enabled: root.quoteReady && !root.busy
+                opacity: enabled ? 1 : 0.45
+                foreground: root.ink
+                onClicked: root.addQuote()
+              }
             }
 
             Button {
-              text: "Reload"
+              visible: root.custom.length > 0
+              text: root.custom.length === 1 ? "1 of your own" : (root.custom.length + " of your own")
+              focusable: true
               bordered: true
-              enabled: !root.busy
-              foreground: Commons.Color.popups.text
-              onClicked: root.reload()
+              foreground: root.ink
+              onClicked: root.listOpen = !root.listOpen
             }
-          }
 
-          Text {
-            width: parent.width
-            visible: root.error === "" && root.blocker !== ""
-            text: root.blocker
-            color: Qt.darker(Commons.Color.popups.text, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
+            Column {
+              width: parent.width
+              visible: root.listOpen && root.custom.length > 0
+              spacing: Style.space(6)
+              Repeater {
+                model: root.custom
+                delegate: Row {
+                  required property var modelData
+                  width: parent.width
+                  spacing: Style.space(8)
+                  Text {
+                    width: parent.width - Style.space(96)
+                    text: modelData.name + ", " + modelData.citation
+                    color: root.ink
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                  }
+                  Button {
+                    text: "Remove"
+                    focusable: true
+                    bordered: true
+                    foreground: root.ink
+                    onClicked: root.removeQuote(modelData.id)
+                  }
+                }
+              }
+            }
 
-          Text {
-            width: parent.width
-            visible: root.error !== ""
-            text: root.error
-            color: Commons.Color.urgent
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
+            Item {
+              width: parent.width
+              implicitHeight: Style.font.bodySmall * 2 + Style.space(4)
+              Text {
+                width: parent.width
+                text: root.statusText
+                color: root.error !== "" ? Commons.Color.urgent : root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+              }
+            }
           }
         }
       }

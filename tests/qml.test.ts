@@ -31,6 +31,29 @@ test("the panel changes settings only through the CLI bridge", () => {
   expect(source).toContain('"panel", "apply"');
 });
 
+test("the settings panel applies changes itself and shows the quote", () => {
+  const source = panel();
+  expect(source).toContain('text: "Omastoic"');
+  expect(source).toContain('text: "Preview"');
+  expect(source).toContain("focusable: true");
+  expect(source).toContain("Every ");
+  expect(source).toContain("seconds");
+  expect(source).toContain("Add your own quote");
+  expect(source).toContain("removeQuote");
+  expect(source).toContain("intervalApplied");
+  expect(source).toContain("placeholderTextColor");
+  expect(source).toContain("Commons.Color.accent");
+  expect(source).not.toContain("Qt.darker");
+  expect(source).not.toContain("MultiSelect");
+  expect(source).not.toContain("Toggle {");
+  expect(source).not.toContain('text: "Save"');
+  expect(source).not.toContain('text: "Reload"');
+  expect(source).not.toContain("Search");
+  expect(source).not.toContain("Author slug");
+  expect(source).toContain("anchors.top: parent.top");
+  expect(source).toContain("implicitHeight: Style.font.bodySmall * 2");
+});
+
 test("import rewriting only touches the qs prefix", () => {
   expect(lintableSource("import qs.Ui\nimport qs.Commons as Commons\nimport Quickshell\n")).toBe(
     "import Ui\nimport Commons\nimport Quickshell\n",
