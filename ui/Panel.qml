@@ -439,16 +439,22 @@ Item {
                   }
                 }
 
-                Text {
+                Item {
+                  id: quoteSlot
                   width: parent.width
                   height: Style.font.body * 1.35 * 3
-                  text: root.preview ? root.preview.text : "Pick at least one Stoic."
-                  color: root.ink
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.body
-                  lineHeight: 1.35
-                  wrapMode: Text.WordWrap
                   clip: true
+                  Text {
+                    width: parent.width
+                    anchors.verticalCenter: quoteSlot.verticalCenter
+                    text: root.preview ? root.preview.text : "Pick at least one Stoic."
+                    color: root.ink
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    lineHeight: 1.35
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 3
+                  }
                 }
                 Text {
                   width: parent.width
