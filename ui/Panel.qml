@@ -652,6 +652,7 @@ Item {
                   model: root.samples
                   delegate: RingButton {
                     required property var modelData
+                    required property int index
                     property int chipIndex: index
                     width: Math.floor((authorGrid.width - Style.space(12)) / 3)
                     label: modelData.name

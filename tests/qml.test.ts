@@ -125,6 +125,41 @@ test("author chips move focus with the arrow keys and never leave the grid", () 
   expect(source).not.toContain("function focus()");
 });
 
+function delegateBody(source: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") {
+      depth--;
+      if (depth === 0) return source.slice(open, i + 1);
+    }
+  }
+  return source.slice(open);
+}
+
+function delegatesUsingIndexWithoutDeclaringIt(source: string): string[] {
+  const problems: string[] = [];
+  const marker = /delegate\s*:\s*[A-Za-z0-9_.]+\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(source))) {
+    const open = source.indexOf("{", match.index);
+    const body = delegateBody(source, open);
+    const usesIndex = /\bindex\b/.test(body);
+    const requiresProperty = /required\s+property\b/.test(body);
+    const declaresIndex = /required\s+property\s+int\s+index\b/.test(body);
+    if (usesIndex && requiresProperty && !declaresIndex) problems.push(body.slice(0, 60).replace(/\s+/g, " "));
+  }
+  return problems;
+}
+
+test("a required-property delegate that reads index declares it", () => {
+  const broken = "delegate: RingButton { required property var modelData property int chipIndex: index }";
+  const fixed = "delegate: RingButton { required property var modelData required property int index property int chipIndex: index }";
+  expect(delegatesUsingIndexWithoutDeclaringIt(broken)).toHaveLength(1);
+  expect(delegatesUsingIndexWithoutDeclaringIt(fixed)).toEqual([]);
+  expect(delegatesUsingIndexWithoutDeclaringIt(panel())).toEqual([]);
+});
+
 test("import rewriting only touches the qs prefix", () => {
   expect(lintableSource("import qs.Ui\nimport qs.Commons as Commons\nimport Quickshell\n")).toBe(
     "import Ui\nimport Commons\nimport Quickshell\n",
