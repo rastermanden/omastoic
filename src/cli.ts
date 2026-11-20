@@ -1408,6 +1408,7 @@ async function panelApply(raw: string): Promise<number> {
   }
 
   let removedId = "";
+  let pendingQuoteFile: { path: string; body: string } | null = null;
   if (Object.hasOwn(value, "removeQuote")) {
     if (typeof value.removeQuote !== "string") {
       console.error("omastoic: Only a quote you added can be removed.");
@@ -1437,11 +1438,17 @@ async function panelApply(raw: string): Promise<number> {
       console.error("omastoic: That quote is not one of yours.");
       return 1;
     }
-    atomicWrite(path, body.endsWith("\n") || body === "" ? body : `${body}\n`);
+    // Settings are saved before this write. A failed save leaves the quote file intact.
+    pendingQuoteFile = { path, body: body.endsWith("\n") || body === "" ? body : `${body}\n` };
     next = remapRemovedQuote(next, custom.quotes, canonicalQuoteId(removedId) ?? removedId);
+    catalog = [...choicesOf(bundled), ...choicesOf(indexCustom(gone.quotes))];
   }
 
   let selectionTouched = false;
+  if (added && pendingQuoteFile) {
+    console.error("omastoic: Add or remove one quote at a time.");
+    return 1;
+  }
   if (added) {
     const code = await appendQuotes([quoteRow(added)], true);
     if (code !== 0) return code;
@@ -1452,13 +1459,12 @@ async function panelApply(raw: string): Promise<number> {
       next = remembered;
       selectionTouched = true;
     }
-  } else if (removedId) {
-    catalog = [...choicesOf(bundled), ...choicesOf(indexCustom(await customQuotes()))];
   }
 
   const after = compactSettings(next, slugs, catalog, custom.readable);
   const settingsChanged = JSON.stringify(savedBefore) !== JSON.stringify(after) || selectionTouched;
   if (settingsChanged) await saveSettings(next, slugs, catalog, custom.readable);
+  if (pendingQuoteFile) atomicWrite(pendingQuoteFile.path, pendingQuoteFile.body);
   if (settingsChanged || added || removedId) await restartDaemon();
   console.log(await panelState());
   return 0;

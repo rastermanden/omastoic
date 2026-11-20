@@ -40,7 +40,9 @@ Item {
   readonly property string statusText: error !== "" ? error : notice
 
   property var selectedAuthors: []
+  property var committedAuthors: []
   property int interval: 60
+  property int committedInterval: 60
   property string newAuthor: "marcus"
   property string newCitation: ""
   property string newText: ""
@@ -93,14 +95,23 @@ Item {
     return line !== "" ? line : fallback
   }
 
+  function restoreCommitted() {
+    adopting = true
+    selectedAuthors = committedAuthors.slice()
+    interval = committedInterval
+    if (secondsField.field) secondsField.field.value = committedInterval
+    adopting = false
+  }
+
   function settleRun(run, fallback) {
     if (!run.exited || run.streamsLeft > 0) return
-    if (run.exitCode !== 0) {
+    var failed = run.exitCode !== 0
+    var adopted = !failed && adoptState(run.stdout)
+    if (failed || !adopted) {
+      if (saving) restoreCommitted()
       notice = ""
-      error = plainError(run.stderr, fallback)
-    } else if (!adoptState(run.stdout)) {
-      notice = ""
-      error = "Could not read the settings."
+      error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
+      applyQueued = false
     } else {
       error = ""
       notice = saving ? "Saved" : ""
@@ -131,6 +142,8 @@ Item {
       if (pool.indexOf(samples[i].slug) !== -1) slugs.push(samples[i].slug)
     }
     selectedAuthors = slugs
+    committedAuthors = slugs.slice()
+    committedInterval = interval
     if (samples.length && !samples.some(function(author) { return author.slug === root.newAuthor }))
       newAuthor = samples[0].slug
     citationField.text = ""
@@ -183,13 +196,13 @@ Item {
     if (busy) { applyQueued = true; return }
     var payload = { authors: selectedAuthors }
     if (intervalApplied) payload.interval = interval
-    if (pendingQuote) {
-      payload.addQuote = pendingQuote
-      pendingQuote = null
-    }
     if (pendingRemove !== "") {
       payload.removeQuote = pendingRemove
       pendingRemove = ""
+      if (pendingQuote) applyQueued = true
+    } else if (pendingQuote) {
+      payload.addQuote = pendingQuote
+      pendingQuote = null
     }
     saving = true
     error = ""

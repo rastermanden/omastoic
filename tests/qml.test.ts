@@ -51,6 +51,7 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).not.toContain("Search");
   expect(source).not.toContain("Author slug");
   expect(source).toContain("anchors.top: parent.top");
+  expect(source).toContain("restoreCommitted");
   expect(source).toContain("implicitHeight: Style.font.bodySmall * 2");
 });
 
