@@ -323,20 +323,27 @@ function brandingStillOurs(): boolean {
   }
 }
 
-async function render(size?: { cols: number; rows: number }, remember = true, forced?: Quote): Promise<string> {
+async function renderQuote(size?: { cols: number; rows: number }, forced?: Quote): Promise<{ text: string; recent: number[] }> {
   const quotes = await quoteBook();
   if (!quotes.length) throw new Error("the quote book is empty");
 
   const chosen = forced ? { quote: forced, recent: await recent() } : pick(quotes, await recent());
-  if (remember && !forced) atomicWrite(join(STATE, "recent.json"), JSON.stringify(chosen.recent));
-
   const grid = size ?? (await screensaverSize());
   const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
-  return compose(chosen.quote, (await authors()).get(chosen.quote.author), {
-    cols: grid.cols,
-    rows: grid.rows,
-    art,
-  });
+  return {
+    text: compose(chosen.quote, (await authors()).get(chosen.quote.author), {
+      cols: grid.cols,
+      rows: grid.rows,
+      art,
+    }),
+    recent: chosen.recent,
+  };
+}
+
+async function render(size?: { cols: number; rows: number }, remember = true, forced?: Quote): Promise<string> {
+  const drawn = await renderQuote(size, forced);
+  if (remember && !forced) atomicWrite(join(STATE, "recent.json"), JSON.stringify(drawn.recent));
+  return drawn.text;
 }
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
@@ -345,10 +352,12 @@ async function writeBranding(takeSlot = false, forced?: Quote): Promise<boolean>
   // measure terminals. All our writers hold the transaction lock.
   const before = await Bun.file(BRANDING).text().catch(() => null);
   if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
-  const canvas = `${await render(undefined, true, forced)}\n`;
+  const drawn = await renderQuote(undefined, forced);
+  const canvas = `${drawn.text}\n`;
   if ((await Bun.file(BRANDING).text().catch(() => null)) !== before) { standAside(); return false; }
   atomicWrite(BRANDING, canvas);
   await rememberWrite(canvas);
+  if (!forced) atomicWrite(join(STATE, "recent.json"), JSON.stringify(drawn.recent));
   return true;
 }
 
