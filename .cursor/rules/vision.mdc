@@ -1,0 +1,14 @@
+---
+description: Check every change against VISION.md and bun run verify
+alwaysApply: true
+---
+
+Read VISION.md before changing Omastoic. If a change breaks a principle, stop
+and change VISION.md first, on purpose.
+
+`bun run verify` is the check that must pass. It runs the same suite CI runs
+and exits 0 or 1. Do not call the work done while it fails.
+
+User-facing text stays plain. Do not fetch at runtime, do not touch a file
+that is not provably Omastoic's, and do not add a quote without an author and
+an exact source.
