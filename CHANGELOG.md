@@ -8,12 +8,31 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 2.4.0 - 2026-11-20
+
 ### Changed
 
 - The settings panel applies each change itself. It shows a portrait and a
   cited quote, lists the six Stoics as rows, and keeps a quote you add behind
   an add button. On the native screensaver it explains that seconds are not
   used. Colours come from the Omarchy theme.
+- The header portrait fills its slot at a fixed size, and the braille dots are
+  square. A short quote sits in the middle of a three-line area, so the card
+  height does not change. Rows, author chips, and buttons have a hover state
+  separate from focus and from the selected tint. A selected chip uses an
+  accent wash, and its label is ink at least 4.5:1. A portrait that would
+  be cut off while scrolling is hidden. A focused field still scrolls into
+  view. A disabled Add quote button does not change colour under the pointer.
+- Builder skills in `.cursor/skills` are left out of `git archive`, and
+  `install.sh` does not copy them. `omarchy plugin add` clones the
+  repository, so the files are in that clone. The shell loads the manifest
+  entry points, not those skills.
+
+### Fixed
+
+- The recent-quote list updates only after that quote's canvas is the file
+  left on screen. A rotation that loses the screensaver file does not record
+  the quote.
 
 ## 2.3.3 - 2026-11-20
 
