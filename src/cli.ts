@@ -46,6 +46,12 @@ import {
 } from "./settings.ts";
 
 const ROOT = dirname(import.meta.dir);
+
+function manifestVersion(): string {
+  const manifest = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8")) as { version?: unknown };
+  if (typeof manifest.version !== "string" || manifest.version === "") throw new Error("manifest.json has no version");
+  return manifest.version;
+}
 const HOME = process.env.HOME ?? "";
 const CONFIG_HOME = process.env.XDG_CONFIG_HOME ?? join(HOME, ".config");
 const STATE_HOME = process.env.XDG_STATE_HOME ?? join(HOME, ".local/state");
@@ -1510,6 +1516,7 @@ async function status(): Promise<number> {
       : "not found";
 
   console.log(`
+version:          ${manifestVersion()}
 screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
 backend:          ${backendLine}
 settings:         ${describeSettings(await config(), names, [...choicesOf(await bundledBook()), ...choicesOf((await indexedCustom()).quotes)])}
@@ -1537,6 +1544,8 @@ function usage(): string {
                        (--plain asks for numbers instead of keys)
   omastoic ui          open the settings panel in the Omarchy shell
   omastoic status      who has the screensaver, and what is in the quote book
+  omastoic version     print the version from manifest.json
+  omastoic --version   same
   omastoic uninstall   take the service, menu row and plugin back out
 
   omastoic --help      print this and do nothing
@@ -1657,6 +1666,10 @@ async function main(): Promise<number> {
       return install();
     case "uninstall":
       return uninstall({ purge: rest.includes("--purge") });
+    case "version":
+    case "--version":
+      console.log(manifestVersion());
+      return 0;
     case "status":
       return status();
     case "config":
