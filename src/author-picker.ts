@@ -268,7 +268,7 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
     const lines = frameLines(rows, checked, focus, output.columns ?? 0);
     const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
     drawn = lines.length;
-    output.write(`${up}\r\x1b[J${lines.join("\n")}`);
+    writeTerminal(output, `${up}\r\x1b[J${lines.join("\n")}`);
   };
   const onResize = () => { draw(); };
   const onSignal = (signal: string) => {
@@ -279,12 +279,14 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
   const signalListeners = SIGNALS.map((signal) => [signal, () => onSignal(signal)] as const);
 
   try {
+    // Listen before the first paint. A signal in that gap kills the process
+    // while the tty is still raw.
+    for (const [signal, listener] of signalListeners) signals?.on(signal, listener);
     // A terminal that is already raw belongs to whatever set it that way.
     if (!wasRaw) input.setRawMode?.(true);
-    output.write(HIDE_CURSOR);
+    writeTerminal(output, HIDE_CURSOR);
     draw();
     output.on?.("resize", onResize);
-    for (const [signal, listener] of signalListeners) signals?.on(signal, listener);
 
     for (;;) {
       if (!buffer) {

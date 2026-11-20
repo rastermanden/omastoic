@@ -215,7 +215,7 @@ export async function pickQuotesTui(
     const lines = frameLines();
     const up = upTo(drawn);
     drawn = lines.length;
-    output.write(`${up}\r\x1b[J${lines.join("\n")}`);
+    writeTerminal(output, `${up}\r\x1b[J${lines.join("\n")}`);
   };
   const onResize = () => { followFocus(); draw(); };
   const onSignal = (signal: string) => {
@@ -226,12 +226,14 @@ export async function pickQuotesTui(
   const signalListeners = SIGNALS.map((signal) => [signal, () => onSignal(signal)] as const);
 
   try {
+    // Listen before the first paint, so a signal once the list is visible
+    // restores the tty instead of killing the process while it is still raw.
+    for (const [signal, listener] of signalListeners) signals?.on(signal, listener);
     // A terminal that is already raw belongs to whatever set it that way.
     if (!wasRaw) input.setRawMode?.(true);
-    output.write(HIDE_CURSOR);
+    writeTerminal(output, HIDE_CURSOR);
     draw();
     output.on?.("resize", onResize);
-    for (const [signal, listener] of signalListeners) signals?.on(signal, listener);
 
     for (;;) {
       if (!buffer) {

@@ -18,6 +18,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   right stay on the row, and up and down move a row. The move starts from the
   chip that has focus. Enter and Space still pick that chip.
 - Opening the settings panel no longer errors while focusing the preview.
+- Killing `omastoic config` while a prompt is on screen shows the cursor again
+  and restores line editing before the process exits.
 
 ## 2.4.0 - 2026-11-20
 

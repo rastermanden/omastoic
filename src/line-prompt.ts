@@ -47,18 +47,20 @@ function startFrame(io: PickerIo, redraw: () => void): Frame {
   const signalListeners = Object.fromEntries(SIGNALS.map((signal) => [signal, () => onSignal(signal)])) as Record<(typeof SIGNALS)[number], () => void>;
   let drawn = 0;
 
+  // Listen before the first paint, so a signal once the prompt is visible
+  // restores the tty instead of killing the process while it is still raw.
+  for (const signal of SIGNALS) signals?.on(signal, signalListeners[signal]);
   // A terminal that is already raw belongs to whatever set it that way.
   if (!wasRaw) input.setRawMode?.(true);
-  output.write(HIDE_CURSOR);
+  writeTerminal(output, HIDE_CURSOR);
   output.on?.("resize", onResize);
-  for (const signal of SIGNALS) signals?.on(signal, signalListeners[signal]);
 
   return {
     source,
     draw(lines) {
       const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
       drawn = lines.length;
-      output.write(`${up}\r\x1b[J${lines.join("\n")}`);
+      writeTerminal(output, `${up}\r\x1b[J${lines.join("\n")}`);
     },
     done() {
       if (ownsSource) source.close();
