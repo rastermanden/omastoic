@@ -248,6 +248,10 @@ Item {
     implicitWidth: inner.implicitWidth
     implicitHeight: inner.implicitHeight
     function focus() { inner.forceActiveFocus() }
+    HoverHandler {
+      id: buttonHover
+      cursorShape: Qt.PointingHandCursor
+    }
     Button {
       id: inner
       width: host.width
@@ -267,10 +271,10 @@ Item {
       anchors.margins: -2
       z: 1
       enabled: false
-      color: "transparent"
+      color: buttonHover.hovered ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, host.picked ? 0.14 : 0.08) : "transparent"
       radius: Style.cornerRadius
-      border.width: inner.activeFocus ? 2 : 0
-      border.color: Commons.Color.accent
+      border.width: inner.activeFocus ? 2 : (buttonHover.hovered ? 1 : 0)
+      border.color: inner.activeFocus ? Commons.Color.accent : root.ink
     }
   }
 
@@ -487,9 +491,14 @@ Item {
                 width: parent.width
                 implicitHeight: row.implicitHeight + Style.space(8)
                 radius: Style.cornerRadius
-                color: (root.selectedAuthors.indexOf(modelData.slug) !== -1) ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16) : "transparent"
-                border.width: activeFocus ? Math.max(2, Style.space(2)) : 0
-                border.color: Commons.Color.accent
+                color: {
+                  var on = root.selectedAuthors.indexOf(modelData.slug) !== -1
+                  if (on) return Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16)
+                  if (rowPress.containsMouse) return Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08)
+                  return "transparent"
+                }
+                border.width: activeFocus ? Math.max(2, Style.space(2)) : (rowPress.containsMouse ? Math.max(1, Style.space(1)) : 0)
+                border.color: activeFocus ? Commons.Color.accent : root.ink
                 activeFocusOnTab: true
                 Accessible.name: modelData.name
                 Accessible.role: Accessible.CheckBox
@@ -536,7 +545,13 @@ Item {
                   }
                 }
 
-                MouseArea { anchors.fill: parent; onClicked: root.toggleAuthor(modelData.slug) }
+                MouseArea {
+                  id: rowPress
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleAuthor(modelData.slug)
+                }
                 Keys.onPressed: function(event) {
                   if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     root.toggleAuthor(modelData.slug)

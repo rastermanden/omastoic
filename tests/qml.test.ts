@@ -64,6 +64,17 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("implicitHeight: Style.font.bodySmall * 2");
 });
 
+test("hover stays distinct from focus and from the selected tint", () => {
+  const source = panel();
+  expect(source).toContain("hoverEnabled: true");
+  expect(source).toContain("cursorShape: Qt.PointingHandCursor");
+  expect(source).toContain("HoverHandler");
+  expect(source).toContain("Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16)");
+  expect(source).toContain("Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08)");
+  expect(source).toContain("border.color: activeFocus ? Commons.Color.accent : root.ink");
+  expect(source).toContain("border.color: inner.activeFocus ? Commons.Color.accent : root.ink");
+});
+
 test("import rewriting only touches the qs prefix", () => {
   expect(lintableSource("import qs.Ui\nimport qs.Commons as Commons\nimport Quickshell\n")).toBe(
     "import Ui\nimport Commons\nimport Quickshell\n",
