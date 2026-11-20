@@ -21,7 +21,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
 import { dirname, join } from "node:path";
 import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type BundledQuote, type Quote } from "./canvas.ts";
-import { portraitDownscale } from "./portrait.ts";
+import { headerPortraitLayout, padPortrait, portraitDownscale } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
@@ -1255,6 +1255,7 @@ async function panelState(): Promise<string> {
   const catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   const selected = settings.authors?.length ? settings.authors : [...roster.keys()];
   const backend = await installedBackend();
+  const header = headerPortraitLayout();
   const samples = [];
   for (const author of roster.values()) {
     const quote = bundled
@@ -1269,7 +1270,7 @@ async function panelState(): Promise<string> {
       id: quote?.id ?? "",
       citation: quote?.citation ?? "",
       text: quote?.text ?? "",
-      portrait: portraitDownscale(block, 18, 24),
+      portrait: padPortrait(portraitDownscale(block, header.rows, header.cols), header.rows, header.cols),
     });
   }
   return JSON.stringify(
@@ -1286,6 +1287,10 @@ async function panelState(): Promise<string> {
         selected: selected.includes(author.slug),
       })),
       samples,
+      portraitFont: header.fontPx,
+      portraitLine: header.cellHeight,
+      portraitWidth: header.width,
+      portraitHeight: header.height,
       customQuotes: custom.quotes.length,
       custom: custom.quotes.map((quote) => ({
         id: quote.id,

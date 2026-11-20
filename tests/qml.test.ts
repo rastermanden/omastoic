@@ -38,8 +38,9 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("id: quoteSlot");
   expect(source).toContain("height: Style.font.body * 1.35 * 3");
   expect(source).toContain("anchors.verticalCenter: quoteSlot.verticalCenter");
-  expect(source).toContain("fontSizeMode: Text.Fit");
-  expect(source).toContain("width: Style.space(88)");
+  expect(source).not.toContain("fontSizeMode");
+  expect(source).toContain("lineHeightMode: Text.FixedHeight");
+  expect(source).toContain("portraitFont");
   expect(source).not.toContain("maximumLineCount: 4");
   expect(source).toContain("focusable: true");
   expect(source).toContain("component RingButton");

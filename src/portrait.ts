@@ -56,6 +56,42 @@ function inkBounds(bitmap: Bitmap): { left: number; top: number; width: number; 
 }
 
 /**
+ * Qt draws braille from Noto Sans Symbols 2 when the UI face has none.
+ * Advance is 700/1000 em. The line is 1699/1000 em.
+ * Round 3 measured 24 by 18 cells at about 28 by 49 px, which is this face near 1.7 px.
+ */
+export const BRAILLE_ADVANCE_EM = 700 / 1000;
+export const BRAILLE_LINE_EM = 1699 / 1000;
+export const HEADER_SLOT_PX = 88;
+export const HEADER_FONT_PX = 8;
+
+/** Cell count for a fixed legible font so the block fills the header slot. */
+export function headerPortraitLayout(
+  slotPx = HEADER_SLOT_PX,
+  fontPx = HEADER_FONT_PX,
+): { fontPx: number; rows: number; cols: number; cellWidth: number; cellHeight: number; width: number; height: number } {
+  const cellWidth = fontPx * BRAILLE_ADVANCE_EM;
+  const cellHeight = fontPx * BRAILLE_LINE_EM;
+  const cols = Math.max(1, Math.round(slotPx / cellWidth));
+  const rows = Math.max(1, Math.round(slotPx / cellHeight));
+  return { fontPx, rows, cols, cellWidth, cellHeight, width: cols * cellWidth, height: rows * cellHeight };
+}
+
+/** Keep every cell, including blank ones, so the rendered block stays the computed size. */
+export function padPortrait(art: string, rows: number, cols: number): string {
+  if (art === "") return "";
+  const blank = "\u2800";
+  const source = art.split("\n");
+  const lines: string[] = [];
+  for (let row = 0; row < rows; row++) {
+    const chars = [...(source[row] ?? "")];
+    while (chars.length < cols) chars.push(blank);
+    lines.push(chars.slice(0, cols).join(""));
+  }
+  return lines.join("\n");
+}
+
+/**
  * Scale the whole drawing into `rows` by `cols` braille cells.
  * A destination dot is on when enough of the source dots under it are ink,
  * so the shape of the portrait survives instead of a window cut from the middle.

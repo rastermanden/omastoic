@@ -390,23 +390,18 @@ Item {
 
               Item {
                 id: portraitSlot
-                width: Style.space(88)
-                height: Style.font.caption * 6
-                clip: true
+                width: portraitText.implicitWidth
+                height: portraitText.implicitHeight
                 opacity: portraitFullyVisible(portraitSlot.mapToItem(scroller.contentItem, 0, 0).y, portraitSlot.height, scroller.contentY, scroller.height) ? 1 : 0
                 Text {
-                  anchors.fill: parent
+                  id: portraitText
                   text: root.preview ? root.preview.portrait : ""
                   color: root.ink
                   font.family: Style.font.family
-                  font.pixelSize: portraitSlot.width
-                  fontSizeMode: Text.Fit
-                  minimumPixelSize: 1
-                  horizontalAlignment: Text.AlignHCenter
-                  verticalAlignment: Text.AlignVCenter
-                  lineHeight: 0.9
+                  font.pixelSize: root.preview && root.preview.portraitFont ? root.preview.portraitFont : 8
+                  lineHeightMode: Text.FixedHeight
+                  lineHeight: root.preview && root.preview.portraitLine ? root.preview.portraitLine : 13.592
                   wrapMode: Text.NoWrap
-                  clip: true
                 }
               }
 

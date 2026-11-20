@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sandbox } from "./sandbox.ts";
+import { headerPortraitLayout } from "../src/portrait.ts";
 
 type Sandbox = ReturnType<typeof sandbox>;
 
@@ -163,10 +164,21 @@ test("panel state includes a cited sample, the backend, and no writes", async ()
       const lines = art.split("\n");
       return { rows: lines.length, cols: Math.max(...lines.map((line) => [...line].length)) };
     };
+    const layout = headerPortraitLayout();
     const marcus = state.samples.find((sample: { slug: string }) => sample.slug === "marcus");
     const seneca = state.samples.find((sample: { slug: string }) => sample.slug === "seneca");
-    expect(grid(marcus.portrait)).toEqual({ rows: 18, cols: 24 });
-    expect(grid(seneca.portrait)).toEqual({ rows: 18, cols: 24 });
+    expect(layout.fontPx).toBe(8);
+    expect(layout.cellWidth).toBeGreaterThanOrEqual(5);
+    expect(layout.width).toBeGreaterThanOrEqual(80);
+    expect(layout.width).toBeLessThanOrEqual(96);
+    expect(layout.height).toBeGreaterThanOrEqual(80);
+    expect(layout.height).toBeLessThanOrEqual(96);
+    expect(state.portraitFont).toBe(layout.fontPx);
+    expect(state.portraitLine).toBe(layout.cellHeight);
+    expect(state.portraitWidth).toBe(layout.width);
+    expect(state.portraitHeight).toBe(layout.height);
+    expect(grid(marcus.portrait)).toEqual({ rows: layout.rows, cols: layout.cols });
+    expect(grid(seneca.portrait)).toEqual({ rows: layout.rows, cols: layout.cols });
     expect(marcus.portrait).not.toBe(seneca.portrait);
     expect(["native", "terminal", "missing"]).toContain(state.backend);
     expect(typeof state.intervalApplied).toBe("boolean");
