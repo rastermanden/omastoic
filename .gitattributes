@@ -1,2 +1,4 @@
 # A locally reintroduced .agents tree stays out of source archives.
 .agents export-ignore
+# Vendored builder skills are for agents, not the installed plugin.
+.cursor/skills export-ignore

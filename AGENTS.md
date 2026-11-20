@@ -31,6 +31,22 @@ Do not merge, tag, or release.
 - Putting personal names, email addresses, home paths, or tokens in code or
   commits.
 
+## Working mode
+The builder works in `/poteto-mode`. Read
+`.cursor/skills/poteto-mode/SKILL.md` first, then follow its principles and
+playbooks.
+
+The owner's rules win over poteto-mode's Autonomy section. Never merge, tag,
+release, push to main, or comment on the Omarchy marketplace issue without the
+owner's explicit approval. Open pull requests only.
+
+Map this loop onto pstack:
+- `/blast-radius` before building
+- `/unslop` on user-facing text
+- `/interrogate` for an independent review
+- `/correct` after each review round
+- `show-me-your-work` for a long run
+
 ## Working loop
 1. Start from an issue with Problem, Expected, Done-check, and a vision fit.
 2. Before building, write down the blast radius: files, user data, and what
