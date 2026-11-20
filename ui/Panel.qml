@@ -55,8 +55,10 @@ Item {
     return null
   }
   readonly property color ink: Commons.Color.popups.text
-  readonly property color quiet: Qt.rgba(ink.r, ink.g, ink.b, 0.62)
-  readonly property color hint: Qt.rgba(ink.r, ink.g, ink.b, 0.45)
+  // 0.88 clears 4.5:1 for small text on Tokyo Night and Catppuccin Latte.
+  // Placeholders stay lower so they read as hints, not as typed text.
+  readonly property color quiet: Qt.rgba(ink.r, ink.g, ink.b, 0.88)
+  readonly property color hint: Qt.rgba(ink.r, ink.g, ink.b, 0.7)
 
   function open(payloadJson) {
     opened = true
