@@ -30,14 +30,26 @@ const mix = (foreground: string, background: string, alpha: number) => {
   return `#${blended.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 };
 
-test("small panel text stays at 4.5:1 and placeholders stay fainter", () => {
+test("small panel text stays at 4.5:1, dates hold over the selected-row wash, and placeholders stay fainter", () => {
   const source = readFileSync(join(import.meta.dir, "../ui/Panel.qml"), "utf8");
-  const quiet = Number(source.match(/ink\.b, (0\.\d+)\)\n {2}readonly property color hint/)?.[1]);
-  const hint = Number(source.match(/readonly property color hint: Qt\.rgba\(ink\.r, ink\.g, ink\.b, (0\.\d+)\)/)?.[1]);
-  expect(quiet).toBeGreaterThan(hint);
-  expect(hint).toBeGreaterThan(0);
+  const alpha = (name: string) => Number(
+    source.match(new RegExp(`readonly property color ${name}: Qt\\.rgba\\(ink\\.r, ink\\.g, ink\\.b, (0\\.\\d+)\\)`))?.[1],
+  );
+  const quiet = alpha("quiet");
+  const dates = alpha("dates");
+  const hint = alpha("hint");
   const chip = Number(source.match(/host\.picked\s*\?\s*Qt\.rgba\(Commons\.Color\.accent\.r, Commons\.Color\.accent\.g, Commons\.Color\.accent\.b, (0\.\d+)\)/)?.[1]);
+  const wash = Number(source.match(/if \(on\) return Qt\.rgba\(Commons\.Color\.accent\.r, Commons\.Color\.accent\.g, Commons\.Color\.accent\.b, (0\.\d+)\)/)?.[1]);
+
+  // Dates sit over the tint, so they read stronger than the other quiet text
+  // but still quieter than the author's name. Placeholders stay the faintest.
+  expect(hint).toBeGreaterThan(0);
+  expect(quiet).toBeGreaterThan(hint);
+  expect(dates).toBeGreaterThan(quiet);
+  expect(dates).toBeLessThan(1);
   expect(chip).toBeGreaterThan(0);
+  expect(wash).toBeGreaterThan(0);
+
   for (const [name, theme] of Object.entries(themes)) {
     expect(contrast(mix(theme.ink, theme.background, quiet), theme.background), name).toBeGreaterThanOrEqual(4.5);
     expect(contrast(mix(theme.ink, theme.background, 1), theme.background), `${name} typed`).toBeGreaterThan(
@@ -45,5 +57,9 @@ test("small panel text stays at 4.5:1 and placeholders stay fainter", () => {
     );
     const fill = mix(theme.accent, theme.background, chip);
     expect(contrast(theme.ink, fill), `${name} selected chip`).toBeGreaterThanOrEqual(4.5);
+    // A selected row paints the accent wash behind the dates, so the date
+    // colour is mixed over the wash, not over the plain popup background.
+    const washColor = mix(theme.accent, theme.background, wash);
+    expect(contrast(mix(theme.ink, washColor, dates), washColor), `${name} selected-row dates`).toBeGreaterThanOrEqual(4.5);
   }
 });

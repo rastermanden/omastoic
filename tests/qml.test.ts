@@ -102,6 +102,23 @@ test("hover stays distinct from focus and from the selected tint", () => {
   expect(source).toContain("color: root.ink");
 });
 
+test("author chips move focus with the arrow keys and never leave the grid", () => {
+  const source = panel();
+  expect(source).toContain("id: authorGrid");
+  expect(source).toContain("id: authorChips");
+  expect(source).toContain("columns: 3");
+  expect(source).toContain("property int chipIndex: index");
+  for (const key of ["Qt.Key_Left", "Qt.Key_Right", "Qt.Key_Up", "Qt.Key_Down"]) {
+    expect(source).toContain(key);
+  }
+  // Movement stays inside the grid: the modulo guard keeps left/right in the
+  // row, the target index stays within the model, and focus lands on the chip.
+  expect(source).toContain("chipIndex % columns");
+  expect(source).toContain("target < root.samples.length");
+  expect(source).toContain("authorChips.itemAt(target)");
+  expect(source).toContain("chip.focus()");
+});
+
 test("import rewriting only touches the qs prefix", () => {
   expect(lintableSource("import qs.Ui\nimport qs.Commons as Commons\nimport Quickshell\n")).toBe(
     "import Ui\nimport Commons\nimport Quickshell\n",
