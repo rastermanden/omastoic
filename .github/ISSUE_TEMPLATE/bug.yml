@@ -1,0 +1,35 @@
+name: Bug
+description: Something Omastoic does that it should not
+title: "[Bug] "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happens, and who it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done-check
+      description: Checks that prove the problem is gone. Use a list.
+      placeholder: |
+        - [ ] …
+    validations:
+      required: true
+  - type: checkboxes
+    id: vision
+    attributes:
+      label: Fits VISION.md?
+      options:
+        - label: This bug is about a VISION.md principle, or fixing it does not break one.
+          required: true
