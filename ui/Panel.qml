@@ -261,7 +261,7 @@ Item {
       width: host.width
       height: host.height
       text: host.label
-      selected: host.picked
+      selected: false
       enabled: host.available
       opacity: host.available ? 1 : 0.45
       focusable: true
@@ -281,7 +281,9 @@ Item {
       anchors.margins: -2
       z: 1
       enabled: false
-      color: buttonHover.hovered && host.available ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, host.picked ? 0.14 : 0.08) : "transparent"
+      color: host.picked
+        ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.45)
+        : (buttonHover.hovered && host.available ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08) : "transparent")
       radius: Style.cornerRadius
       border.width: inner.activeFocus ? 2 : (buttonHover.hovered && host.available ? 1 : 0)
       border.color: inner.activeFocus ? Commons.Color.accent : root.ink
