@@ -270,6 +270,12 @@ Item {
       onClicked: host.activated()
       onActiveFocusChanged: if (activeFocus) root.reveal(host)
     }
+    MouseArea {
+      anchors.fill: inner
+      z: 2
+      enabled: !host.available
+      hoverEnabled: true
+    }
     Rectangle {
       anchors.fill: inner
       anchors.margins: -2

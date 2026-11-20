@@ -91,6 +91,7 @@ test("hover stays distinct from focus and from the selected tint", () => {
   expect(source).toContain("border.color: activeFocus ? Commons.Color.accent : root.ink");
   expect(source).toContain("border.color: inner.activeFocus ? Commons.Color.accent : root.ink");
   expect(source).toContain("buttonHover.hovered && host.available");
+  expect(source).toContain("enabled: !host.available");
 });
 
 test("import rewriting only touches the qs prefix", () => {
