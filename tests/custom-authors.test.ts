@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { root, sandbox } from "./sandbox.ts";
 import { pty, SHOWS } from "./pty.ts";
-import { detectImageKind, headerPortraitLayout, otsuThreshold, pbmToBraille, pgmToBraille, PORTRAIT_COLS, PORTRAIT_ROWS, portraitDownscale, validatePortraitArt } from "../src/portrait.ts";
+import { detectImageKind, hasDecodeWarning, headerPortraitLayout, otsuThreshold, pbmToBraille, pgmToBraille, PORTRAIT_COLS, PORTRAIT_ROWS, portraitDownscale, validatePortraitArt } from "../src/portrait.ts";
 import { parseAuthors } from "../src/canvas.ts";
 
 const sampleJpeg = join(root, "assets/local/marcus.jpg");
@@ -1201,29 +1201,53 @@ test("remove rollback on read-only art/ and replace rollback when config.json sa
   }
 }, 30000);
 
+/** Insert dummy bytes right before SOS (0xFF 0xDA) so libjpeg warns on extraneous bytes before decoding normally. */
+function jpegWithExtraneousBytesBeforeSos(source: Buffer): Buffer {
+  let pos = 2; // Skip SOI (0xFF 0xD8).
+  while (pos + 1 < source.length) {
+    if (source[pos] !== 0xff) { pos++; continue; }
+    while (pos < source.length && source[pos] === 0xff) pos++;
+    if (pos >= source.length) break;
+    const marker = source[pos]!;
+    const markerStart = pos - 1;
+    if (marker === 0xda) {
+      return Buffer.concat([source.subarray(0, markerStart), Buffer.from([0x00, 0x11, 0x22, 0x33]), source.subarray(markerStart)]);
+    }
+    if (marker === 0xd9) break;
+    const segmentLength = (source[pos + 1]! << 8) | source[pos + 2]!;
+    pos = pos + 1 + segmentLength;
+  }
+  throw new Error("expected SOS marker 0xFF 0xDA in JPEG fixture");
+}
+
 test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and panel apply without overwriting existing portrait", async () => {
   const s = sandbox();
   const pngA = join(s.home, "a.png");
   const truncatedJpeg = join(s.home, "truncated.jpg");
+  const paddedTruncatedJpeg = join(s.home, "padded-truncated.jpg");
   const jpgBytes = readFileSync(sampleJpeg);
+  const paddedBytes = jpegWithExtraneousBytesBeforeSos(jpgBytes);
   writePortraitPng(pngA);
   writeFileSync(truncatedJpeg, jpgBytes.subarray(0, Math.floor(jpgBytes.length / 2)));
+  writeFileSync(paddedTruncatedJpeg, paddedBytes.subarray(0, Math.floor(paddedBytes.length / 2)));
 
   try {
-    // 1. --add-author with truncated JPEG fails cleanly and writes nothing.
-    const failedAdd = await s.cli([
-      "config",
-      "--add-author", "musonius",
-      "--name", "Musonius Rufus",
-      "--image", truncatedJpeg,
-      "--citation", "Lectures VI",
-      "--text", "Train both soul and body.",
-    ]);
-    expect(failedAdd.code).toBe(1);
-    expect(failedAdd.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
-    expect(failedAdd.stderr).not.toContain("omastoic-portrait-");
-    expect(failedAdd.stderr).not.toContain("JPEGWarningHandler");
-    expect(failedAdd.stderr).not.toContain("@ warning/");
+    // 1. --add-author with truncated JPEG (plain or with extraneous bytes) fails cleanly and writes nothing.
+    for (const badJpg of [truncatedJpeg, paddedTruncatedJpeg]) {
+      const failedAdd = await s.cli([
+        "config",
+        "--add-author", "musonius",
+        "--name", "Musonius Rufus",
+        "--image", badJpg,
+        "--citation", "Lectures VI",
+        "--text", "Train both soul and body.",
+      ]);
+      expect(failedAdd.code, badJpg).toBe(1);
+      expect(failedAdd.stderr.toLowerCase(), badJpg).toContain("looks damaged or truncated");
+      expect(failedAdd.stderr, badJpg).not.toContain("omastoic-portrait-");
+      expect(failedAdd.stderr, badJpg).not.toContain("JPEGWarningHandler");
+      expect(failedAdd.stderr, badJpg).not.toContain("@ warning/");
+    }
     expect(existsSync(join(s.config, "omastoic/authors.tsv"))).toBe(false);
     expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
     expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
@@ -1255,7 +1279,7 @@ test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and 
       "--text", "Must not overwrite.",
     ]);
     expect(failedReplace.code).toBe(1);
-    expect(failedReplace.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
+    expect(failedReplace.stderr.toLowerCase()).toContain("looks damaged or truncated");
     expect(failedReplace.stderr).not.toContain("omastoic-portrait-");
     expect(failedReplace.stderr).not.toContain("JPEGWarningHandler");
     expect(readFileSync(artPath, "utf8")).toBe(artBefore);
@@ -1271,7 +1295,7 @@ test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and 
       },
     })]);
     expect(failedPanelReplace.code).toBe(1);
-    expect(failedPanelReplace.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
+    expect(failedPanelReplace.stderr.toLowerCase()).toContain("looks damaged or truncated");
     expect(failedPanelReplace.stderr).not.toContain("omastoic-portrait-");
     expect(failedPanelReplace.stderr).not.toContain("JPEGWarningHandler");
     expect(readFileSync(artPath, "utf8")).toBe(artBefore);
@@ -1309,9 +1333,76 @@ test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and 
       { PATH: isolatedBin },
     );
     expect(failedOmarchy.code).toBe(1);
-    expect(failedOmarchy.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
+    expect(failedOmarchy.stderr.toLowerCase()).toContain("looks damaged or truncated");
     expect(existsSync(join(s.config, "omastoic/art/posidonius.txt"))).toBe(false);
     expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
     expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+  } finally { s.cleanup(); }
+}, 30000);
+
+test.skipIf(!hasImageMagick)("JPEG with harmless extraneous bytes before marker is accepted on add, replace, and panel apply", async () => {
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xda")).toBe(false);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 12 extraneous bytes before marker 0xed")).toBe(false);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 1 extraneous bytes before marker 0xd9")).toBe(false);
+  expect(hasDecodeWarning([
+    "magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xda",
+    "magick: Premature end of JPEG file",
+  ].join("\n"))).toBe(true);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: bad Huffman code")).toBe(true);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: premature end of data segment")).toBe(true);
+
+  const s = sandbox();
+  const cleanJpeg = join(s.home, "clean.jpg");
+  const paddedJpeg = join(s.home, "padded.jpg");
+  const pngA = join(s.home, "a.png");
+  const jpgBytes = readFileSync(sampleJpeg);
+  writeFileSync(cleanJpeg, jpgBytes);
+  writeFileSync(paddedJpeg, jpegWithExtraneousBytesBeforeSos(jpgBytes));
+  writePortraitPng(pngA);
+
+  // Confirm the fixture triggers libjpeg's extraneous-bytes warning while exiting 0 in production decode flags.
+  const magick = Bun.which("magick") ?? Bun.which("convert")!;
+  const probe = Bun.spawnSync([
+    magick, "-background", "white", paddedJpeg, "-auto-orient", "-alpha", "remove", "-alpha", "off",
+    "-colorspace", "Gray", "-blur", "0x0.6", "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`, "-compress", "none", "pgm:-",
+  ]);
+  expect(probe.exitCode).toBe(0);
+  expect(probe.stderr.toString()).toContain("extraneous bytes before marker 0xda");
+
+  try {
+    expectOk(await s.cli([
+      "config",
+      "--add-author", "ref",
+      "--name", "Reference Author",
+      "--image", cleanJpeg,
+      "--citation", "Ref 1",
+      "--text", "Reference line.",
+    ]), "add reference clean jpg");
+    const expectedArt = readFileSync(join(s.config, "omastoic/art/ref.txt"), "utf8");
+
+    // 1. --add-author accepts the extraneous-bytes JPEG and produces identical braille art.
+    expectOk(await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", paddedJpeg,
+      "--citation", "Lectures VI",
+      "--text", "Train both soul and body.",
+    ]), "add extraneous-bytes jpg");
+    const musoniusArtPath = join(s.config, "omastoic/art/musonius.txt");
+    expect(readFileSync(musoniusArtPath, "utf8")).toBe(expectedArt);
+
+    // 2. --replace-author switches away to pngA, then restores via the extraneous-bytes JPEG.
+    expectOk(await s.cli(["config", "--replace-author", "musonius", "--image", pngA]), "replace with pngA");
+    expect(readFileSync(musoniusArtPath, "utf8")).not.toBe(expectedArt);
+    expectOk(await s.cli(["config", "--replace-author", "musonius", "--image", paddedJpeg]), "replace with extraneous-bytes jpg");
+    expect(readFileSync(musoniusArtPath, "utf8")).toBe(expectedArt);
+
+    // 3. panel apply replaceAuthor accepts the extraneous-bytes JPEG.
+    expectOk(await s.cli(["config", "--replace-author", "musonius", "--image", pngA]), "reset to pngA before panel replace");
+    expectOk(await s.cli(["panel", "apply", JSON.stringify({
+      replaceAuthor: { slug: "musonius", image: paddedJpeg },
+    })]), "panel apply extraneous-bytes jpg");
+    expect(readFileSync(musoniusArtPath, "utf8")).toBe(expectedArt);
   } finally { s.cleanup(); }
 }, 30000);
