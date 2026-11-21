@@ -582,6 +582,7 @@ export async function transcodePortrait(
 
 const MIN_PORTRAIT_ASPECT = 0.55;
 const MAX_PORTRAIT_ASPECT = 1.35;
+const MAX_HAIRLINE_DOTS = 6;
 
 function tightenBox(
   source: Bitmap,
@@ -615,7 +616,7 @@ function fitPortraitToBudget(art: string): string {
   if (!initial) return "";
 
   let box = initial;
-  const hairline = Math.min(box.width, box.height) <= 2;
+  const hairline = Math.min(box.width, box.height) <= MAX_HAIRLINE_DOTS;
 
   if (!hairline) {
     for (let pass = 0; pass < 2; pass++) {
@@ -669,6 +670,7 @@ function fitPortraitToBudget(art: string): string {
             prev = on;
           }
           if (prev) transitions += 1;
+          // Square column thickness so heads outscore long thin horizontal rules.
           colScore[x] = ink * ink + Math.max(0, transitions - 2) * 64;
         }
         let current = 0;
@@ -706,7 +708,7 @@ function fitPortraitToBudget(art: string): string {
   const maxDotW = PORTRAIT_COLS * 2;
   const maxDotH = PORTRAIT_ROWS * 4;
   const rawScale = Math.min(maxDotW / box.width, maxDotH / box.height);
-  const scale = Math.min(box.width, box.height) <= 2 ? Math.min(1, rawScale) : rawScale;
+  const scale = hairline || Math.min(box.width, box.height) <= 3 ? Math.min(1, rawScale) : rawScale;
   const dstW = Math.max(1, Math.min(maxDotW, Math.round(box.width * scale)));
   const dstH = Math.max(1, Math.min(maxDotH, Math.round(box.height * scale)));
   const cols = Math.ceil(dstW / 2);

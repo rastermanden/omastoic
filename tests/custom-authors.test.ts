@@ -1426,6 +1426,8 @@ test.skipIf(!hasImageMagick)("extreme 1:9, 10:1, and standard portraits fill the
   const standingPng = join(s.home, "standing-1-9.png");
   const hlinePng = join(s.home, "hline-10-1.png");
   const ruleSpeckPng = join(s.home, "rule-speck-10-1.png");
+  const vline3pxPng = join(s.home, "vline-3px-300.png");
+  const hline3pxPng = join(s.home, "hline-3px-100.png");
 
   writeFileSync(tallPng, makePng(90, 810, (x, y) => {
     const dx = x - 45;
@@ -1503,6 +1505,8 @@ test.skipIf(!hasImageMagick)("extreme 1:9, 10:1, and standard portraits fill the
   }));
   writeFileSync(hlinePng, makePng(1000, 100, (_x, y) => (y === 50 ? 10 : 252)));
   writeFileSync(ruleSpeckPng, makePng(1000, 100, (x, y) => ((x < 700 && y === 50) || (x >= 980 && x <= 986 && y >= 15 && y <= 21) ? 10 : 252)));
+  writeFileSync(vline3pxPng, makePng(300, 300, (x, _y) => (x >= 149 && x <= 151 ? 10 : 252)));
+  writeFileSync(hline3pxPng, makePng(100, 100, (x, y) => (y >= 49 && y <= 51 && x >= 10 && x <= 90 ? 10 : 252)));
 
   const inkBox = (art: string) => {
     const lines = art.replace(/\n+$/, "").split("\n");
@@ -1609,5 +1613,22 @@ test.skipIf(!hasImageMagick)("extreme 1:9, 10:1, and standard portraits fill the
     expectOk(addedRuleSpeck, "add rulespeck");
     const ruleSpeckArt = readFileSync(join(s.config, "omastoic/art/rulespeck.txt"), "utf8").trimEnd().split("\n");
     expect(ruleSpeckArt.length).toBeLessThanOrEqual(2);
+
+    const addedVline3 = await s.cli([
+      "config", "--add-author", "vline3px", "--name", "Three Pixel Line", "--dates", "200 BC",
+      "--image", vline3pxPng, "--citation", "Note 3", "--text", "A 3px vertical stroke stays a line.",
+    ]);
+    expectOk(addedVline3, "add vline3px");
+    const vline3Box = inkBox(readFileSync(join(s.config, "omastoic/art/vline3px.txt"), "utf8"));
+    expect(vline3Box.inkWidth).toBeLessThanOrEqual(3);
+    expect(vline3Box.rows).toBeGreaterThanOrEqual(15);
+
+    const addedHline3 = await s.cli([
+      "config", "--add-author", "hline3px", "--name", "Three Pixel Rule", "--dates", "200 BC",
+      "--image", hline3pxPng, "--citation", "Note 4", "--text", "A 3px horizontal stroke stays thin.",
+    ]);
+    expectOk(addedHline3, "add hline3px");
+    const hline3Box = inkBox(readFileSync(join(s.config, "omastoic/art/hline3px.txt"), "utf8"));
+    expect(hline3Box.rows).toBeLessThanOrEqual(2);
   } finally { s.cleanup(); }
 }, 30000);
