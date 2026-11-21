@@ -167,12 +167,13 @@ omastoic config --add-author musonius \
 ```
 
 `--dates` is optional, and `--add $'musonius\tCitation\tQuote'` works in place
-of `--citation` and `--text`. Omastoic converts the image to a 34×20 braille
-portrait and writes `~/.config/omastoic/authors.tsv`,
-`~/.config/omastoic/art/<slug>.txt`, and `~/.config/omastoic/quotes.tsv`.
-Nothing is written inside the plugin checkout. Slugs that belong to bundled
-authors are rejected, and a missing or unusable image fails without writing a
-partial author.
+of `--citation` and `--text`. Converting the portrait image requires
+`omarchy-transcode-ascii` (included on Omarchy) or ImageMagick (`magick` or
+`convert`). Omastoic turns the image into a 34×20 braille portrait and writes
+`~/.config/omastoic/authors.tsv`, `~/.config/omastoic/art/<slug>.txt`, and
+`~/.config/omastoic/quotes.tsv`. Nothing is written inside the plugin checkout.
+Slugs that belong to bundled authors are rejected, and a missing or unusable
+image fails without writing a partial author.
 
 ### On screen
 

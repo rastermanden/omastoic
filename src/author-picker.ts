@@ -339,7 +339,7 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
   }
 }
 function plainPromptFor(count: number): string {
-  return `Select Stoics [1-${Math.max(1, count)}, all, none, or a list; empty keeps the current set]: `;
+  return `Select authors [1-${Math.max(1, count)}, all, none, or a list; empty keeps the current set]: `;
 }
 
 /**

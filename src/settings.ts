@@ -153,7 +153,8 @@ export function applyQuoteFlags(
     const unknown = parsed.ids.find((id) => !known.some((row) => row.id === id));
     if (unknown) return { ok: false, error: `unknown quote ${unknown} for ${parsed.author} — omastoic config --list` };
     const nextIds = known.filter((row) => parsed.ids.includes(row.id)).map((row) => row.id);
-    if (parsed.ids.length === 0 && known.some((row) => row.id.startsWith("c")) && !nextIds.includes("c00")) {
+    const hasBundled = known.some((row) => row.id.startsWith("q"));
+    if (parsed.ids.length === 0 && !hasBundled && known.some((row) => row.id.startsWith("c")) && !nextIds.includes("c00")) {
       nextIds.push("c00");
     }
     if (!dropUnknownCustom) {

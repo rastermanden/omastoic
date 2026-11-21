@@ -228,7 +228,7 @@ test("the plain prompt keeps the current selection on an empty line", async () =
   const shown = h.text();
   expect(shown).toContain("1 [ ] Marcus Aurelius");
   expect(shown).toContain("2 [x] Seneca");
-  expect(shown).toContain("Select Stoics");
+  expect(shown).toContain("Select authors");
   expect(h.modes).toEqual([]);
 });
 
@@ -308,7 +308,7 @@ test("redirected stdout falls back to the plain prompt", async () => {
   expect(await picked).toEqual(["marcus"]);
   expect(h.modes).toEqual([]);
   expect(h.text()).not.toContain("\x1b[?25l");
-  expect(h.text()).toContain("Select Stoics");
+  expect(h.text()).toContain("Select authors");
 });
 
 test("an already raw terminal is left as it was found", async () => {

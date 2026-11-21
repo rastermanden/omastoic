@@ -7,6 +7,8 @@ export const PORTRAIT_COLS = 34;
 export const PORTRAIT_ROWS = 20;
 const PORTRAIT_THRESHOLD = 45;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const DEFAULT_TRANSCODE_TIMEOUT_MS = 15_000;
+const DRAWING_CORNER_FLOOR = 0.85;
 
 const DOTS: ReadonlyArray<readonly [number, number, number]> = [
   [0x01, 0, 0],
@@ -258,21 +260,85 @@ function firstLine(text: string): string {
   return text.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
 }
 
-function cleanTranscodeError(stderr: string, staged: string, original: string): string {
+function cleanTranscodeError(
+  stderr: string,
+  staged: string,
+  original: string,
+  missingMagick = false,
+): string {
   const line = firstLine(stderr);
+  if (missingMagick && (!line || /Unable to read logo image|command not found|not found/i.test(line))) {
+    return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
+  }
   if (!line) return "could not convert portrait image";
   if (/No logo pixels found/i.test(line)) return "image produced an empty portrait";
+  if (/command not found|No such file or directory.*\b(?:magick|convert)\b/i.test(line)) {
+    return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
+  }
   if (/Unable to read logo image/i.test(line)) return `could not convert portrait image: unreadable image ${original}`;
   const cleaned = line.replaceAll(staged, original).replace(/\blogo\b/gi, "portrait");
   return `could not convert portrait image: ${cleaned}`;
 }
 
+function transcodeTimeoutMs(override?: number): number {
+  if (override != null && Number.isFinite(override) && override > 0) return override;
+  const fromEnv = Number(process.env.OMASTOIC_TRANSCODE_TIMEOUT_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return DEFAULT_TRANSCODE_TIMEOUT_MS;
+}
+
+async function runWithTimeout(
+  cmd: string[],
+  captureStdout: boolean,
+  timeoutMs: number,
+): Promise<{ stdout: string; stderr: string; code: number }> {
+  const timeoutBin = Bun.which("timeout");
+  const seconds = `${Math.max(0.05, timeoutMs / 1000).toFixed(3)}s`;
+  const argv = timeoutBin ? [timeoutBin, "-k", "1s", seconds, ...cmd] : cmd;
+  const proc = Bun.spawn(argv, {
+    stdout: captureStdout ? "pipe" : "ignore",
+    stderr: "pipe",
+    stdin: "ignore",
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch { /* already exited */ }
+      try { void proc.stdout?.cancel?.(); } catch { /* ignore */ }
+      try { void proc.stderr?.cancel?.(); } catch { /* ignore */ }
+      reject(new Error("portrait image conversion timed out"));
+    }, timeoutBin ? timeoutMs + 1000 : timeoutMs);
+  });
+  const finished = (async () => {
+    const [stdout, stderr, code] = await Promise.all([
+      captureStdout && proc.stdout ? new Response(proc.stdout).text() : Promise.resolve(""),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (timeoutBin && (code === 124 || code === 137)) {
+      throw new Error("portrait image conversion timed out");
+    }
+    return { stdout, stderr, code };
+  })();
+  finished.catch(() => {});
+  try {
+    return await Promise.race([finished, timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Convert a user-supplied JPEG or PNG into a 34x20 braille portrait.
- * Uses Omarchy's own `omarchy-transcode-ascii` when present, falling back to
- * ImageMagick (`magick` or `convert`) plus `pbmToBraille`.
+ * Light-paper drawings use Omarchy's `omarchy-transcode-ascii` (or ImageMagick
+ * threshold fallback). Darker-background photographs use the halftone vignette
+ * pipeline from `scripts/transcode.ts` so backgrounds do not turn into solid
+ * braille blocks.
  */
-export async function transcodePortrait(imagePath: string): Promise<string> {
+export async function transcodePortrait(
+  imagePath: string,
+  options: { timeoutMs?: number } = {},
+): Promise<string> {
   const trimmed = imagePath.trim();
   if (!trimmed) throw new Error("portrait image path is required");
   const resolved = expandHome(trimmed);
@@ -295,15 +361,80 @@ export async function transcodePortrait(imagePath: string): Promise<string> {
   const kind = detectImageKind(bytes);
   if (!kind) throw new Error("portrait image must be a JPEG or PNG file");
 
+  const timeoutMs = transcodeTimeoutMs(options.timeoutMs);
+  const omarchyTranscoder = Bun.which("omarchy-transcode-ascii");
+  const magickBin = Bun.which("magick");
+  const convertBin = Bun.which("convert");
+  const imBin = magickBin ?? convertBin;
+
+  if (!imBin && !omarchyTranscoder) {
+    throw new Error("could not convert portrait image: install omarchy-transcode-ascii or ImageMagick (magick or convert)");
+  }
+
   const scratch = mkdtempSync(join(tmpdir(), "omastoic-portrait-"));
   try {
     const staged = join(scratch, `source.${kind === "png" ? "png" : "jpg"}`);
     writeFileSync(staged, bytes, { mode: 0o600 });
 
-    const omarchyTranscoder = Bun.which("omarchy-transcode-ascii");
-    if (omarchyTranscoder) {
+    let isPhoto = false;
+    if (imBin) {
+      const probe = await runWithTimeout(
+        [
+          imBin,
+          "-background", "white",
+          staged,
+          "-auto-orient",
+          "-alpha", "remove", "-alpha", "off",
+          "-colorspace", "Gray",
+          "-resize", "64x64!",
+          "-format", "%[fx:(p{0,0}+p{63,0}+p{0,63}+p{63,63}+p{32,0}+p{0,32}+p{63,32})/7]",
+          "info:",
+        ],
+        true,
+        timeoutMs,
+      );
+      if (probe.code !== 0) {
+        throw new Error(cleanTranscodeError(probe.stderr, staged, trimmed));
+      }
+      const corners = Number(probe.stdout.trim());
+      if (Number.isFinite(corners) && corners < DRAWING_CORNER_FLOOR) isPhoto = true;
+    }
+
+    if (isPhoto && imBin) {
+      const w = PORTRAIT_COLS * 8;
+      const h = PORTRAIT_ROWS * 16;
+      const ellipse = `ellipse ${w / 2},${h / 2} ${(w * 0.95) / 2},${(h * 0.95) / 2} 0,360`;
+      const result = await runWithTimeout(
+        [
+          imBin,
+          "-background", "white",
+          staged,
+          "-auto-orient",
+          "-alpha", "remove", "-alpha", "off",
+          "-colorspace", "Gray",
+          "-resize", `${w}x${h}^`, "-gravity", "center", "-extent", `${w}x${h}`,
+          "-blur", "0x1", "-normalize", "-level", "10%,90%",
+          "(", "+clone", "-fill", "black", "-colorize", "100", "-fill", "white",
+          "-draw", ellipse, "-blur", `0x${Math.round(w / 12)}`, ")",
+          "-compose", "multiply", "-composite",
+          "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}!`,
+          "-ordered-dither", "h4x4a",
+          "-negate",
+          "-compress", "none",
+          "pbm:-",
+        ],
+        true,
+        timeoutMs,
+      );
+      if (result.code !== 0) {
+        throw new Error(cleanTranscodeError(result.stderr, staged, trimmed));
+      }
+      return validatePortraitArt(pbmToBraille(result.stdout));
+    }
+
+    if (omarchyTranscoder && (magickBin || !imBin)) {
       const outTxt = join(scratch, "portrait.txt");
-      const proc = Bun.spawn(
+      const result = await runWithTimeout(
         [
           omarchyTranscoder,
           staged,
@@ -312,11 +443,11 @@ export async function transcodePortrait(imagePath: string): Promise<string> {
           "--height", String(PORTRAIT_ROWS),
           "--threshold", String(PORTRAIT_THRESHOLD),
         ],
-        { stdout: "ignore", stderr: "pipe", stdin: "ignore" },
+        false,
+        timeoutMs,
       );
-      const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-      if (code !== 0) {
-        throw new Error(cleanTranscodeError(stderr, staged, trimmed));
+      if (result.code !== 0) {
+        throw new Error(cleanTranscodeError(result.stderr, staged, trimmed, !magickBin));
       }
       let art: string;
       try { art = readFileSync(outTxt, "utf8"); }
@@ -324,13 +455,9 @@ export async function transcodePortrait(imagePath: string): Promise<string> {
       return validatePortraitArt(art);
     }
 
-    const magick = Bun.which("magick") ?? Bun.which("convert");
-    if (!magick) {
-      throw new Error("could not convert portrait image: install omarchy-transcode-ascii or ImageMagick");
-    }
-    const proc = Bun.spawn(
+    const result = await runWithTimeout(
       [
-        magick,
+        imBin!,
         "-background", "white",
         staged,
         "-auto-orient",
@@ -344,17 +471,13 @@ export async function transcodePortrait(imagePath: string): Promise<string> {
         "-compress", "none",
         "pbm:-",
       ],
-      { stdout: "pipe", stderr: "pipe", stdin: "ignore" },
+      true,
+      timeoutMs,
     );
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (code !== 0) {
-      throw new Error(cleanTranscodeError(stderr, staged, trimmed));
+    if (result.code !== 0) {
+      throw new Error(cleanTranscodeError(result.stderr, staged, trimmed));
     }
-    return validatePortraitArt(pbmToBraille(stdout));
+    return validatePortraitArt(pbmToBraille(result.stdout));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
