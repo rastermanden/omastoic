@@ -943,31 +943,38 @@ async function daemon(): Promise<number> {
 
 // --- configure ----------------------------------------------------------------
 
-function stringFlag(rest: string[], name: string): string | undefined {
-  const i = rest.indexOf(`--${name}`);
-  return i >= 0 && rest[i + 1] ? rest[i + 1] : undefined;
-}
-
-const CONFIG_FLAGS = new Set([
+const CONFIG_VALUE_FLAGS = new Set([
   "--authors", "--interval", "--quotes", "--add", "--add-author",
-  "--name", "--dates", "--image", "--citation", "--text", "--list", "--plain",
+  "--replace-author", "--remove-author", "--name", "--dates",
+  "--image", "--citation", "--text",
 ]);
+const CONFIG_BOOL_FLAGS = new Set(["--list", "--plain"]);
+const CONFIG_FLAGS = new Set([...CONFIG_VALUE_FLAGS, ...CONFIG_BOOL_FLAGS]);
 
-function flagArg(rest: string[], name: string): { present: boolean; value?: string } {
-  const i = rest.indexOf(`--${name}`);
-  if (i < 0) return { present: false };
-  const next = rest[i + 1];
-  return { present: true, value: next !== undefined && !CONFIG_FLAGS.has(next) ? next : undefined };
-}
+type ParsedConfigFlags = {
+  values: Map<string, Array<string | undefined>>;
+  bools: Set<string>;
+};
 
-function flagValues(rest: string[], name: string): string[] {
-  const out: string[] = [];
+function parseConfigFlags(rest: string[]): ParsedConfigFlags {
+  const values = new Map<string, Array<string | undefined>>();
+  const bools = new Set<string>();
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i] !== `--${name}`) continue;
-    const next = rest[i + 1];
-    out.push(next && !next.startsWith("--") ? next : "");
+    const arg = rest[i]!;
+    if (CONFIG_BOOL_FLAGS.has(arg)) {
+      bools.add(arg);
+      continue;
+    }
+    if (CONFIG_VALUE_FLAGS.has(arg)) {
+      const next = i + 1 < rest.length ? rest[i + 1]! : undefined;
+      const hasValue = next !== undefined && !CONFIG_FLAGS.has(next);
+      const list = values.get(arg) ?? [];
+      list.push(hasValue ? next : undefined);
+      values.set(arg, list);
+      if (hasValue) i += 1;
+    }
   }
-  return out;
+  return { values, bools };
 }
 
 async function pickAuthorList(roster: Map<string, { name: string }>, selected: string[], io: ConfigIo): Promise<string[] | undefined> {
@@ -1046,6 +1053,17 @@ function addAuthorUsage(): void {
   console.error("          omastoic config --add-author");
   console.error("          omastoic config --add-author musonius --name \"Musonius Rufus\" --dates \"c. AD 30 – 100\" --image portrait.jpg --citation \"Lectures VI\" --text \"Your line.\"");
   console.error("          omastoic config --add-author musonius --name \"Musonius Rufus\" --image portrait.png --add $'musonius\\tLectures VI\\tYour line.'");
+}
+
+function replaceAuthorUsage(): void {
+  console.error("omastoic: --replace-author needs a custom author slug and at least one field to update");
+  console.error("          omastoic config --replace-author musonius --image new.jpg");
+  console.error("          omastoic config --replace-author musonius --name \"Musonius Rufus\" --dates \"c. AD 30 – 100\" --citation \"Lectures VI\" --text \"Your line.\"");
+}
+
+function removeAuthorUsage(): void {
+  console.error("omastoic: --remove-author needs a custom author slug");
+  console.error("          omastoic config --remove-author musonius");
 }
 
 async function promptNewAuthor(io: ConfigIo): Promise<PromptedAuthor> {
@@ -1147,7 +1165,7 @@ async function commitNewAuthor(
     existingAuthorsText = read.missing ? "" : read.text;
     const existingAuthors = existingAuthorsText ? parseAuthors(existingAuthorsText) : new Map<string, Author>();
     if (existingAuthors.has(slug)) {
-      return { ok: false, error: `author "${slug}" already exists in ${USER_AUTHORS_FILE}` };
+      return { ok: false, error: `author "${slug}" already exists in ${USER_AUTHORS_FILE}. Use --replace-author ${slug} to update it.` };
     }
   } catch (error) {
     return { ok: false, error: (error as Error).message };
@@ -1240,6 +1258,527 @@ async function commitNewAuthor(
     console.log(`→ added author ${author.name} (${author.slug}) with portrait and ${parsedQuotes.length} ${parsedQuotes.length === 1 ? "quote" : "quotes"}`);
   }
   return { ok: true, author, quotes: parsedQuotes };
+}
+
+type ReplaceAuthorInput = {
+  slug: string;
+  name?: string;
+  dates?: string;
+  image?: string;
+  quotes?: Array<{ citation: string; text: string }>;
+};
+
+type ValidatedReplaceAuthor = {
+  slug: string;
+  name?: string;
+  dates?: string;
+  image?: string;
+  quotes?: Quote[];
+};
+
+function splitTsvLines(existingText: string): string[] {
+  const normalized = existingText.replace(/\r\n/g, "\n");
+  if (!normalized) return [];
+  return normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
+}
+
+function replaceAuthorInTsv(existingText: string, author: Author): string {
+  const row = `${author.slug}\t${author.name}\t${author.dates}`;
+  let inserted = false;
+  const out: string[] = [];
+  for (const line of splitTsvLines(existingText)) {
+    if (!line.trim() || line.startsWith("#")) {
+      out.push(line);
+      continue;
+    }
+    const fields = line.split("\t");
+    if (fields[0]?.trim() === author.slug) {
+      if (!inserted) {
+        out.push(row);
+        inserted = true;
+      }
+      continue;
+    }
+    out.push(line);
+  }
+  if (!inserted) {
+    if (out.length === 0) out.push(AUTHORS_HEADER.slice(0, -1));
+    out.push(row);
+  }
+  return `${out.join("\n")}\n`;
+}
+
+function removeAuthorFromTsv(existingText: string, slug: string): { text: string; removed: boolean } {
+  let removed = false;
+  const out: string[] = [];
+  for (const line of splitTsvLines(existingText)) {
+    if (!line.trim() || line.startsWith("#")) {
+      out.push(line);
+      continue;
+    }
+    const fields = line.split("\t");
+    if (fields[0]?.trim() === slug) {
+      removed = true;
+      continue;
+    }
+    out.push(line);
+  }
+  return { text: out.length ? `${out.join("\n")}\n` : "", removed };
+}
+
+function replaceAuthorQuotesInTsv(existingText: string, slug: string, newQuotes: Quote[]): string {
+  const rows = newQuotes.map(quoteRow);
+  let inserted = false;
+  const out: string[] = [];
+  for (const line of splitTsvLines(existingText)) {
+    if (!line.trim() || line.startsWith("#")) {
+      out.push(line);
+      continue;
+    }
+    const fields = line.split("\t");
+    if (fields[0]?.trim() === slug) {
+      if (!inserted) {
+        out.push(...rows);
+        inserted = true;
+      }
+      continue;
+    }
+    out.push(line);
+  }
+  if (!inserted) {
+    if (out.length === 0) out.push(QUOTE_HEADER.slice(0, -1));
+    out.push(...rows);
+  }
+  return `${out.join("\n")}\n`;
+}
+
+/**
+ * Remap saved `cNN` quote ids after removing or replacing `resetSlug`'s rows in
+ * quotes.tsv. Drops `resetSlug`'s own allow-list and keeps `c00` cleared state
+ * intact for other authors.
+ */
+function remapCustomQuoteIds(
+  settings: Settings,
+  beforeCustom: BundledQuote[],
+  afterCustom: BundledQuote[],
+  resetSlug: string,
+): Settings {
+  if (!settings.quotes) return settings;
+  const afterIdsByRow = new Map<string, string[]>();
+  for (const quote of afterCustom) {
+    if (quote.author === resetSlug) continue;
+    const key = quoteRow(quote);
+    const list = afterIdsByRow.get(key) ?? [];
+    list.push(quote.id);
+    afterIdsByRow.set(key, list);
+  }
+  const idMap = new Map<string, string>();
+  for (const quote of beforeCustom) {
+    if (quote.author === resetSlug) continue;
+    const list = afterIdsByRow.get(quoteRow(quote));
+    const nextId = list?.shift();
+    if (nextId) idMap.set(quote.id, nextId);
+  }
+  const quotes: Record<string, string[]> = {};
+  for (const [author, ids] of Object.entries(settings.quotes)) {
+    if (author === resetSlug) continue;
+    const hadCustom = ids.some((id) => id.startsWith("c"));
+    const mapped = ids.flatMap((id) => {
+      if (id === "c00") return ["c00"];
+      if (id.startsWith("c")) return idMap.has(id) ? [idMap.get(id)!] : [];
+      return [id];
+    });
+    if (hadCustom && !mapped.some((id) => id.startsWith("c"))) mapped.push("c00");
+    quotes[author] = mapped;
+  }
+  return { ...settings, quotes: Object.keys(quotes).length ? quotes : undefined };
+}
+
+async function checkEditableCustomSlug(
+  rawSlug: string,
+  action: "replaced" | "removed",
+): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+  const slug = flatField(rawSlug);
+  if (!slug || !AUTHOR_SLUG.test(slug)) {
+    return { ok: false, error: "invalid author slug (use lowercase letters, digits, _ or -, up to 64 characters)" };
+  }
+  if (slug === "all") {
+    return { ok: false, error: "\"all\" is reserved and cannot be used as an author slug" };
+  }
+  const bundled = await bundledAuthors();
+  if (bundled.has(slug)) {
+    return { ok: false, error: `author "${slug}" is a bundled author and cannot be ${action}` };
+  }
+  try {
+    const customMap = await customAuthors();
+    if (!customMap.has(slug)) {
+      return { ok: false, error: `author "${slug}" is not a custom author` };
+    }
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  return { ok: true, slug };
+}
+
+async function validateReplaceAuthorInput(
+  input: ReplaceAuthorInput,
+): Promise<{ ok: true; value: ValidatedReplaceAuthor } | { ok: false; error: string }> {
+  const checkedSlug = await checkEditableCustomSlug(input.slug, "replaced");
+  if (!checkedSlug.ok) return checkedSlug;
+  const slug = checkedSlug.slug;
+
+  const hasName = input.name !== undefined;
+  const hasDates = input.dates !== undefined;
+  const hasImage = input.image !== undefined;
+  const hasQuotes = input.quotes !== undefined;
+  if (!hasName && !hasDates && !hasImage && !hasQuotes) {
+    return { ok: false, error: "replace requires at least one change (--image, --name, --dates, or quotes via --citation/--text or --add)" };
+  }
+
+  let cleanName: string | undefined;
+  if (hasName) {
+    cleanName = flatField(input.name!);
+    if (!cleanName) return { ok: false, error: "author needs a display name" };
+    if (cleanName.length > 128) return { ok: false, error: "author display name must be at most 128 characters" };
+    try {
+      parseAuthors(`${slug}\t${cleanName}\t\n`);
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+
+  let cleanDates: string | undefined;
+  if (hasDates) {
+    cleanDates = flatField(input.dates!);
+    if (cleanDates.length > 128) return { ok: false, error: "author dates must be at most 128 characters" };
+    try {
+      parseAuthors(`${slug}\tPlaceholder\t${cleanDates}\n`);
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+
+  let cleanImage: string | undefined;
+  if (hasImage) {
+    cleanImage = input.image!.trim();
+    if (!cleanImage) return { ok: false, error: "author portrait image path cannot be empty" };
+  }
+
+  let parsedQuotes: Quote[] | undefined;
+  if (hasQuotes) {
+    if (!input.quotes!.length) return { ok: false, error: "replacement quotes cannot be empty" };
+    parsedQuotes = [];
+    const seen = new Set<string>();
+    for (const item of input.quotes!) {
+      const citation = flatField(item.citation);
+      const text = flatField(item.text);
+      if (!citation || !text) return { ok: false, error: "each quote needs a citation and text" };
+      let rows: Quote[];
+      try {
+        rows = parseQuotes(`${slug}\t${citation}\t${text}\n`);
+      } catch (error) {
+        return { ok: false, error: (error as Error).message };
+      }
+      if (rows.length !== 1) return { ok: false, error: "each quote needs a citation and text" };
+      const key = quoteRow(rows[0]);
+      if (seen.has(key)) return { ok: false, error: "duplicate quote in replace request" };
+      seen.add(key);
+      parsedQuotes.push(rows[0]);
+    }
+  }
+
+  return {
+    ok: true,
+    value: { slug, name: cleanName, dates: cleanDates, image: cleanImage, quotes: parsedQuotes },
+  };
+}
+
+/**
+ * Commit a validated replacement for an existing custom author under the state
+ * lock, rolling back all modified files if any write fails.
+ */
+async function commitReplaceAuthor(
+  validated: ValidatedReplaceAuthor,
+  artText: string | null,
+  currentSettings: Settings,
+  quiet = false,
+): Promise<
+  | { ok: true; author: Author; nextSettings: Settings; settingsRemapped: boolean; quotesChanged: boolean; rollback: () => void }
+  | { ok: false; error: string }
+> {
+  const { slug } = validated;
+  let existingAuthorsText = "";
+  let prevAuthor: Author;
+  try {
+    const read = readExisting(USER_AUTHORS_FILE);
+    existingAuthorsText = read.missing ? "" : read.text;
+    const existingAuthors = existingAuthorsText ? parseAuthors(existingAuthorsText) : new Map<string, Author>();
+    const found = existingAuthors.get(slug);
+    if (!found) return { ok: false, error: `author "${slug}" is not a custom author` };
+    prevAuthor = found;
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  const nextAuthor: Author = {
+    slug,
+    name: validated.name ?? prevAuthor.name,
+    dates: validated.dates ?? prevAuthor.dates,
+  };
+  const authorsChanged = validated.name !== undefined || validated.dates !== undefined;
+  let nextAuthorsText = existingAuthorsText;
+  if (authorsChanged) {
+    try {
+      parseAuthors(`${nextAuthor.slug}\t${nextAuthor.name}\t${nextAuthor.dates}\n`);
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+    nextAuthorsText = replaceAuthorInTsv(existingAuthorsText, nextAuthor);
+    if (Buffer.byteLength(nextAuthorsText) > 1024 * 1024) {
+      return { ok: false, error: "custom author file exceeds 1 MiB" };
+    }
+  }
+
+  const quotesPath = join(USER_CONFIG, "quotes.tsv");
+  let hadQuotesFile = false;
+  let existingQuotesText = "";
+  let nextQuotesText = "";
+  let beforeCustom: BundledQuote[] = [];
+  let afterCustom: BundledQuote[] = [];
+  const quotesChanged = validated.quotes !== undefined;
+  if (quotesChanged) {
+    try {
+      const read = readExisting(quotesPath);
+      hadQuotesFile = !read.missing;
+      existingQuotesText = read.missing ? "" : read.text;
+      const beforeQuotes = existingQuotesText ? parseQuotes(existingQuotesText) : [];
+      nextQuotesText = replaceAuthorQuotesInTsv(existingQuotesText, slug, validated.quotes!);
+      if (Buffer.byteLength(nextQuotesText) > 1024 * 1024) {
+        return { ok: false, error: "custom quote file exceeds 1 MiB" };
+      }
+      beforeCustom = indexCustom(beforeQuotes);
+      afterCustom = indexCustom(parseQuotes(nextQuotesText));
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+
+  const artPath = join(USER_ART_DIR, `${slug}.txt`);
+  let hadArtFile = false;
+  let existingArtText = "";
+  const artChanged = artText !== null;
+  if (artChanged) {
+    try {
+      const existingArt = readExisting(artPath);
+      hadArtFile = !existingArt.missing;
+      existingArtText = existingArt.missing ? "" : existingArt.text;
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+
+  const hadArtDir = existsSync(USER_ART_DIR);
+  const cleanupArtDir = () => {
+    if (!hadArtDir) {
+      try { rmdirSync(USER_ART_DIR); } catch { /* not empty or already gone */ }
+    }
+  };
+
+  let wroteArt = false;
+  let wroteAuthors = false;
+  let wroteQuotes = false;
+  const rollback = () => {
+    if (wroteQuotes) {
+      try {
+        if (hadQuotesFile) atomicWrite(quotesPath, existingQuotesText);
+        else rmSync(quotesPath, { force: true });
+      } catch { /* best-effort restore */ }
+    }
+    if (wroteAuthors) {
+      try {
+        atomicWrite(USER_AUTHORS_FILE, existingAuthorsText);
+      } catch { /* best-effort restore */ }
+    }
+    if (wroteArt) {
+      try {
+        if (hadArtFile) atomicWrite(artPath, existingArtText);
+        else {
+          rmSync(artPath, { force: true });
+          cleanupArtDir();
+        }
+      } catch { /* best-effort restore */ }
+    }
+  };
+
+  try {
+    if (artChanged) {
+      mkdirSync(USER_ART_DIR, { recursive: true });
+      atomicWrite(artPath, artText);
+      wroteArt = true;
+    }
+    if (authorsChanged) {
+      atomicWrite(USER_AUTHORS_FILE, nextAuthorsText);
+      wroteAuthors = true;
+    }
+    if (quotesChanged) {
+      atomicWrite(quotesPath, nextQuotesText);
+      wroteQuotes = true;
+    }
+  } catch (error) {
+    rollback();
+    cleanupArtDir();
+    throw error;
+  }
+
+  const nextSettings = quotesChanged
+    ? remapCustomQuoteIds(currentSettings, beforeCustom, afterCustom, slug)
+    : currentSettings;
+  const settingsRemapped = quotesChanged && JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
+
+  if (!quiet) {
+    console.log(`→ replaced author ${nextAuthor.name} (${slug})`);
+  }
+  return { ok: true, author: nextAuthor, nextSettings, settingsRemapped, quotesChanged, rollback };
+}
+
+/**
+ * Remove a custom author row, their quotes, their art file, and their slug
+ * from saved settings under the state lock, rolling back on failure.
+ */
+async function commitRemoveAuthor(
+  rawSlug: string,
+  currentSettings: Settings,
+  bundled: BundledQuote[],
+  quiet = false,
+): Promise<{ ok: true; author: Author; nextSettings: Settings; settingsSaved: boolean; rollback: () => void } | { ok: false; error: string }> {
+  const checkedSlug = await checkEditableCustomSlug(rawSlug, "removed");
+  if (!checkedSlug.ok) return checkedSlug;
+  const slug = checkedSlug.slug;
+
+  let existingAuthorsText = "";
+  let removedAuthor: Author;
+  try {
+    const read = readExisting(USER_AUTHORS_FILE);
+    existingAuthorsText = read.missing ? "" : read.text;
+    const existingAuthors = existingAuthorsText ? parseAuthors(existingAuthorsText) : new Map<string, Author>();
+    const found = existingAuthors.get(slug);
+    if (!found) return { ok: false, error: `author "${slug}" is not a custom author` };
+    removedAuthor = found;
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  const nextAuthorsText = removeAuthorFromTsv(existingAuthorsText, slug).text;
+  const nextCustomAuthors = nextAuthorsText ? parseAuthors(nextAuthorsText) : new Map<string, Author>();
+  const bundledMap = await bundledAuthors();
+  const nextRoster = [...bundledMap.keys()];
+  for (const key of nextCustomAuthors.keys()) {
+    if (!nextRoster.includes(key)) nextRoster.push(key);
+  }
+
+  const quotesPath = join(USER_CONFIG, "quotes.tsv");
+  let existingQuotesText = "";
+  let nextQuotesText = "";
+  let quotesChanged = false;
+  let beforeCustom: BundledQuote[] = [];
+  let afterCustom: BundledQuote[] = [];
+  try {
+    const read = readExisting(quotesPath);
+    if (!read.missing) {
+      existingQuotesText = read.text;
+      const beforeQuotes = existingQuotesText ? parseQuotes(existingQuotesText) : [];
+      const stripped = removeAuthorFromTsv(existingQuotesText, slug);
+      nextQuotesText = stripped.text;
+      quotesChanged = stripped.removed;
+      beforeCustom = indexCustom(beforeQuotes);
+      afterCustom = indexCustom(nextQuotesText ? parseQuotes(nextQuotesText) : []);
+    }
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  const artPath = join(USER_ART_DIR, `${slug}.txt`);
+  let hadArtFile = false;
+  let existingArtText = "";
+  try {
+    const stat = lstatSync(artPath);
+    if (!stat.isFile()) {
+      return { ok: false, error: `refusing to remove non-file: ${artPath}` };
+    }
+    existingArtText = readFileSync(artPath, "utf8");
+    hadArtFile = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      return { ok: false, error: `could not inspect ${artPath}: ${(error as Error).message}` };
+    }
+  }
+
+  let nextSettings: Settings = { ...currentSettings };
+  if (nextSettings.authors?.length) {
+    nextSettings.authors = nextSettings.authors.filter((item) => item !== slug);
+  }
+  nextSettings = remapCustomQuoteIds(nextSettings, beforeCustom, afterCustom, slug);
+
+  const nextCatalog = [...choicesOf(bundled), ...choicesOf(afterCustom)];
+  let hadSettingsFile = false;
+  let existingSettingsText = "";
+  try {
+    const settingsRead = readExisting(SETTINGS_FILE);
+    hadSettingsFile = !settingsRead.missing;
+    existingSettingsText = settingsRead.missing ? "" : settingsRead.text;
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  const compactedNext = compactSettings(nextSettings, nextRoster, nextCatalog, true);
+  const nextSettingsJson = `${JSON.stringify(compactedNext, null, 2)}\n`;
+  const settingsNeedsSave = hadSettingsFile && existingSettingsText !== nextSettingsJson;
+
+  let wroteAuthors = false;
+  let wroteQuotes = false;
+  let wroteSettings = false;
+  let removedArt = false;
+  const rollback = () => {
+    if (removedArt) {
+      try { atomicWrite(artPath, existingArtText); } catch { /* best-effort restore */ }
+    }
+    if (wroteSettings) {
+      try {
+        if (hadSettingsFile) atomicWrite(SETTINGS_FILE, existingSettingsText);
+        else rmSync(SETTINGS_FILE, { force: true });
+      } catch { /* best-effort restore */ }
+    }
+    if (wroteQuotes) {
+      try { atomicWrite(quotesPath, existingQuotesText); } catch { /* best-effort restore */ }
+    }
+    if (wroteAuthors) {
+      try { atomicWrite(USER_AUTHORS_FILE, existingAuthorsText); } catch { /* best-effort restore */ }
+    }
+  };
+  try {
+    atomicWrite(USER_AUTHORS_FILE, nextAuthorsText);
+    wroteAuthors = true;
+    if (quotesChanged) {
+      atomicWrite(quotesPath, nextQuotesText);
+      wroteQuotes = true;
+    }
+    if (settingsNeedsSave) {
+      await saveSettings(nextSettings, nextRoster, nextCatalog, true);
+      wroteSettings = true;
+    }
+    if (hadArtFile) {
+      rmSync(artPath);
+      removedArt = true;
+    }
+  } catch (error) {
+    rollback();
+    throw error;
+  }
+
+  if (!quiet) {
+    console.log(`→ removed author ${removedAuthor.name} (${slug})`);
+  }
+  return { ok: true, author: removedAuthor, nextSettings, settingsSaved: settingsNeedsSave, rollback };
 }
 
 async function promptCustomQuote(io: ConfigIo): Promise<PromptedQuote> {
@@ -1359,27 +1898,87 @@ function printSettings(settings: Settings, names: Map<string, { name: string }>,
   console.log(`→ ${describeSettings(settings, names, catalog)}`);
 }
 
+async function validateQuoteFlagsForReplace(
+  baseSettings: Settings,
+  quoteFlags: string[],
+  slugs: string[],
+  bundled: BundledQuote[],
+  customBefore: BundledQuote[],
+  customReadable: boolean,
+  slug: string,
+  replacementQuotes?: Quote[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!quoteFlags.length) return { ok: true };
+  let candidateSettings = baseSettings;
+  let candidateCustom = customBefore;
+  if (replacementQuotes) {
+    const quotesPath = join(USER_CONFIG, "quotes.tsv");
+    const existingQuotesText = readExisting(quotesPath).missing ? "" : readExisting(quotesPath).text;
+    const nextQuotesText = replaceAuthorQuotesInTsv(existingQuotesText, slug, replacementQuotes);
+    candidateCustom = indexCustom(parseQuotes(nextQuotesText));
+    candidateSettings = remapCustomQuoteIds(baseSettings, customBefore, candidateCustom, slug);
+  }
+  const candidateCatalog = [...choicesOf(bundled), ...choicesOf(candidateCustom)];
+  const checked = applyQuoteFlags(candidateSettings.quotes, quoteFlags, slugs, candidateCatalog, customReadable);
+  return checked.ok ? { ok: true } : { ok: false, error: checked.error };
+}
+
 async function configure(rest: string[]): Promise<number> {
-  const authorsFlag = stringFlag(rest, "authors");
-  const intervalFlag = stringFlag(rest, "interval");
-  const quoteFlags = flagValues(rest, "quotes");
-  let addFlags = flagValues(rest, "add");
-  const addAuthorFlags = flagValues(rest, "add-author");
-  const nameFlag = flagArg(rest, "name");
-  const datesFlag = flagArg(rest, "dates");
-  const imageFlag = flagArg(rest, "image");
-  const citationFlag = flagArg(rest, "citation");
-  const textFlag = flagArg(rest, "text");
-  const list = rest.includes("--list");
-  // --plain asks for numbers instead of keys for the authors and their quotes; the
-  // interval and custom-quote prompts read a line either way.
-  const plain = rest.includes("--plain");
-  const authorSubFlags = nameFlag.present || datesFlag.present || imageFlag.present || citationFlag.present || textFlag.present;
-  if (authorSubFlags && addAuthorFlags.length === 0) {
-    console.error("omastoic: --name, --dates, --image, --citation and --text require --add-author");
+  const parsedFlags = parseConfigFlags(rest);
+  const singleFlag = (name: string): { present: boolean; value?: string } => {
+    const list = parsedFlags.values.get(`--${name}`);
+    return list ? { present: true, value: list[0] } : { present: false };
+  };
+  for (const key of ["name", "dates", "image", "citation", "text"]) {
+    if ((parsedFlags.values.get(`--${key}`)?.length ?? 0) > 1) {
+      console.error(`omastoic: --${key} can only be passed once`);
+      return 1;
+    }
+  }
+  const authorsValues = parsedFlags.values.get("--authors") ?? [];
+  const intervalValues = parsedFlags.values.get("--interval") ?? [];
+  if (authorsValues.some((v) => v === undefined)) {
+    console.error("omastoic: --authors requires a value");
     return 1;
   }
-  const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && addAuthorFlags.length === 0 && !list;
+  if (intervalValues.some((v) => v === undefined)) {
+    console.error("omastoic: --interval requires a value");
+    return 1;
+  }
+  const authorsFlag = authorsValues.length ? authorsValues[authorsValues.length - 1] : undefined;
+  const intervalFlag = intervalValues.length ? intervalValues[intervalValues.length - 1] : undefined;
+  const quoteFlags = (parsedFlags.values.get("--quotes") ?? []).map((v) => v ?? "");
+  let addFlags = (parsedFlags.values.get("--add") ?? []).map((v) => v ?? "");
+  const addAuthorFlags = (parsedFlags.values.get("--add-author") ?? []).map((v) => v ?? "");
+  const replaceAuthorFlags = parsedFlags.values.get("--replace-author") ?? [];
+  const removeAuthorFlags = parsedFlags.values.get("--remove-author") ?? [];
+  const nameFlag = singleFlag("name");
+  const datesFlag = singleFlag("dates");
+  const imageFlag = singleFlag("image");
+  const citationFlag = singleFlag("citation");
+  const textFlag = singleFlag("text");
+  const list = parsedFlags.bools.has("--list");
+  // --plain asks for numbers instead of keys for the authors and their quotes; the
+  // interval and custom-quote prompts read a line either way.
+  const plain = parsedFlags.bools.has("--plain");
+  const authorActionCount =
+    (addAuthorFlags.length > 0 ? 1 : 0) +
+    (replaceAuthorFlags.length > 0 ? 1 : 0) +
+    (removeAuthorFlags.length > 0 ? 1 : 0);
+  if (authorActionCount > 1) {
+    console.error("omastoic: use only one of --add-author, --replace-author, or --remove-author at a time");
+    return 1;
+  }
+  const authorSubFlags = nameFlag.present || datesFlag.present || imageFlag.present || citationFlag.present || textFlag.present;
+  if (authorSubFlags && addAuthorFlags.length === 0 && replaceAuthorFlags.length === 0) {
+    console.error("omastoic: --name, --dates, --image, --citation and --text require --add-author or --replace-author");
+    return 1;
+  }
+  if (removeAuthorFlags.length > 0 && addFlags.length > 0) {
+    console.error("omastoic: --add cannot be used with --remove-author");
+    return 1;
+  }
+  const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && authorActionCount === 0 && !list;
 
   if (interactive && !process.stdin.isTTY && !plain) {
     const roster = await authors();
@@ -1400,13 +1999,15 @@ async function configure(rest: string[]): Promise<number> {
     console.log(`  omastoic config --add`);
     console.log(`  omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'`);
     console.log(`  omastoic config --add-author musonius --name "Musonius Rufus" --image portrait.jpg --citation "Lectures VI" --text "Your line."`);
+    console.log(`  omastoic config --replace-author musonius --image new.jpg`);
+    console.log(`  omastoic config --remove-author musonius`);
     console.log(`  omastoic config --list`);
     console.log(`  omastoic config --plain`);
     return 0;
   }
 
-  // Validate and transcode --add-author outside the state transaction lock so a
-  // slow converter or interactive prompt never blocks daemon writes.
+  // Validate and transcode --add-author / --replace-author outside the state
+  // transaction lock so a slow converter or interactive prompt never blocks daemon writes.
   let preparedAuthor: { validated: ValidatedNewAuthor; artText: string } | null = null;
   if (addAuthorFlags.length) {
     if (addAuthorFlags.length > 1) {
@@ -1501,7 +2102,7 @@ async function configure(rest: string[]): Promise<number> {
       const preRoster = await authors();
       const preSlugs = [...preRoster.keys()];
       if (preRoster.has(checked.value.author.slug)) {
-        console.error(`omastoic: author "${checked.value.author.slug}" already exists in ${USER_AUTHORS_FILE}`);
+        console.error(`omastoic: author "${checked.value.author.slug}" already exists in ${USER_AUTHORS_FILE}. Use --replace-author ${checked.value.author.slug} to update it.`);
         return 1;
       }
       const candidateSlugs = [...preSlugs, checked.value.author.slug];
@@ -1540,6 +2141,146 @@ async function configure(rest: string[]): Promise<number> {
     }
   }
 
+  let preparedReplace: { validated: ValidatedReplaceAuthor; artText: string | null } | null = null;
+  if (replaceAuthorFlags.length) {
+    if (replaceAuthorFlags.length > 1) {
+      console.error("omastoic: --replace-author accepts one author at a time");
+      return 1;
+    }
+    if (intervalFlag != null && parseInterval(intervalFlag) == null) {
+      console.error("omastoic: interval must be a whole number of seconds from 1 to 3600");
+      return 1;
+    }
+    const slugArg = replaceAuthorFlags[0];
+    if (!slugArg) {
+      replaceAuthorUsage();
+      return 1;
+    }
+    if (datesFlag.present && datesFlag.value === undefined) {
+      console.error("omastoic: --dates requires a value");
+      return 1;
+    }
+    if (nameFlag.present && !nameFlag.value) {
+      console.error("omastoic: --name requires a value");
+      return 1;
+    }
+    if (imageFlag.present && !imageFlag.value) {
+      console.error("omastoic: --image requires a file path");
+      return 1;
+    }
+    if (citationFlag.present !== textFlag.present) {
+      console.error("omastoic: --citation and --text must be given together");
+      return 1;
+    }
+    const quotesForAuthor: Array<{ citation: string; text: string }> = [];
+    if (citationFlag.present && textFlag.present) {
+      if (!citationFlag.value || !textFlag.value) {
+        console.error("omastoic: --citation and --text cannot be empty");
+        return 1;
+      }
+      quotesForAuthor.push({ citation: citationFlag.value, text: textFlag.value });
+    }
+    if (addFlags.length) {
+      if (addFlags.some((line) => !line)) {
+        addUsage();
+        return 1;
+      }
+      for (const line of addFlags) {
+        let rows: Quote[];
+        try {
+          rows = parseQuotes(line.endsWith("\n") ? line : `${line}\n`);
+        } catch (error) {
+          console.error(`omastoic: ${(error as Error).message}`);
+          return 1;
+        }
+        if (rows.length !== 1) {
+          addUsage();
+          return 1;
+        }
+        if (rows[0].author !== flatField(slugArg)) {
+          console.error(`omastoic: --add quote author "${rows[0].author}" does not match --replace-author "${flatField(slugArg)}"`);
+          return 1;
+        }
+        quotesForAuthor.push({ citation: rows[0].citation, text: rows[0].text });
+      }
+      addFlags = [];
+    }
+    const checked = await validateReplaceAuthorInput({
+      slug: slugArg,
+      name: nameFlag.present ? nameFlag.value : undefined,
+      dates: datesFlag.present ? datesFlag.value : undefined,
+      image: imageFlag.present ? imageFlag.value : undefined,
+      quotes: quotesForAuthor.length ? quotesForAuthor : undefined,
+    });
+    if (!checked.ok) {
+      console.error(`omastoic: ${checked.error}`);
+      return 1;
+    }
+    const preRoster = await authors();
+    const preSlugs = [...preRoster.keys()];
+    if (authorsFlag != null && parseAuthorList(authorsFlag, preSlugs) == null) {
+      console.error(`omastoic: unknown author — try: ${preSlugs.join(", ")} (or all)`);
+      return 1;
+    }
+    if (quoteFlags.length) {
+      const preBundled = await bundledBook();
+      const preCustom = await indexedCustom();
+      let preSettings: Settings;
+      try { preSettings = await loadSettings(); }
+      catch (error) {
+        console.error(`omastoic: ${(error as Error).message}`);
+        return 1;
+      }
+      const checkedQuotes = await validateQuoteFlagsForReplace(
+        preSettings,
+        quoteFlags,
+        preSlugs,
+        preBundled,
+        preCustom.quotes,
+        preCustom.readable,
+        checked.value.slug,
+        checked.value.quotes,
+      );
+      if (!checkedQuotes.ok) {
+        console.error(`omastoic: ${checkedQuotes.error}`);
+        return 1;
+      }
+    }
+    let artText: string | null = null;
+    if (checked.value.image !== undefined) {
+      try {
+        artText = await transcodePortrait(checked.value.image);
+      } catch (error) {
+        console.error(`omastoic: ${(error as Error).message}`);
+        return 1;
+      }
+    }
+    preparedReplace = { validated: checked.value, artText };
+  }
+
+  let pendingRemoveAuthorSlug: string | null = null;
+  if (removeAuthorFlags.length) {
+    if (removeAuthorFlags.length > 1) {
+      console.error("omastoic: --remove-author accepts one author at a time");
+      return 1;
+    }
+    if (intervalFlag != null && parseInterval(intervalFlag) == null) {
+      console.error("omastoic: interval must be a whole number of seconds from 1 to 3600");
+      return 1;
+    }
+    const slugArg = removeAuthorFlags[0];
+    if (!slugArg) {
+      removeAuthorUsage();
+      return 1;
+    }
+    const checkedSlug = await checkEditableCustomSlug(slugArg, "removed");
+    if (!checkedSlug.ok) {
+      console.error(`omastoic: ${checkedSlug.error}`);
+      return 1;
+    }
+    pendingRemoveAuthorSlug = checkedSlug.slug;
+  }
+
   return locked(STATE, async () => {
     let roster = await authors();
     let slugs = [...roster.keys()];
@@ -1556,7 +2297,10 @@ async function configure(rest: string[]): Promise<number> {
     let next: Settings = { ...current };
     let quoteLines: string[] | null = null;
     let quoteFailure: number | null = null;
-    let authorAdded = false;
+    let authorChanged = false;
+    let selectionTouched = false;
+    let replaceRollback: (() => void) | null = null;
+    let removeRollback: (() => void) | null = null;
 
     if (interactive) {
       const io: ConfigIo = configIo(plain);
@@ -1627,7 +2371,75 @@ async function configure(rest: string[]): Promise<number> {
           console.error(`omastoic: ${created.error}`);
           return 1;
         }
-        authorAdded = true;
+        authorChanged = true;
+        roster = await authors();
+        slugs = [...roster.keys()];
+        customBook = await indexedCustom();
+        catalog = [...choicesOf(bundled), ...choicesOf(customBook.quotes)];
+      }
+
+      if (preparedReplace) {
+        if (authorsFlag != null && parseAuthorList(authorsFlag, slugs) == null) {
+          console.error(`omastoic: unknown author — try: ${slugs.join(", ")} (or all)`);
+          return 1;
+        }
+        const checkedQuotes = await validateQuoteFlagsForReplace(
+          next,
+          quoteFlags,
+          slugs,
+          bundled,
+          customBook.quotes,
+          customBook.readable,
+          preparedReplace.validated.slug,
+          preparedReplace.validated.quotes,
+        );
+        if (!checkedQuotes.ok) {
+          console.error(`omastoic: ${checkedQuotes.error}`);
+          return 1;
+        }
+        const replaced = await commitReplaceAuthor(preparedReplace.validated, preparedReplace.artText, next);
+        if (!replaced.ok) {
+          console.error(`omastoic: ${replaced.error}`);
+          return 1;
+        }
+        authorChanged = true;
+        next = replaced.nextSettings;
+        if (replaced.settingsRemapped) selectionTouched = true;
+        replaceRollback = replaced.rollback;
+        roster = await authors();
+        slugs = [...roster.keys()];
+        customBook = await indexedCustom();
+        catalog = [...choicesOf(bundled), ...choicesOf(customBook.quotes)];
+      }
+
+      if (pendingRemoveAuthorSlug) {
+        if (!slugs.includes(pendingRemoveAuthorSlug)) {
+          console.error(`omastoic: author "${pendingRemoveAuthorSlug}" is not a custom author`);
+          return 1;
+        }
+        const remainingSlugs = slugs.filter((item) => item !== pendingRemoveAuthorSlug);
+        if (authorsFlag != null && parseAuthorList(authorsFlag, remainingSlugs) == null) {
+          console.error(`omastoic: unknown author — try: ${remainingSlugs.join(", ")} (or all)`);
+          return 1;
+        }
+        if (quoteFlags.length) {
+          const remainingCustom = indexCustom(customBook.quotes.filter((quote) => quote.author !== pendingRemoveAuthorSlug));
+          const remainingCatalog = [...choicesOf(bundled), ...choicesOf(remainingCustom)];
+          const remapped = remapCustomQuoteIds(next, customBook.quotes, remainingCustom, pendingRemoveAuthorSlug);
+          const checkedQuotes = applyQuoteFlags(remapped.quotes, quoteFlags, remainingSlugs, remainingCatalog, customBook.readable);
+          if (!checkedQuotes.ok) {
+            console.error(`omastoic: ${checkedQuotes.error}`);
+            return 1;
+          }
+        }
+        const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled);
+        if (!removed.ok) {
+          console.error(`omastoic: ${removed.error}`);
+          return 1;
+        }
+        authorChanged = true;
+        next = removed.nextSettings;
+        removeRollback = removed.rollback;
         roster = await authors();
         slugs = [...roster.keys()];
         customBook = await indexedCustom();
@@ -1666,7 +2478,6 @@ async function configure(rest: string[]): Promise<number> {
     }
 
     const settingsTouched = interactive || authorsFlag != null || intervalFlag != null || quoteFlags.length > 0;
-    let selectionTouched = false;
     if (quoteLines) {
       const code = await appendQuotes(quoteLines);
       if (code !== 0) quoteFailure = code;
@@ -1684,19 +2495,27 @@ async function configure(rest: string[]): Promise<number> {
         }
       }
     }
-    if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog, customBook.readable);
+    if (settingsTouched || selectionTouched) {
+      try {
+        await saveSettings(next, slugs, catalog, customBook.readable);
+      } catch (error) {
+        replaceRollback?.();
+        removeRollback?.();
+        throw error;
+      }
+    }
     if (quoteFailure != null) {
-      if (settingsTouched || authorAdded) {
+      if (settingsTouched || selectionTouched || authorChanged) {
         await restartDaemon();
         printSettings(await config(), roster, catalog);
       }
       return quoteFailure;
     }
-    if (!settingsTouched && !quoteLines && !authorAdded && !list) return 0;
-    if (settingsTouched || quoteLines || authorAdded) await restartDaemon();
+    if (!settingsTouched && !selectionTouched && !quoteLines && !authorChanged && !list) return 0;
+    if (settingsTouched || selectionTouched || quoteLines || authorChanged) await restartDaemon();
     const saved = await config();
     printSettings(saved, roster, catalog);
-    const custom = (quoteLines || authorAdded) && quoteFailure == null ? indexCustom(await customQuotes()) : customBook.quotes;
+    const custom = (quoteLines || authorChanged) && quoteFailure == null ? indexCustom(await customQuotes()) : customBook.quotes;
     warnIgnoredRotation(bundled, custom, saved);
     if (list) {
       if (customBook.error) console.error(`omastoic: ${customBook.error}`);
@@ -1714,6 +2533,7 @@ async function configure(rest: string[]): Promise<number> {
 /** What the panel renders. Read-only: no lock, no writes, no state directory. */
 async function panelState(): Promise<string> {
   const roster = await authors();
+  const bundledRoster = await bundledAuthors();
   const settings = await config();
   const bundled = await bundledBook();
   const custom = await indexedCustom();
@@ -1733,6 +2553,7 @@ async function panelState(): Promise<string> {
       slug: author.slug,
       name: author.name,
       dates: author.dates,
+      custom: !bundledRoster.has(author.slug),
       id: quote?.id ?? "",
       citation: quote?.citation ?? "",
       text: quote?.text ?? "",
@@ -1750,6 +2571,7 @@ async function panelState(): Promise<string> {
         slug: author.slug,
         name: author.name,
         dates: author.dates,
+        custom: !bundledRoster.has(author.slug),
         selected: selected.includes(author.slug),
       })),
       samples,
@@ -1846,7 +2668,58 @@ function panelAuthor(raw: unknown): { input: NewAuthorInput } | { error: string 
   return { input: { slug, name, dates, image, quotes } };
 }
 
-/** One JSON object from the panel: the fields `config` owns, plus one quote or author to add. */
+function panelReplaceAuthor(raw: unknown): { input: ReplaceAuthorInput } | { error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "panel replaceAuthor expects an object with slug and fields to update" };
+  }
+  const row = raw as Record<string, unknown>;
+  if (typeof row.slug !== "string") {
+    return { error: "panel replaceAuthor needs an author slug" };
+  }
+  let name: string | undefined;
+  if (Object.hasOwn(row, "name") && row.name !== undefined) {
+    if (typeof row.name !== "string") return { error: "panel replaceAuthor name must be a string" };
+    name = row.name;
+  }
+  let dates: string | undefined;
+  if (Object.hasOwn(row, "dates") && row.dates !== undefined) {
+    if (typeof row.dates !== "string") return { error: "panel replaceAuthor dates must be a string" };
+    dates = row.dates;
+  }
+  let image: string | undefined;
+  if (Object.hasOwn(row, "image") && row.image !== undefined) {
+    if (typeof row.image !== "string") return { error: "panel replaceAuthor image must be a string" };
+    image = row.image;
+  }
+  let quotes: Array<{ citation: string; text: string }> | undefined;
+  if (Object.hasOwn(row, "quotes") && row.quotes !== undefined) {
+    if (!Array.isArray(row.quotes) || row.quotes.length === 0) {
+      return { error: "panel replaceAuthor quotes must be a non-empty list of citation and text" };
+    }
+    quotes = [];
+    for (const item of row.quotes) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return { error: "panel replaceAuthor quotes must be objects with citation and text" };
+      }
+      const entry = item as Record<string, unknown>;
+      quotes.push({
+        citation: typeof entry.citation === "string" ? entry.citation : "",
+        text: typeof entry.text === "string" ? entry.text : "",
+      });
+    }
+  } else if (
+    (Object.hasOwn(row, "citation") && row.citation !== undefined) ||
+    (Object.hasOwn(row, "text") && row.text !== undefined)
+  ) {
+    if (typeof row.citation !== "string" || typeof row.text !== "string") {
+      return { error: "panel replaceAuthor citation and text must be given together" };
+    }
+    quotes = [{ citation: row.citation, text: row.text }];
+  }
+  return { input: { slug: row.slug, name, dates, image, quotes } };
+}
+
+/** One JSON object from the panel: the fields `config` owns, plus one quote or author change. */
 async function panelApply(raw: string): Promise<number> {
   let payload: unknown;
   try {
@@ -1869,14 +2742,16 @@ async function panelApply(raw: string): Promise<number> {
     }
   }
 
-  // Validate and transcode addAuthor outside the state lock so slow image work
-  // never holds transaction.flock.
+  const actionKeys = ["addAuthor", "replaceAuthor", "removeAuthor", "addQuote", "removeQuote"] as const;
+  if (actionKeys.filter((key) => Object.hasOwn(value, key)).length > 1) {
+    console.error("omastoic: Change one author or quote at a time.");
+    return 1;
+  }
+
+  // Validate and transcode addAuthor / replaceAuthor outside the state lock so
+  // slow image work never holds transaction.flock.
   let preparedAuthor: { validated: ValidatedNewAuthor; artText: string } | null = null;
   if (Object.hasOwn(value, "addAuthor")) {
-    if (Object.hasOwn(value, "addQuote") || Object.hasOwn(value, "removeQuote")) {
-      console.error("omastoic: Add one author or quote at a time.");
-      return 1;
-    }
     const parsedAuthor = panelAuthor(value.addAuthor);
     if ("error" in parsedAuthor) {
       console.error(`omastoic: ${parsedAuthor.error}`);
@@ -1889,7 +2764,7 @@ async function panelApply(raw: string): Promise<number> {
     }
     const preRoster = await authors();
     if (preRoster.has(checked.value.author.slug)) {
-      console.error(`omastoic: author "${checked.value.author.slug}" already exists in ${USER_AUTHORS_FILE}`);
+      console.error(`omastoic: author "${checked.value.author.slug}" already exists in ${USER_AUTHORS_FILE}. Use --replace-author ${checked.value.author.slug} to update it.`);
       return 1;
     }
     if (Object.hasOwn(value, "authors")) {
@@ -1911,6 +2786,68 @@ async function panelApply(raw: string): Promise<number> {
       return 1;
     }
     preparedAuthor = { validated: checked.value, artText };
+  }
+
+  let preparedReplace: { validated: ValidatedReplaceAuthor; artText: string | null } | null = null;
+  if (Object.hasOwn(value, "replaceAuthor")) {
+    const parsedReplace = panelReplaceAuthor(value.replaceAuthor);
+    if ("error" in parsedReplace) {
+      console.error(`omastoic: ${parsedReplace.error}`);
+      return 1;
+    }
+    const checked = await validateReplaceAuthorInput(parsedReplace.input);
+    if (!checked.ok) {
+      console.error(`omastoic: ${checked.error}`);
+      return 1;
+    }
+    const preRoster = await authors();
+    if (Object.hasOwn(value, "authors")) {
+      if (!Array.isArray(value.authors) || !value.authors.every((slug) => typeof slug === "string")) {
+        console.error("omastoic: panel authors must be a list of author slugs — an empty list means all");
+        return 1;
+      }
+      const allowed = [...preRoster.keys()];
+      if ((value.authors as string[]).some((slug) => !allowed.includes(slug))) {
+        console.error("omastoic: Unknown author. Pick a name from the list.");
+        return 1;
+      }
+    }
+    let artText: string | null = null;
+    if (checked.value.image !== undefined) {
+      try {
+        artText = await transcodePortrait(checked.value.image);
+      } catch (error) {
+        console.error(`omastoic: ${(error as Error).message}`);
+        return 1;
+      }
+    }
+    preparedReplace = { validated: checked.value, artText };
+  }
+
+  let pendingRemoveAuthorSlug: string | null = null;
+  if (Object.hasOwn(value, "removeAuthor")) {
+    if (typeof value.removeAuthor !== "string") {
+      console.error("omastoic: removeAuthor expects an author slug");
+      return 1;
+    }
+    const checkedSlug = await checkEditableCustomSlug(value.removeAuthor, "removed");
+    if (!checkedSlug.ok) {
+      console.error(`omastoic: ${checkedSlug.error}`);
+      return 1;
+    }
+    if (Object.hasOwn(value, "authors")) {
+      if (!Array.isArray(value.authors) || !value.authors.every((slug) => typeof slug === "string")) {
+        console.error("omastoic: panel authors must be a list of author slugs — an empty list means all");
+        return 1;
+      }
+      const preRoster = await authors();
+      const allowed = [...preRoster.keys()].filter((slug) => slug !== checkedSlug.slug);
+      if ((value.authors as string[]).some((slug) => !allowed.includes(slug))) {
+        console.error("omastoic: Unknown author. Pick a name from the list.");
+        return 1;
+      }
+    }
+    pendingRemoveAuthorSlug = checkedSlug.slug;
   }
 
   return locked(STATE, async () => {
@@ -1939,8 +2876,11 @@ async function panelApply(raw: string): Promise<number> {
 
     const allowedSlugs = preparedAuthor && !slugs.includes(preparedAuthor.validated.author.slug)
       ? [...slugs, preparedAuthor.validated.author.slug]
-      : slugs;
+      : pendingRemoveAuthorSlug
+        ? slugs.filter((slug) => slug !== pendingRemoveAuthorSlug)
+        : slugs;
 
+    let requestedAuthors: string[] | undefined;
     if (Object.hasOwn(value, "authors")) {
       if (!Array.isArray(value.authors) || !value.authors.every((slug) => typeof slug === "string")) {
         console.error("omastoic: panel authors must be a list of author slugs — an empty list means all");
@@ -1952,17 +2892,58 @@ async function panelApply(raw: string): Promise<number> {
         console.error("omastoic: Unknown author. Pick a name from the list.");
         return 1;
       }
+      requestedAuthors = wanted;
       next.authors = wanted;
     }
 
-    let addedAuthor = false;
+    let authorMutated = false;
+    let selectionTouched = false;
+    let replaceRollback: (() => void) | null = null;
+    let removeRollback: (() => void) | null = null;
+
     if (preparedAuthor) {
       const created = await commitNewAuthor(preparedAuthor.validated, preparedAuthor.artText, true);
       if (!created.ok) {
         console.error(`omastoic: ${created.error}`);
         return 1;
       }
-      addedAuthor = true;
+      authorMutated = true;
+      roster = await authors();
+      slugs = [...roster.keys()];
+      custom = await indexedCustom();
+      catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
+    }
+
+    if (preparedReplace) {
+      const replaced = await commitReplaceAuthor(preparedReplace.validated, preparedReplace.artText, next, true);
+      if (!replaced.ok) {
+        console.error(`omastoic: ${replaced.error}`);
+        return 1;
+      }
+      authorMutated = true;
+      next = replaced.nextSettings;
+      if (replaced.settingsRemapped) selectionTouched = true;
+      replaceRollback = replaced.rollback;
+      roster = await authors();
+      slugs = [...roster.keys()];
+      custom = await indexedCustom();
+      catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
+    }
+
+    if (pendingRemoveAuthorSlug) {
+      if (!slugs.includes(pendingRemoveAuthorSlug)) {
+        console.error(`omastoic: author "${pendingRemoveAuthorSlug}" is not a custom author`);
+        return 1;
+      }
+      const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled, true);
+      if (!removed.ok) {
+        console.error(`omastoic: ${removed.error}`);
+        return 1;
+      }
+      authorMutated = true;
+      next = removed.nextSettings;
+      removeRollback = removed.rollback;
+      if (requestedAuthors !== undefined) next.authors = requestedAuthors;
       roster = await authors();
       slugs = [...roster.keys()];
       custom = await indexedCustom();
@@ -2020,7 +3001,6 @@ async function panelApply(raw: string): Promise<number> {
       catalog = [...choicesOf(bundled), ...choicesOf(indexCustom(gone.quotes))];
     }
 
-    let selectionTouched = false;
     if (added && pendingQuoteFile) {
       console.error("omastoic: Add or remove one quote at a time.");
       return 1;
@@ -2039,9 +3019,17 @@ async function panelApply(raw: string): Promise<number> {
 
     const after = compactSettings(next, slugs, catalog, custom.readable);
     const settingsChanged = JSON.stringify(savedBefore) !== JSON.stringify(after) || selectionTouched;
-    if (settingsChanged) await saveSettings(next, slugs, catalog, custom.readable);
+    if (settingsChanged && (!pendingRemoveAuthorSlug || requestedAuthors !== undefined || Object.hasOwn(value, "interval"))) {
+      try {
+        await saveSettings(next, slugs, catalog, custom.readable);
+      } catch (error) {
+        replaceRollback?.();
+        removeRollback?.();
+        throw error;
+      }
+    }
     if (pendingQuoteFile) atomicWrite(pendingQuoteFile.path, pendingQuoteFile.body);
-    if (settingsChanged || added || addedAuthor || removedId) await restartDaemon();
+    if (settingsChanged || added || authorMutated || removedId) await restartDaemon();
     console.log(await panelState());
     return 0;
   });
@@ -2094,7 +3082,7 @@ function usage(): string {
   omastoic preview     write a new canvas and start the screensaver now
                        (native: passes that file with --input)
   omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
-  omastoic config      choose authors, their quotes, and seconds, or add a quote or author
+  omastoic config      choose authors, their quotes, and seconds, or manage custom quotes and authors
                        (--plain asks for numbers instead of keys)
   omastoic ui          open the settings panel in the Omarchy shell
   omastoic status      who has the screensaver, and what is in the quote book

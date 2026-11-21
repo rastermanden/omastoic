@@ -33,10 +33,10 @@ _omastoic() {
       mapfile -t COMPREPLY < <(compgen -f -- "$cur")
       return 0
     fi
-    if [[ $prev == --interval || $prev == --quotes || $prev == --add || $prev == --add-author || $prev == --name || $prev == --dates || $prev == --citation || $prev == --text ]]; then
+    if [[ $prev == --interval || $prev == --quotes || $prev == --add || $prev == --add-author || $prev == --replace-author || $prev == --remove-author || $prev == --name || $prev == --dates || $prev == --citation || $prev == --text ]]; then
       return 0
     fi
-    mapfile -t COMPREPLY < <(compgen -W "--authors --interval --quotes --add --add-author --name --dates --image --citation --text --list --plain" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--authors --interval --quotes --add --add-author --replace-author --remove-author --name --dates --image --citation --text --list --plain" -- "$cur")
     ;;
   uninstall)
     mapfile -t COMPREPLY < <(compgen -W "--purge" -- "$cur")

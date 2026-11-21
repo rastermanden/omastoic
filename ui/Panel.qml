@@ -34,8 +34,14 @@ Item {
   property bool applyQueued: false
   property var pendingQuote: null
   property var pendingAuthor: null
+  property var pendingReplaceAuthor: null
   property bool addingAuthor: false
+  property bool replacingAuthor: false
   property string pendingRemove: ""
+  property string pendingRemoveAuthor: ""
+  property string editingAuthorSlug: ""
+  property string editingAuthorOrigName: ""
+  property string editingAuthorOrigDates: ""
   property string notice: ""
   property string error: ""
   property bool quoteOpen: false
@@ -62,7 +68,24 @@ Item {
   property string newAuthorText: ""
 
   readonly property bool quoteReady: newAuthor !== "" && newCitation.trim() !== "" && newText.trim() !== ""
-  readonly property bool authorReady: newAuthorSlug.trim() !== "" && newAuthorName.trim() !== "" && newAuthorImage.trim() !== "" && newAuthorCitation.trim() !== "" && newAuthorText.trim() !== ""
+  readonly property bool authorReady: editingAuthorSlug !== ""
+    ? (
+        newAuthorName.trim() !== "" &&
+        ((newAuthorCitation.trim() === "") === (newAuthorText.trim() === "")) &&
+        (
+          newAuthorName.trim() !== editingAuthorOrigName ||
+          newAuthorDates.trim() !== editingAuthorOrigDates ||
+          newAuthorImage.trim() !== "" ||
+          (newAuthorCitation.trim() !== "" && newAuthorText.trim() !== "")
+        )
+      )
+    : (
+        newAuthorSlug.trim() !== "" &&
+        newAuthorName.trim() !== "" &&
+        newAuthorImage.trim() !== "" &&
+        newAuthorCitation.trim() !== "" &&
+        newAuthorText.trim() !== ""
+      )
   readonly property var preview: {
     for (var i = 0; i < samples.length; i++) {
       if (selectedAuthors.indexOf(samples[i].slug) !== -1) return samples[i]
@@ -84,6 +107,11 @@ Item {
     quoteOpen = false
     authorOpen = false
     listOpen = false
+    editingAuthorSlug = ""
+    editingAuthorOrigName = ""
+    editingAuthorOrigDates = ""
+    pendingReplaceAuthor = null
+    pendingRemoveAuthor = ""
     reload()
     Qt.callLater(function() { if (root.opened) previewButton.takeFocus() })
   }
@@ -156,8 +184,10 @@ Item {
       error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       applyQueued = false
       pendingAuthor = null
+      pendingReplaceAuthor = null
       pendingQuote = null
       pendingRemove = ""
+      pendingRemoveAuthor = ""
       Qt.callLater(function() { root.reveal(statusSlot) })
     } else {
       error = ""
@@ -166,6 +196,7 @@ Item {
     }
     saving = false
     addingAuthor = false
+    replacingAuthor = false
     if (applyQueued) {
       applyQueued = false
       applyNow()
@@ -198,15 +229,20 @@ Item {
       newAuthor = samples[0].slug
     citationField.text = ""
     textField.text = ""
-    if (addingAuthor) {
+    if (addingAuthor || replacingAuthor) {
       authorOpen = false
       authorSlugEdited = false
+      editingAuthorSlug = ""
+      editingAuthorOrigName = ""
+      editingAuthorOrigDates = ""
       authorNameField.text = ""
       authorSlugField.text = ""
       authorDatesField.text = ""
       authorImageField.text = ""
       authorCitationField.text = ""
       authorTextField.text = ""
+    } else if (editingAuthorSlug !== "" && !samples.some(function(author) { return author.slug === root.editingAuthorSlug })) {
+      closeAuthorForm()
     }
     if (secondsField.field) secondsField.field.value = interval
     adopting = false
@@ -261,6 +297,24 @@ Item {
       if (intervalApplied && interval !== committedInterval) payload.interval = interval
       pendingAuthor = null
       addingAuthor = true
+      if (pendingReplaceAuthor || pendingRemoveAuthor !== "" || pendingRemove !== "" || pendingQuote) applyQueued = true
+    } else if (pendingReplaceAuthor) {
+      payload.replaceAuthor = pendingReplaceAuthor
+      if (selectedAuthors.join(",") !== committedAuthors.join(",")) payload.authors = selectedAuthors
+      if (intervalApplied && interval !== committedInterval) payload.interval = interval
+      pendingReplaceAuthor = null
+      replacingAuthor = true
+      if (pendingRemoveAuthor !== "" || pendingRemove !== "" || pendingQuote) applyQueued = true
+    } else if (pendingRemoveAuthor !== "") {
+      var removeSlug = pendingRemoveAuthor
+      payload.removeAuthor = removeSlug
+      var nextWithoutRemoved = selectedAuthors.filter(function(slug) { return slug !== removeSlug })
+      var committedWithoutRemoved = committedAuthors.filter(function(slug) { return slug !== removeSlug })
+      if (nextWithoutRemoved.length > 0 && nextWithoutRemoved.join(",") !== committedWithoutRemoved.join(",")) {
+        payload.authors = nextWithoutRemoved
+      }
+      if (intervalApplied && interval !== committedInterval) payload.interval = interval
+      pendingRemoveAuthor = ""
       if (pendingRemove !== "" || pendingQuote) applyQueued = true
     } else {
       payload.authors = selectedAuthors
@@ -294,7 +348,104 @@ Item {
     applyNow()
   }
 
+  function openAddAuthor() {
+    if (authorOpen && editingAuthorSlug === "") {
+      authorOpen = false
+      return
+    }
+    quoteOpen = false
+    editingAuthorSlug = ""
+    editingAuthorOrigName = ""
+    editingAuthorOrigDates = ""
+    authorSlugEdited = false
+    authorNameField.text = ""
+    authorSlugField.text = ""
+    authorDatesField.text = ""
+    authorImageField.text = ""
+    authorCitationField.text = ""
+    authorTextField.text = ""
+    authorOpen = true
+    Qt.callLater(function() { root.reveal(authorForm) })
+  }
+
+  function startEditAuthor(author) {
+    if (authorOpen && editingAuthorSlug === author.slug) {
+      closeAuthorForm()
+      return
+    }
+    quoteOpen = false
+    editingAuthorSlug = author.slug
+    editingAuthorOrigName = author.name
+    editingAuthorOrigDates = author.dates
+    authorSlugEdited = true
+    authorNameField.text = author.name
+    authorSlugField.text = author.slug
+    authorDatesField.text = author.dates
+    authorImageField.text = ""
+    authorCitationField.text = ""
+    authorTextField.text = ""
+    authorOpen = true
+    Qt.callLater(function() { root.reveal(authorForm) })
+  }
+
+  function closeAuthorForm() {
+    authorOpen = false
+    editingAuthorSlug = ""
+    editingAuthorOrigName = ""
+    editingAuthorOrigDates = ""
+  }
+
   function addAuthor() {
+    submitAuthor()
+  }
+
+  function submitAuthor() {
+    if (root.busy) return
+    if (editingAuthorSlug !== "") {
+      if (newAuthorName.trim() === "") {
+        error = ""
+        notice = "An author needs a name."
+        Qt.callLater(function() { root.reveal(statusSlot) })
+        return
+      }
+      var hasCite = newAuthorCitation.trim() !== ""
+      var hasWords = newAuthorText.trim() !== ""
+      if (hasCite !== hasWords) {
+        error = ""
+        notice = "A quote needs a citation and the words."
+        Qt.callLater(function() { root.reveal(statusSlot) })
+        return
+      }
+      var patch = { slug: editingAuthorSlug }
+      var changed = false
+      if (newAuthorName.trim() !== editingAuthorOrigName) {
+        patch.name = newAuthorName.trim()
+        changed = true
+      }
+      if (newAuthorDates.trim() !== editingAuthorOrigDates) {
+        patch.dates = newAuthorDates.trim()
+        changed = true
+      }
+      if (newAuthorImage.trim() !== "") {
+        patch.image = newAuthorImage.trim()
+        changed = true
+      }
+      if (hasCite && hasWords) {
+        patch.citation = newAuthorCitation.trim()
+        patch.text = newAuthorText.trim()
+        changed = true
+      }
+      if (!changed) {
+        error = ""
+        notice = "Change the portrait, name, dates, or quote first."
+        Qt.callLater(function() { root.reveal(statusSlot) })
+        return
+      }
+      applyTimer.stop()
+      pendingReplaceAuthor = patch
+      applyNow()
+      return
+    }
     if (!authorReady) {
       error = ""
       notice = "An author needs a name, id, image, citation and quote."
@@ -310,6 +461,14 @@ Item {
       citation: newAuthorCitation.trim(),
       text: newAuthorText.trim(),
     }
+    applyNow()
+  }
+
+  function removeAuthor(slug) {
+    if (root.busy) return
+    if (editingAuthorSlug === slug) closeAuthorForm()
+    applyTimer.stop()
+    pendingRemoveAuthor = slug
     applyNow()
   }
 
@@ -585,6 +744,7 @@ Item {
             Repeater {
               model: root.samples
               delegate: Rectangle {
+                id: authorRow
                 required property var modelData
                 width: parent.width
                 implicitHeight: row.implicitHeight + Style.space(8)
@@ -600,6 +760,14 @@ Item {
                 activeFocusOnTab: true
                 Accessible.name: modelData.name
                 Accessible.role: Accessible.CheckBox
+
+                MouseArea {
+                  id: rowPress
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleAuthor(modelData.slug)
+                }
 
                 Row {
                   id: row
@@ -627,7 +795,8 @@ Item {
                     }
                   }
                   Column {
-                    width: parent.width - Style.space(32)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.max(0, parent.width - Style.space(32) - (customActions.visible ? customActions.implicitWidth : 0))
                     Text {
                       width: parent.width
                       elide: Text.ElideRight
@@ -646,16 +815,27 @@ Item {
                       font.pixelSize: Style.font.bodySmall
                     }
                   }
+                  Row {
+                    id: customActions
+                    visible: modelData.custom === true
+                    spacing: Style.space(6)
+                    anchors.verticalCenter: parent.verticalCenter
+                    RingButton {
+                      label: "Edit"
+                      picked: root.authorOpen && root.editingAuthorSlug === modelData.slug
+                      available: !root.busy
+                      onActivated: root.startEditAuthor(modelData)
+                    }
+                    RingButton {
+                      label: "Remove"
+                      available: !root.busy
+                      onActivated: root.removeAuthor(modelData.slug)
+                    }
+                  }
                 }
 
-                MouseArea {
-                  id: rowPress
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.toggleAuthor(modelData.slug)
-                }
                 Keys.onPressed: function(event) {
+                  if (!authorRow.activeFocus) return
                   if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     root.toggleAuthor(modelData.slug)
                     event.accepted = true
@@ -712,11 +892,8 @@ Item {
                 }
               }
               RingButton {
-                label: root.authorOpen ? "Close" : "Add an author"
-                onActivated: {
-                  root.authorOpen = !root.authorOpen
-                  if (root.authorOpen) root.quoteOpen = false
-                }
+                label: (root.authorOpen && root.editingAuthorSlug === "") ? "Close" : "Add an author"
+                onActivated: root.openAddAuthor()
               }
             }
 
@@ -856,6 +1033,14 @@ Item {
               spacing: Style.space(8)
 
               Text {
+                visible: root.editingAuthorSlug !== ""
+                text: "Update " + root.editingAuthorOrigName
+                color: root.ink
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+              Text {
                 text: "Name"
                 color: root.quiet
                 font.family: Style.font.family
@@ -890,12 +1075,14 @@ Item {
                 }
               }
               Text {
+                visible: root.editingAuthorSlug === ""
                 text: "Short id"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
               }
               Item {
+                visible: root.editingAuthorSlug === ""
                 width: parent.width
                 height: authorSlugField.implicitHeight
                 TextField {
@@ -949,7 +1136,7 @@ Item {
                 }
               }
               Text {
-                text: "Portrait image (JPEG or PNG)"
+                text: root.editingAuthorSlug !== "" ? "New portrait image (optional, JPEG or PNG)" : "Portrait image (JPEG or PNG)"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
@@ -960,7 +1147,7 @@ Item {
                 TextField {
                   id: authorImageField
                   width: parent.width
-                  placeholderText: "/path/to/portrait.png"
+                  placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current portrait" : "/path/to/portrait.png"
                   placeholderTextColor: root.hint
                   foreground: root.ink
                   onTextChanged: root.newAuthorImage = text
@@ -977,7 +1164,7 @@ Item {
                 }
               }
               Text {
-                text: "Citation"
+                text: root.editingAuthorSlug !== "" ? "Replacement citation (optional)" : "Citation"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
@@ -988,7 +1175,7 @@ Item {
                 TextField {
                   id: authorCitationField
                   width: parent.width
-                  placeholderText: "Lectures VI"
+                  placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "Lectures VI"
                   placeholderTextColor: root.hint
                   foreground: root.ink
                   onTextChanged: root.newAuthorCitation = text
@@ -1005,7 +1192,7 @@ Item {
                 }
               }
               Text {
-                text: "Quote"
+                text: root.editingAuthorSlug !== "" ? "Replacement quote (optional)" : "Quote"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
@@ -1016,11 +1203,11 @@ Item {
                 TextField {
                   id: authorTextField
                   width: parent.width
-                  placeholderText: "The line itself"
+                  placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "The line itself"
                   placeholderTextColor: root.hint
                   foreground: root.ink
                   onTextChanged: root.newAuthorText = text
-                  Keys.onReturnPressed: root.addAuthor()
+                  Keys.onReturnPressed: if (!root.busy) root.submitAuthor()
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorTextField)
                 }
                 Rectangle {
@@ -1033,10 +1220,18 @@ Item {
                   border.color: Commons.Color.accent
                 }
               }
-              RingButton {
-                label: "Add author"
-                available: root.authorReady && !root.busy
-                onActivated: root.addAuthor()
+              Row {
+                spacing: Style.space(8)
+                RingButton {
+                  label: root.editingAuthorSlug !== "" ? "Replace author" : "Add author"
+                  available: root.authorReady && !root.busy
+                  onActivated: root.submitAuthor()
+                }
+                RingButton {
+                  visible: root.editingAuthorSlug !== ""
+                  label: "Cancel"
+                  onActivated: root.closeAuthorForm()
+                }
               }
             }
 
