@@ -197,7 +197,7 @@ test("a resize redraws the frame and leaves no listeners behind", async () => {
   h.resize();
   h.send("\r");
   expect(await picked).toEqual(all);
-  expect(h.text().split("Stoics on the screensaver").length - 1).toBeGreaterThanOrEqual(2);
+  expect(h.text().split("Authors on the screensaver").length - 1).toBeGreaterThanOrEqual(2);
   expect(h.events.listenerCount("resize")).toBe(0);
   expect(h.modes).toEqual([true, false]);
 });
@@ -335,7 +335,7 @@ test("a narrow terminal truncates every frame line and a resize re-fits them", a
   const wide = lines(frames[2]!);
   expect(wide.some((line) => line.length > 19)).toBe(true);
   expect(wide.every((line) => line.length <= 59)).toBe(true);
-  expect(wide[0]).toContain("Stoics on the screensaver");
+  expect(wide[0]).toContain("Authors on the screensaver");
 });
 
 test("a raw tty is required for the picker and plain mode is used otherwise", async () => {

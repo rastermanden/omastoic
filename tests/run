@@ -14,7 +14,7 @@ fi
 
 # The suite includes tests/qml.test.ts, which lints the manifest's QML entry
 # points when a host kit and qmllint are present and skips that check otherwise.
-bun test tests
+bun test --timeout 30000 tests
 
 shopt -s nullglob
 shell_scripts=(

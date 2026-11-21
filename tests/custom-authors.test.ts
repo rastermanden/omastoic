@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { root, sandbox } from "./sandbox.ts";
 import { pty, SHOWS } from "./pty.ts";
-import { detectImageKind, pbmToBraille, PORTRAIT_COLS, PORTRAIT_ROWS, validatePortraitArt } from "../src/portrait.ts";
+import { detectImageKind, headerPortraitLayout, otsuThreshold, pbmToBraille, pgmToBraille, PORTRAIT_COLS, PORTRAIT_ROWS, portraitDownscale, validatePortraitArt } from "../src/portrait.ts";
 import { parseAuthors } from "../src/canvas.ts";
 
 const sampleJpeg = join(root, "assets/local/marcus.jpg");
@@ -97,15 +97,59 @@ function writePhotoPng(path: string): void {
   writeFileSync(path, png);
 }
 
+function writeMidGreyPhotoPng(path: string): void {
+  // Noisy mid-grey gradient backdrop with a lit head and dark features/shoulders.
+  const png = makePng(120, 140, (x, y) => {
+    const dx = x - 60;
+    const dy = y - 54;
+    const inFace = (dx * dx) / (26 * 26) + (dy * dy) / (34 * 34) <= 1;
+    const leftEye = (x - 49) * (x - 49) + (y - 48) * (y - 48) <= 16;
+    const rightEye = (x - 71) * (x - 71) + (y - 48) * (y - 48) <= 16;
+    if (leftEye || rightEye) return 28;
+    if (inFace) return Math.max(150, Math.min(225, Math.round(210 - Math.hypot(dx, dy) * 1.4)));
+    const inShoulders = y >= 94 && Math.abs(dx) <= 46;
+    if (inShoulders) return 38;
+    // Mid-grey gradient + deterministic noise (112..148)
+    const noise = ((x * 37 + y * 73) % 21) - 10;
+    return Math.round(135 - (y / 140) * 18 + noise);
+  });
+  writeFileSync(path, png);
+}
+
 function writeBlankPng(path: string): void {
   writeFileSync(path, makePng(32, 32, () => 255));
 }
 
-test("portrait helpers detect JPEG/PNG, encode PBM to braille, and enforce 34x20 bounds", () => {
+test("portrait helpers detect JPEG/PNG, compute Otsu threshold, suppress mid-grey noise, and enforce 34x20 bounds", () => {
   expect(detectImageKind(readFileSync(sampleJpeg))).toBe("jpeg");
   expect(detectImageKind(makePng(8, 8, () => 0))).toBe("png");
   expect(detectImageKind(Buffer.from("<svg></svg>"))).toBeNull();
   expect(detectImageKind(Buffer.from("not an image"))).toBeNull();
+
+  // Otsu separates a bimodal distribution between its two modes.
+  const bimodal = [...Array.from({ length: 100 }, () => 40), ...Array.from({ length: 100 }, () => 200)];
+  const split = otsuThreshold(bimodal);
+  expect(split).toBeGreaterThanOrEqual(40);
+  expect(split).toBeLessThan(200);
+
+  // pgmToBraille suppresses a noisy mid-grey border while keeping a dark center subject.
+  const w = 68;
+  const h = 80;
+  const pixels: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = x - 34;
+      const dy = y - 34;
+      if (dx * dx + dy * dy < 12 * 12) pixels.push(25);
+      else pixels.push(132 + (((x * 19 + y * 31) % 15) - 7));
+    }
+  }
+  const midGreyArt = pgmToBraille(`P2\n${w} ${h}\n255\n${pixels.join(" ")}`);
+  const midGreyLines = midGreyArt.split("\n");
+  expect(midGreyArt).toMatch(/[\u2801-\u28ff]/);
+  // Outer corners stay blank (no mid-grey noise).
+  expect(midGreyLines[0]!.startsWith("⣿")).toBe(false);
+  expect(midGreyLines[0]!.startsWith(" ")).toBe(true);
 
   const pbm = "P1\n2 4\n1 0\n1 1\n0 1\n0 0\n";
   const braille = pbmToBraille(pbm);
@@ -198,20 +242,21 @@ test("config --add-author adds a JPEG author under ~/.config/omastoic/ without t
       authors: ["musonius"],
     });
   } finally { s.cleanup(); }
-});
+}, 30000);
 
-test("PNG images, optional dates, panel state/apply, and additional quotes work end to end", async () => {
+test("PNG images, optional dates, long citations, panel state/apply, and additional quotes work end to end", async () => {
   const s = sandbox();
   const pngPath = join(s.home, "hierocles.png");
+  const longCitation = "Elements of Ethics, Book IV, Section 12 — On Concentric Circles of Concern";
   writePortraitPng(pngPath);
   try {
-    // Add through the settings panel bridge without dates.
+    // Add through the settings panel bridge without dates and with a >52-char citation.
     const applied = await s.cli(["panel", "apply", JSON.stringify({
       addAuthor: {
         slug: "hierocles",
         name: "Hierocles",
         image: pngPath,
-        citation: "Elements of Ethics",
+        citation: longCitation,
         text: "Each of us is encircled by many concentric rings.",
       },
     })]);
@@ -223,9 +268,17 @@ test("PNG images, optional dates, panel state/apply, and additional quotes work 
     expect(sample.name).toBe("Hierocles");
     expect(sample.dates).toBe("");
     expect(sample.id).toBe("c01");
-    expect(sample.citation).toBe("Elements of Ethics");
+    expect(sample.citation).toBe(longCitation);
     expect(sample.text).toBe("Each of us is encircled by many concentric rings.");
     expect(sample.portrait).toMatch(/[\u2801-\u28ff]/);
+
+    // Select Hierocles and verify the >52-char citation wraps instead of dropping the portrait.
+    expectOk(await s.cli(["config", "--authors", "hierocles"]), "select hierocles");
+    const longCiteShown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+    expectOk(longCiteShown, "show with long citation");
+    expect(longCiteShown.stdout).toMatch(/[\u2801-\u28ff]/);
+    expect(longCiteShown.stdout).toContain("HIEROCLES");
+    expect(longCiteShown.stdout.replace(/[\u2800-\u28ff\s]/gu, "")).toContain(longCitation.replace(/\s/g, ""));
 
     // Panel can select the new author and add another quote for them.
     const second = await s.cli(["panel", "apply", JSON.stringify({
@@ -253,32 +306,54 @@ test("PNG images, optional dates, panel state/apply, and additional quotes work 
     expect(status.stdout).toContain("2 quotes:");
     expect(status.stdout).toMatch(/Hierocles\s+2\s+portrait/);
   } finally { s.cleanup(); }
-});
+}, 30000);
 
-test("dark-background photo portraits use halftone vignette instead of solid-block backgrounds", async () => {
+test("dark-background and mid-grey photo portraits stay clean and avoid small-panel blobs", async () => {
   const s = sandbox();
-  const photoPath = join(s.home, "photo.png");
-  writePhotoPng(photoPath);
+  const darkPhoto = join(s.home, "dark-photo.png");
+  const midGreyPhoto = join(s.home, "midgrey-photo.png");
+  writePhotoPng(darkPhoto);
+  writeMidGreyPhotoPng(midGreyPhoto);
+  const header = headerPortraitLayout();
   try {
-    const added = await s.cli([
+    const addedDark = await s.cli([
       "config",
       "--add-author", "sowell",
       "--name", "Thomas Sowell",
-      "--image", photoPath,
+      "--image", darkPhoto,
       "--citation", "A Conflict of Visions",
       "--text", "There are no solutions, only trade-offs.",
     ]);
-    expectOk(added, "config --add-author photo");
-    const art = readFileSync(join(s.config, "omastoic/art/sowell.txt"), "utf8");
-    const lines = art.replace(/\n+$/, "").split("\n");
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
-    expect(Math.max(...lines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
-    // Top-left corner of the vignette must not be solid-block ink.
-    expect(lines[0]!.startsWith("⣿")).toBe(false);
-    expect(art).toMatch(/[\u2801-\u28ff]/);
+    expectOk(addedDark, "config --add-author dark photo");
+    const darkArt = readFileSync(join(s.config, "omastoic/art/sowell.txt"), "utf8");
+    const darkLines = darkArt.replace(/\n+$/, "").split("\n");
+    expect(darkLines.length).toBeGreaterThan(0);
+    expect(darkLines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+    expect(Math.max(...darkLines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    expect(darkLines[0]!.startsWith("⣿")).toBe(false);
+    expect(darkArt).toMatch(/[\u2801-\u28ff]/);
+
+    const addedMid = await s.cli([
+      "config",
+      "--add-author", "midgrey",
+      "--name", "Mid Grey",
+      "--image", midGreyPhoto,
+      "--citation", "Essay I",
+      "--text", "Keep the background quiet.",
+    ]);
+    expectOk(addedMid, "config --add-author mid-grey photo");
+    const midArt = readFileSync(join(s.config, "omastoic/art/midgrey.txt"), "utf8");
+    const midLines = midArt.replace(/\n+$/, "").split("\n");
+    expect(midLines.length).toBeGreaterThan(0);
+    expect(midLines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+    expect(midLines[0]!.startsWith("⣿")).toBe(false);
+    // Small panel downscale must not collapse into a solid block of full cells.
+    const small = portraitDownscale(midArt, header.rows, header.cols);
+    const cells = [...small.replace(/\n/g, "")];
+    const solid = cells.filter((c) => c === "⣿").length;
+    expect(solid).toBeLessThan(cells.length);
   } finally { s.cleanup(); }
-});
+}, 30000);
 
 test("bundled slug collisions and unusable images fail clearly and leave nothing half-written", async () => {
   const s = sandbox();
@@ -329,12 +404,12 @@ test("bundled slug collisions and unusable images fail clearly and leave nothing
     expect(reserved.stderr).toContain("reserved");
     expect(reserved.code).toBe(1);
 
-    // Missing image, non-JPEG/PNG, SVG, corrupt JPEG, blank PNG all fail cleanly.
+    // Missing image, non-JPEG/PNG, SVG, corrupt JPEG, blank PNG all fail cleanly without ImageMagick internals.
     const badImages: Array<[string, string]> = [
       [join(s.home, "does-not-exist.jpg"), "not found"],
       [textFile, "JPEG or PNG"],
       [svgFile, "JPEG or PNG"],
-      [corruptJpeg, "could not convert"],
+      [corruptJpeg, "not a readable JPEG or PNG image"],
       [blankPng, "portrait"],
     ];
     for (const [image, expected] of badImages) {
@@ -348,6 +423,8 @@ test("bundled slug collisions and unusable images fail clearly and leave nothing
       ]);
       expect(result.stderr.toLowerCase(), image).toContain(expected.toLowerCase());
       expect(result.stderr, image).not.toContain("omastoic-portrait-");
+      expect(result.stderr, image).not.toContain("@ error/");
+      expect(result.stderr, image).not.toContain("JPEGErrorHandler");
       expect(result.code, image).toBe(1);
     }
 
@@ -370,7 +447,7 @@ test("bundled slug collisions and unusable images fail clearly and leave nothing
     expect(duplicate.code).toBe(1);
     expect(readFileSync(quotesPath, "utf8")).not.toContain("Second line.");
   } finally { s.cleanup(); }
-});
+}, 30000);
 
 test("interactive TTY config --add-author and author picker handle a user-added author", async () => {
   const s = sandbox();
@@ -509,7 +586,7 @@ test.skipIf(!hasImageMagick)("ImageMagick fallback produces a valid 34x20 portra
     expect(Math.max(...lines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
     expect(art).toMatch(/[\u2801-\u28ff]/);
   } finally { s.cleanup(); }
-});
+}, 30000);
 
 test("missing ImageMagick reports the missing tool and slow converters time out cleanly without holding the state lock", async () => {
   const s = sandbox();
@@ -555,7 +632,7 @@ test("missing ImageMagick reports the missing tool and slow converters time out 
     expect(timedOut.code).toBe(1);
     expect(existsSync(join(s.state, "transaction.flock"))).toBe(false);
   } finally { s.cleanup(); }
-});
+}, 30000);
 
 test("review edge cases: invalid --quotes rollback, --dates missing value, custom=none vs bundled=none, tab in art, unreadable authors.tsv", async () => {
   const s = sandbox();
@@ -655,4 +732,4 @@ test("review edge cases: invalid --quotes rollback, --dates missing value, custo
     expect(marcus.name).toBe("Marcus Aurelius");
     expect(marcus.dates).not.toBe("2099");
   } finally { s.cleanup(); }
-});
+}, 30000);

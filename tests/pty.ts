@@ -110,7 +110,7 @@ export function pty(s: ReturnType<typeof sandbox>, args: string[], steps: PtySte
 
 /** The markers each prompt starts with, so a test can say which answer is which. */
 export const SHOWS = {
-  authors: "Stoics on the screensaver",
+  authors: "Authors on the screensaver",
   quotes: "Quotes from ",
   interval: "Seconds between quotes while the screensaver is up: ",
   confirm: "Add a custom quote? [y/N]",

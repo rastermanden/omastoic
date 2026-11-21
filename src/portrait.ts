@@ -8,7 +8,6 @@ export const PORTRAIT_ROWS = 20;
 const PORTRAIT_THRESHOLD = 45;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const DEFAULT_TRANSCODE_TIMEOUT_MS = 15_000;
-const DRAWING_CORNER_FLOOR = 0.85;
 
 const DOTS: ReadonlyArray<readonly [number, number, number]> = [
   [0x01, 0, 0],
@@ -136,6 +135,16 @@ export function portraitDownscale(art: string, rows: number, cols: number): stri
   if (!bounds) return "";
   const targetWidth = cols * 2;
   const targetHeight = rows * 4;
+  let totalInk = 0;
+  for (let y = bounds.top; y < bounds.top + bounds.height; y++) {
+    for (let x = bounds.left; x < bounds.left + bounds.width; x++) {
+      if (source.dots[y * source.width + x]) totalInk += 1;
+    }
+  }
+  const density = totalInk / Math.max(1, bounds.width * bounds.height);
+  // Sparse line art uses 0.28 so thin strokes survive; denser portraits raise
+  // the cutoff so small header previews keep facial detail instead of blobbing.
+  const cutoff = density > 0.45 ? Math.min(0.55, 0.28 + (density - 0.45) * 0.9) : 0.28;
   const scaled: boolean[] = [];
   for (let y = 0; y < targetHeight; y++) {
     const y0 = bounds.top + (y / targetHeight) * bounds.height;
@@ -151,7 +160,7 @@ export function portraitDownscale(art: string, rows: number, cols: number): stri
           if (source.dots[sy * source.width + sx]) ink += 1;
         }
       }
-      scaled.push(seen > 0 && ink / seen >= 0.28);
+      scaled.push(seen > 0 && ink / seen >= cutoff);
     }
   }
   const lines: string[] = [];
@@ -215,6 +224,120 @@ export function pbmToBraille(pbm: string): string {
   return rows.join("\n");
 }
 
+/** Otsu between-class variance threshold on 8-bit grayscale values (0..255). */
+export function otsuThreshold(values: readonly number[]): number {
+  const hist = new Uint32Array(256);
+  for (const v of values) hist[Math.max(0, Math.min(255, v | 0))] += 1;
+  const total = values.length;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i]!;
+  let sumB = 0;
+  let wB = 0;
+  let bestVar = -1;
+  let firstBest = 128;
+  let lastBest = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]!;
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t]!;
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > bestVar) {
+      bestVar = between;
+      firstBest = t;
+      lastBest = t;
+    } else if (between === bestVar) {
+      lastBest = t;
+    }
+  }
+  return Math.floor((firstBest + lastBest) / 2);
+}
+
+/**
+ * Convert an ASCII PGM (P2) grayscale bitmap into Unicode braille art using
+ * percentile auto-contrast, Otsu thresholding, and border-aware background
+ * suppression so both drawings and mid-grey/dark photos stay clean.
+ */
+export function pgmToBraille(pgm: string): string {
+  const tokens = pgm
+    .split("\n")
+    .map((line) => line.replace(/#.*/, ""))
+    .join(" ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (tokens[0] !== "P2") throw new Error("expected an ASCII PGM (P2)");
+  const width = Number(tokens[1]);
+  const height = Number(tokens[2]);
+  const maxVal = Number(tokens[3]);
+  if (
+    !Number.isInteger(width) || width < 1 ||
+    !Number.isInteger(height) || height < 1 ||
+    !Number.isInteger(maxVal) || maxVal < 1
+  ) {
+    throw new Error("invalid PGM header");
+  }
+  const count = width * height;
+  if (tokens.length < 4 + count) throw new Error("incomplete PGM pixel data");
+
+  const values: number[] = new Array(count);
+  for (let i = 0; i < count; i++) {
+    const raw = Number(tokens[4 + i]);
+    values[i] = Math.max(0, Math.min(255, Math.round((raw / maxVal) * 255)));
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const p2 = sorted[Math.floor(sorted.length * 0.02)]!;
+  const p98 = sorted[Math.floor(sorted.length * 0.98)]!;
+  const span = p98 - p2;
+  if (span < 8) return "";
+
+  const stretched = values.map((v) => Math.max(0, Math.min(255, Math.round(((v - p2) / span) * 255))));
+
+  // Sample top, left, and right borders (bottom often holds shoulders/torso).
+  const border: number[] = [];
+  for (let x = 0; x < width; x++) border.push(stretched[x]!);
+  const sideRows = Math.max(1, Math.floor(height * 0.75));
+  for (let y = 0; y < sideRows; y++) {
+    border.push(stretched[y * width]!, stretched[y * width + width - 1]!);
+  }
+  border.sort((a, b) => a - b);
+  const borderMed = border[Math.floor(border.length / 2)]!;
+  const borderSpread = border[Math.floor(border.length * 0.85)]! - border[Math.floor(border.length * 0.15)]!;
+
+  const otsu = otsuThreshold(stretched);
+  const darkBg = borderMed < otsu;
+  // Push threshold outside the noisy border band so mid-grey backdrops stay blank.
+  const margin = Math.max(18, Math.min(48, Math.round(borderSpread * 1.1 + 16)));
+  const threshold = darkBg
+    ? Math.max(otsu, Math.min(230, borderMed + margin))
+    : Math.min(otsu, Math.max(25, borderMed - margin));
+
+  const bits: string[] = new Array(count);
+  const cx = width / 2;
+  const cy = height / 2;
+  const rx = Math.max(1, width * 0.48);
+  const ry = Math.max(1, height * 0.48);
+  for (let i = 0; i < count; i++) {
+    const v = stretched[i]!;
+    const x = i % width;
+    const y = Math.floor(i / width);
+    const nx = (x - cx) / rx;
+    const ny = (y - cy) / ry;
+    if (Math.abs(v - borderMed) <= margin && nx * nx + ny * ny > 0.65) {
+      bits[i] = "0";
+      continue;
+    }
+    bits[i] = (darkBg ? v > threshold : v <= threshold) ? "1" : "0";
+  }
+
+  return pbmToBraille(`P1\n${width} ${height}\n${bits.join("")}`);
+}
+
 /** Identify JPEG or PNG from magic bytes. */
 export function detectImageKind(bytes: Uint8Array): "png" | "jpeg" | null {
   if (
@@ -262,7 +385,6 @@ function firstLine(text: string): string {
 
 function cleanTranscodeError(
   stderr: string,
-  staged: string,
   original: string,
   missingMagick = false,
 ): string {
@@ -270,14 +392,13 @@ function cleanTranscodeError(
   if (missingMagick && (!line || /Unable to read logo image|command not found|not found/i.test(line))) {
     return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
   }
-  if (!line) return "could not convert portrait image";
-  if (/No logo pixels found/i.test(line)) return "image produced an empty portrait";
+  if (/No logo pixels found|geometry does not contain image/i.test(line)) {
+    return "image produced an empty portrait";
+  }
   if (/command not found|No such file or directory.*\b(?:magick|convert)\b/i.test(line)) {
     return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
   }
-  if (/Unable to read logo image/i.test(line)) return `could not convert portrait image: unreadable image ${original}`;
-  const cleaned = line.replaceAll(staged, original).replace(/\blogo\b/gi, "portrait");
-  return `could not convert portrait image: ${cleaned}`;
+  return `could not convert portrait image: "${original}" is not a readable JPEG or PNG image`;
 }
 
 function transcodeTimeoutMs(override?: number): number {
@@ -376,34 +497,7 @@ export async function transcodePortrait(
     const staged = join(scratch, `source.${kind === "png" ? "png" : "jpg"}`);
     writeFileSync(staged, bytes, { mode: 0o600 });
 
-    let isPhoto = false;
     if (imBin) {
-      const probe = await runWithTimeout(
-        [
-          imBin,
-          "-background", "white",
-          staged,
-          "-auto-orient",
-          "-alpha", "remove", "-alpha", "off",
-          "-colorspace", "Gray",
-          "-resize", "64x64!",
-          "-format", "%[fx:(p{0,0}+p{63,0}+p{0,63}+p{63,63}+p{32,0}+p{0,32}+p{63,32})/7]",
-          "info:",
-        ],
-        true,
-        timeoutMs,
-      );
-      if (probe.code !== 0) {
-        throw new Error(cleanTranscodeError(probe.stderr, staged, trimmed));
-      }
-      const corners = Number(probe.stdout.trim());
-      if (Number.isFinite(corners) && corners < DRAWING_CORNER_FLOOR) isPhoto = true;
-    }
-
-    if (isPhoto && imBin) {
-      const w = PORTRAIT_COLS * 8;
-      const h = PORTRAIT_ROWS * 16;
-      const ellipse = `ellipse ${w / 2},${h / 2} ${(w * 0.95) / 2},${(h * 0.95) / 2} 0,360`;
       const result = await runWithTimeout(
         [
           imBin,
@@ -412,72 +506,40 @@ export async function transcodePortrait(
           "-auto-orient",
           "-alpha", "remove", "-alpha", "off",
           "-colorspace", "Gray",
-          "-resize", `${w}x${h}^`, "-gravity", "center", "-extent", `${w}x${h}`,
-          "-blur", "0x1", "-normalize", "-level", "10%,90%",
-          "(", "+clone", "-fill", "black", "-colorize", "100", "-fill", "white",
-          "-draw", ellipse, "-blur", `0x${Math.round(w / 12)}`, ")",
-          "-compose", "multiply", "-composite",
-          "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}!`,
-          "-ordered-dither", "h4x4a",
-          "-negate",
+          "-blur", "0x0.6",
+          "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`,
           "-compress", "none",
-          "pbm:-",
+          "pgm:-",
         ],
         true,
         timeoutMs,
       );
       if (result.code !== 0) {
-        throw new Error(cleanTranscodeError(result.stderr, staged, trimmed));
+        throw new Error(cleanTranscodeError(result.stderr, trimmed));
       }
-      return validatePortraitArt(pbmToBraille(result.stdout));
+      return validatePortraitArt(pgmToBraille(result.stdout));
     }
 
-    if (omarchyTranscoder && (magickBin || !imBin)) {
-      const outTxt = join(scratch, "portrait.txt");
-      const result = await runWithTimeout(
-        [
-          omarchyTranscoder,
-          staged,
-          outTxt,
-          "--width", String(PORTRAIT_COLS),
-          "--height", String(PORTRAIT_ROWS),
-          "--threshold", String(PORTRAIT_THRESHOLD),
-        ],
-        false,
-        timeoutMs,
-      );
-      if (result.code !== 0) {
-        throw new Error(cleanTranscodeError(result.stderr, staged, trimmed, !magickBin));
-      }
-      let art: string;
-      try { art = readFileSync(outTxt, "utf8"); }
-      catch { throw new Error("could not convert portrait image: transcoder produced no output"); }
-      return validatePortraitArt(art);
-    }
-
+    const outTxt = join(scratch, "portrait.txt");
     const result = await runWithTimeout(
       [
-        imBin!,
-        "-background", "white",
+        omarchyTranscoder!,
         staged,
-        "-auto-orient",
-        "-alpha", "remove", "-alpha", "off",
-        "-colorspace", "Gray",
-        "-negate",
-        "-bordercolor", "black", "-border", "1", "-trim", "+repage",
-        "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`,
-        "-threshold", `${PORTRAIT_THRESHOLD}%`,
-        "-negate",
-        "-compress", "none",
-        "pbm:-",
+        outTxt,
+        "--width", String(PORTRAIT_COLS),
+        "--height", String(PORTRAIT_ROWS),
+        "--threshold", String(PORTRAIT_THRESHOLD),
       ],
-      true,
+      false,
       timeoutMs,
     );
     if (result.code !== 0) {
-      throw new Error(cleanTranscodeError(result.stderr, staged, trimmed));
+      throw new Error(cleanTranscodeError(result.stderr, trimmed, !magickBin));
     }
-    return validatePortraitArt(pbmToBraille(result.stdout));
+    let art: string;
+    try { art = readFileSync(outTxt, "utf8"); }
+    catch { throw new Error("could not convert portrait image: transcoder produced no output"); }
+    return validatePortraitArt(art);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

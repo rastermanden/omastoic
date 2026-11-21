@@ -21,7 +21,7 @@ test("every config prompt runs in the terminal, so gum is not needed", async () 
       { marker: SHOWS.confirm, keys: "n" },
     ]);
     expect(configured.code).toBe(0);
-    expect(configured.stdout).toContain("Stoics on the screensaver");
+    expect(configured.stdout).toContain("Authors on the screensaver");
     expect(configured.stdout).toContain("Quotes from Marcus Aurelius");
     expect(configured.stdout).toContain("Add a custom quote? [y/N]");
     expect(configured.stdout + configured.stderr).not.toContain("gum must not run any more");
@@ -55,7 +55,7 @@ test("cancelling the author picker writes nothing", async () => {
   try {
     const cancelled = await pty(s, ["config"], [{ marker: SHOWS.authors, keys: "q" }]);
     expect(cancelled.code).toBe(0);
-    expect(cancelled.stdout).toContain("Stoics on the screensaver");
+    expect(cancelled.stdout).toContain("Authors on the screensaver");
     expect(existsSync(join(s.config, "omastoic/config.json"))).toBe(false);
   } finally { s.cleanup(); }
 });

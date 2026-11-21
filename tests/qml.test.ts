@@ -36,8 +36,9 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain('text: "Omastoic"');
   expect(source).toContain('label: "Preview"');
   expect(source).toContain("id: quoteSlot");
-  expect(source).toContain("height: Style.font.body * 1.35 * 3");
+  expect(source).toContain("height: Math.max(Style.font.body * 1.35 * 3, quotePreviewText.implicitHeight)");
   expect(source).toContain("anchors.verticalCenter: quoteSlot.verticalCenter");
+  expect(source).toContain("elide: Text.ElideRight");
   expect(source).not.toContain("fontSizeMode");
   expect(source).toContain("lineHeightMode: Text.FixedHeight");
   expect(source).toContain("font.pixelSize: root.portraitFont");

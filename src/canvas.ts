@@ -136,31 +136,37 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
 
   if (art && art.length) {
     const artWidth = Math.max(...art.map(cellWidth));
-    const textWidth = Math.min(52, Math.max(30, cols - artWidth - ART_GAP - 2));
-    const body = wrap(`“${quote.text}”`, textWidth);
-    const text = [...body, "", right(quote.citation, textWidth)];
+    const margin = cols >= 72 ? 6 : 4;
+    const textWidth = Math.min(52, cols - artWidth - ART_GAP - margin);
+    if (textWidth >= 28) {
+      const body = wrap(`“${quote.text}”`, textWidth);
+      const citation = wrap(quote.citation, textWidth).map((l) => right(l, textWidth));
+      const text = [...body, "", ...citation];
 
-    const label = ["", centre(name, artWidth), ...(dates ? [centre(dates, artWidth)] : [])];
-    const left = [...art.map((l) => pad(l, artWidth)), ...label];
+      const nameLines = wrap(name, artWidth).map((l) => centre(l, artWidth));
+      const dateLines = dates ? wrap(dates, artWidth).map((l) => centre(l, artWidth)) : [];
+      const label = ["", ...nameLines, ...dateLines];
+      const left = [...art.map((l) => pad(l, artWidth)), ...label];
 
-    // Sit the quote against the portrait's optical centre, a little above the
-    // label so the two blocks read as one plate.
-    const offset = Math.max(0, Math.floor((art.length - text.length) / 2));
-    const height = Math.max(left.length, offset + text.length);
-    const gap = " ".repeat(ART_GAP);
+      // Sit the quote against the portrait's optical centre, a little above the
+      // label so the two blocks read as one plate.
+      const offset = Math.max(0, Math.floor((art.length - text.length) / 2));
+      const height = Math.max(left.length, offset + text.length);
+      const gap = " ".repeat(ART_GAP);
 
-    const out: string[] = [];
-    for (let i = 0; i < height; i++) {
-      const l = pad(left[i] ?? "", artWidth);
-      const r = i >= offset ? (text[i - offset] ?? "") : "";
-      out.push((l + gap + r).replace(/\s+$/, ""));
+      const out: string[] = [];
+      for (let i = 0; i < height; i++) {
+        const l = pad(left[i] ?? "", artWidth);
+        const r = i >= offset ? (text[i - offset] ?? "") : "";
+        out.push((l + gap + r).replace(/\s+$/, ""));
+      }
+      if (fits(out)) return finish(out);
     }
-    if (fits(out)) return finish(out);
   }
 
-  // Lose decoration before content. Try the quiet measure, then the full width,
-  // then remove dates/blank lines. Never truncate a quote or its citation.
-  for (const width of [...new Set([Math.min(64, Math.max(1, cols - 8)), cols])]) {
+  // Lose decoration before content. Try the quiet measure, then a smaller margin,
+  // then the full width, then remove dates/blank lines. Never truncate a quote or its citation.
+  for (const width of [...new Set([Math.min(64, Math.max(1, cols - 8)), Math.max(1, cols - 4), cols])]) {
     const body = wrap(`“${quote.text}”`, width);
     const citation = wrap(quote.citation, width).map((l) => right(l, width));
     for (const compact of [false, true]) {

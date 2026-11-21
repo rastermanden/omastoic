@@ -226,7 +226,7 @@ Item {
     if (!found) return
     if (!next.length) {
       error = ""
-      notice = "Pick at least one Stoic."
+      notice = "Pick at least one author."
       return
     }
     selectedAuthors = next
@@ -250,7 +250,7 @@ Item {
     commitInterval()
     if (!selectedAuthors.length) {
       error = ""
-      notice = "Pick at least one Stoic."
+      notice = "Pick at least one author."
       return
     }
     if (busy) { applyQueued = true; return }
@@ -503,7 +503,7 @@ Item {
 
               Column {
                 width: parent.width - Style.space(110)
-                spacing: Style.space(4)
+                spacing: Style.space(6)
 
                 Row {
                   width: parent.width
@@ -542,18 +542,20 @@ Item {
                 Item {
                   id: quoteSlot
                   width: parent.width
-                  height: Style.font.body * 1.35 * 3
+                  height: Math.max(Style.font.body * 1.35 * 3, quotePreviewText.implicitHeight)
                   clip: true
                   Text {
+                    id: quotePreviewText
                     width: parent.width
                     anchors.verticalCenter: quoteSlot.verticalCenter
-                    text: root.preview ? (root.preview.text !== "" ? root.preview.text : "No quotes yet.") : "Pick at least one Stoic."
+                    text: root.preview ? (root.preview.text !== "" ? root.preview.text : "No quotes yet.") : "Pick at least one author."
                     color: root.ink
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     lineHeight: 1.35
                     wrapMode: Text.WordWrap
                     maximumLineCount: 3
+                    elide: Text.ElideRight
                   }
                 }
                 Text {

@@ -223,7 +223,7 @@ function decode(buffer: string): { key: Key; rest: string } | "more" {
   return { key: { kind: "ignore" }, rest };
 }
 
-const HEADER = "Stoics on the screensaver";
+const HEADER = "Authors on the screensaver";
 
 function hintsFor(count: number): string {
   const digits = count > 1 ? `1-${Math.min(count, 9)}` : "1";
