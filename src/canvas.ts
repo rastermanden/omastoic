@@ -8,6 +8,7 @@ export type Quote = { author: string; citation: string; text: string };
 export type Author = { slug: string; name: string; dates: string };
 
 export const ART_GAP = 4;
+const MIN_LABEL_WIDTH = 20;
 export const AUTHOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MAX_AUTHOR_FIELD = 128;
 const MAX_ART_BYTES = 64 * 1024;
@@ -135,32 +136,43 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
   const dates = author?.dates ?? "";
 
   if (art && art.length) {
-    const artWidth = Math.max(...art.map(cellWidth));
-    const margin = cols >= 72 ? 6 : 4;
-    const textWidth = Math.min(52, cols - artWidth - ART_GAP - margin);
-    if (textWidth >= 28) {
-      const body = wrap(`“${quote.text}”`, textWidth);
-      const citation = wrap(quote.citation, textWidth).map((l) => right(l, textWidth));
-      const text = [...body, "", ...citation];
+    const trimmedArt = art.map((l) => l.replace(/[\s\u2800]+$/u, ""));
+    const artWidth = Math.max(...trimmedArt.map(cellWidth));
+    if (artWidth > 0) {
+      const leftWidth = Math.max(artWidth, MIN_LABEL_WIDTH);
+      const margin = cols >= 72 ? 6 : 4;
+      const textWidth = Math.min(52, cols - leftWidth - ART_GAP - margin);
+      if (textWidth >= 28) {
+        const body = wrap(`“${quote.text}”`, textWidth);
+        const citation = wrap(quote.citation, textWidth).map((l) => right(l, textWidth));
+        const text = [...body, "", ...citation];
 
-      const nameLines = wrap(name, artWidth).map((l) => centre(l, artWidth));
-      const dateLines = dates ? wrap(dates, artWidth).map((l) => centre(l, artWidth)) : [];
-      const label = ["", ...nameLines, ...dateLines];
-      const left = [...art.map((l) => pad(l, artWidth)), ...label];
+        const artInset = " ".repeat(Math.floor((leftWidth - artWidth) / 2));
+        const nameLines = wrap(name, leftWidth).map((l) => centre(l, leftWidth));
+        const dateLines = dates ? wrap(dates, leftWidth).map((l) => centre(l, leftWidth)) : [];
+        const label = ["", ...nameLines, ...dateLines];
 
-      // Sit the quote against the portrait's optical centre, a little above the
-      // label so the two blocks read as one plate.
-      const offset = Math.max(0, Math.floor((art.length - text.length) / 2));
-      const height = Math.max(left.length, offset + text.length);
-      const gap = " ".repeat(ART_GAP);
+        // Sit the quote against the portrait's optical centre, and keep the
+        // museum label underneath both so the name never sits beside the quote.
+        const plateRows = Math.max(trimmedArt.length, text.length);
+        const artTop = Math.floor((plateRows - trimmedArt.length) / 2);
+        const textTop = Math.floor((plateRows - text.length) / 2);
+        const left = [
+          ...Array.from({ length: artTop }, () => ""),
+          ...trimmedArt.map((l) => pad(artInset + l, leftWidth)),
+          ...Array.from({ length: plateRows - artTop - trimmedArt.length }, () => ""),
+          ...label,
+        ];
+        const gap = " ".repeat(ART_GAP);
 
-      const out: string[] = [];
-      for (let i = 0; i < height; i++) {
-        const l = pad(left[i] ?? "", artWidth);
-        const r = i >= offset ? (text[i - offset] ?? "") : "";
-        out.push((l + gap + r).replace(/\s+$/, ""));
+        const out: string[] = [];
+        for (let i = 0; i < left.length; i++) {
+          const l = pad(left[i] ?? "", leftWidth);
+          const r = i >= textTop ? (text[i - textTop] ?? "") : "";
+          out.push((l + gap + r).replace(/\s+$/, ""));
+        }
+        if (fits(out)) return finish(out);
       }
-      if (fits(out)) return finish(out);
     }
   }
 
