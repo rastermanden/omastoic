@@ -38,7 +38,9 @@ if [[ -e $target ]] && ! jq -e --arg id "$plugin_id" '.id == $id' "$target/manif
 fi
 mkdir -p "$target"
 rsync -a --delete \
-  --exclude node_modules --exclude .git --exclude .agents --exclude .cursor/skills --exclude bun.lock --exclude '*.bak.*' \
+  --exclude node_modules --exclude .git --exclude .agents --exclude .claude --exclude .cursor \
+  --exclude .gemini --exclude AGENTS.md --exclude CLAUDE.md --exclude GEMINI.md \
+  --exclude .github/copilot-instructions.md --exclude bun.lock --exclude '*.bak.*' \
   --exclude assets/sources --exclude assets/local --exclude assets/originals \
   --exclude assets/portraits \
   --exclude demo.mp4 --exclude preview.gif \

@@ -1,4 +1,10 @@
-# A locally reintroduced .agents tree stays out of source archives.
+# Agent files are for agents, not the installed plugin. `git archive` drops
+# them, and install.sh --exclude does the same for a manual copy.
 .agents export-ignore
-# Vendored builder skills are for agents, not the installed plugin.
-.cursor/skills export-ignore
+.claude export-ignore
+.cursor export-ignore
+.gemini export-ignore
+AGENTS.md export-ignore
+CLAUDE.md export-ignore
+GEMINI.md export-ignore
+.github/copilot-instructions.md export-ignore

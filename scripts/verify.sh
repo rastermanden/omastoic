@@ -18,7 +18,7 @@ fi
 if [[ -n $validator ]]; then
   archive="$(mktemp -d)"
   trap 'rm -rf "$archive"' EXIT
-  # .cursor/skills is export-ignore, so the archive check does not lint vendored skills.
+  # Agent skills are export-ignore, so the archive check does not lint vendored skills.
   git archive HEAD | tar -xf - -C "$archive"
   "$validator" plugin validate "$archive"
 fi

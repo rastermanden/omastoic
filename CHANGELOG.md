@@ -8,6 +8,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- The builder workflow and its skills now live in `.agents/skills/`, which
+  every coding agent reads except Claude Code. Claude Code reads
+  `.claude/skills/`, a real mirror checked by `bun run verify`. `AGENTS.md` is
+  the single contract that `CLAUDE.md`, `GEMINI.md`,
+  `.github/copilot-instructions.md`, `.gemini/settings.json`,
+  `.agents/rules/omastoic.md`, and `.cursor/rules/vision.mdc` point to.
+  `bun run verify` fails if the skills mirror drifts or a pointer file goes
+  missing.
+
 ## 2.4.1 - 2026-11-20
 
 ### Fixed

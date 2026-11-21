@@ -6,6 +6,9 @@ alwaysApply: true
 Read VISION.md before changing Omastoic. If a change breaks a principle, stop
 and change VISION.md first, on purpose.
 
+Follow `.agents/skills/projekt-workflow/SKILL.md` for every change, and read
+`AGENTS.md` for the builder contract and hard rules.
+
 `bun run verify` is the check that must pass. It runs the same suite CI runs
 and exits 0 or 1. Do not call the work done while it fails.
 
