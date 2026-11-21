@@ -8,8 +8,24 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- `omastoic config --replace-author <slug>` replaces a custom author's portrait
+  (`--image`), display name (`--name`), dates (`--dates`), or quotes
+  (`--citation`/`--text` or `--add`), leaving omitted fields unchanged and
+  rolling back on transcode or write failure.
+- `omastoic config --remove-author <slug>` removes a custom author row, their
+  quotes, their `art/<slug>.txt` portrait, and their slug in `config.json`,
+  leaving bundled files and other custom authors untouched.
+- `omastoic ui` adds **Edit** and **Remove** buttons for custom authors, not
+  bundled Stoics, using `replaceAuthor` and `removeAuthor` in
+  `omastoic panel apply`.
+
 ### Changed
 
+- Bundled slugs are rejected for `--replace-author` and `--remove-author`,
+  same-slug `--add-author` errors point to `--replace-author`, and repeated
+  `--image` flags fail with a clear error instead of using the first path.
 - The builder workflow and its skills now live in `.agents/skills/`, which
   every coding agent reads except Claude Code. Claude Code reads
   `.claude/skills/`, a real mirror checked by `bun run verify`. `AGENTS.md` is

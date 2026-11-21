@@ -383,6 +383,21 @@ function firstLine(text: string): string {
   return text.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
 }
 
+const DECODE_WARNING =
+  /Premature end|Corrupt (?:JPEG|PNG|image)|unexpected end[- ]of[- ]file|insufficient image data|Not a JPEG file|Invalid JPEG|incomplete image|Improper image header/i;
+const HARMLESS_DECODE_WARNING =
+  /Corrupt JPEG data:\s*\d+\s+extraneous bytes? before marker\b/i;
+
+function decodeWarningLines(stderr: string): string[] {
+  return stderr
+    .split(/\r?\n/)
+    .filter((line) => DECODE_WARNING.test(line) && !HARMLESS_DECODE_WARNING.test(line));
+}
+
+export function hasDecodeWarning(stderr: string): boolean {
+  return decodeWarningLines(stderr).length > 0;
+}
+
 function cleanTranscodeError(
   stderr: string,
   original: string,
@@ -397,6 +412,13 @@ function cleanTranscodeError(
   }
   if (/command not found|No such file or directory.*\b(?:magick|convert)\b/i.test(line)) {
     return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
+  }
+  if (
+    decodeWarningLines(stderr).some((entry) =>
+      /Premature end|unexpected end[- ]of[- ]file|incomplete image|Corrupt (?:JPEG|PNG|image)/i.test(entry),
+    )
+  ) {
+    return `could not convert portrait image: "${original}" looks damaged or truncated`;
   }
   return `could not convert portrait image: "${original}" is not a readable JPEG or PNG image`;
 }
@@ -514,7 +536,7 @@ export async function transcodePortrait(
         true,
         timeoutMs,
       );
-      if (result.code !== 0) {
+      if (result.code !== 0 || hasDecodeWarning(result.stderr) || !result.stdout.trim()) {
         throw new Error(cleanTranscodeError(result.stderr, trimmed));
       }
       return validatePortraitArt(pgmToBraille(result.stdout));
@@ -533,7 +555,7 @@ export async function transcodePortrait(
       false,
       timeoutMs,
     );
-    if (result.code !== 0) {
+    if (result.code !== 0 || hasDecodeWarning(result.stderr)) {
       throw new Error(cleanTranscodeError(result.stderr, trimmed, !magickBin));
     }
     let art: string;

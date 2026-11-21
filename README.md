@@ -175,6 +175,29 @@ of `--citation` and `--text`. Converting the portrait image requires
 Slugs that belong to bundled authors are rejected, and a missing or unusable
 image fails without writing a partial author.
 
+To replace a custom author's portrait, display details, or quotes, use
+`omastoic config --replace-author <slug>`, or the **Edit** button on a custom
+author row in `omastoic ui`:
+
+```bash
+omastoic config --replace-author musonius --image new-portrait.jpg
+omastoic config --remove-author musonius
+```
+
+Optional `--name` and `--dates` update those fields, while `--citation` and
+`--text`, or `--add`, replace that custom author's quotes. Omitted fields stay
+as they are. Pass `--dates ""` to clear dates. Portrait replacement writes
+`art/<slug>.txt` atomically and rolls back on failure, so an unusable image
+keeps the previous portrait, author row, and quotes in place.
+
+`omastoic config --remove-author <slug>`, or **Remove** on a custom author row
+in `omastoic ui`, deletes the custom row from `authors.tsv`, deletes that
+author's quotes from `quotes.tsv`, deletes `art/<slug>.txt`, and drops the slug
+from `config.json` without touching bundled files or other custom authors.
+Bundled Stoics have no edit or remove buttons and are rejected by both
+commands. Passing an existing custom slug to `--add-author` fails and points to
+`--replace-author`, and passing `--image` more than once is rejected.
+
 ### On screen
 
 The canvas uses the smallest measured terminal or monitor. Portraits drop out

@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { check, failuresIn, lintableSource, root } from "../scripts/check-qml.ts";
 
@@ -55,6 +56,13 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("Add your own quote");
   expect(source).toContain("Add an author");
   expect(source).toContain("addAuthor");
+  expect(source).toContain("replaceAuthor");
+  expect(source).toContain("removeAuthor");
+  expect(source).toContain("confirmRemoveAuthor");
+  expect(source).toContain("requestRemoveAuthor");
+  expect(source).toContain('"Remove?"');
+  expect(source).toContain('root.confirmRemoveAuthor = ""');
+  expect(source).toContain("modelData.custom === true");
   expect(source).toContain("removeQuote");
   expect(source).not.toContain("authors.tsv");
   expect(source).toContain("intervalApplied");
@@ -185,4 +193,413 @@ test("the plugin's QML entry points compile against the host kit", () => {
   }
   expect(result.failures).toEqual([]);
   expect(result.code).toBe(0);
+});
+
+function blockContaining(source: string, headerPattern: RegExp, innerNeedle: string): string | null {
+  const regex = new RegExp(headerPattern.source, headerPattern.flags.includes("g") ? headerPattern.flags : `${headerPattern.flags}g`);
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(source))) {
+    const open = source.indexOf("{", match.index);
+    if (open === -1) continue;
+    const body = delegateBody(source, open);
+    if (body.includes(innerNeedle)) return body;
+  }
+  return null;
+}
+
+test("cancel handler for Remove? sits inside the scrolling content and clears on focus loss", () => {
+  const source = panel();
+
+  const scrollerBody = blockContaining(source, /Flickable\s*\{/, "id: scroller");
+  expect(scrollerBody).not.toBeNull();
+  const backdropPos = scrollerBody!.search(/\bid:\s*contentBackdrop\b/);
+  const contentPos = scrollerBody!.search(/\bid:\s*content\b/);
+  expect(backdropPos).toBeGreaterThan(-1);
+  expect(contentPos).toBeGreaterThan(-1);
+  expect(backdropPos).toBeLessThan(contentPos);
+
+  const backdropBody = blockContaining(scrollerBody!, /MouseArea\s*\{/, "id: contentBackdrop");
+  expect(backdropBody).not.toBeNull();
+  expect(backdropBody!).toContain("width: scroller.width");
+  expect(backdropBody!).toContain("height: Math.max(scroller.height, content.implicitHeight)");
+  expect(backdropBody!).toContain('onClicked: root.confirmRemoveAuthor = ""');
+
+  const ringButtonBody = blockContaining(source, /component\s+RingButton\s*:\s*Item\s*\{/, "id: host");
+  expect(ringButtonBody).not.toBeNull();
+  expect(ringButtonBody!).toContain("property bool keepsRemoveConfirm: false");
+  expect(ringButtonBody!).toContain("signal focusLost()");
+  expect(ringButtonBody!).toContain('if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""');
+  expect(ringButtonBody!).toContain("else host.focusLost()");
+
+  const disabledArea = blockContaining(ringButtonBody!, /MouseArea\s*\{/, "enabled: !host.available");
+  expect(disabledArea).not.toBeNull();
+  expect(disabledArea!).toContain('onClicked: if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""');
+
+  const customActionsBody = blockContaining(source, /Row\s*\{/, "id: customActions");
+  expect(customActionsBody).not.toBeNull();
+  expect(customActionsBody!).toContain("visible: modelData.custom === true");
+  const removeButtonBody = blockContaining(customActionsBody!, /RingButton\s*\{/, "requestRemoveAuthor");
+  expect(removeButtonBody).not.toBeNull();
+  expect(removeButtonBody!).toContain("keepsRemoveConfirm: true");
+  expect(removeButtonBody!).toContain('onFocusLost: if (root.confirmRemoveAuthor === modelData.slug) root.confirmRemoveAuthor = ""');
+
+  const escapeBody = blockContaining(source, /Keys\.onEscapePressed\s*:\s*\{/, "root.dismiss()");
+  expect(escapeBody).not.toBeNull();
+  expect(escapeBody!).toContain('if (root.confirmRemoveAuthor !== "")');
+  expect(escapeBody!).toContain('root.confirmRemoveAuthor = ""');
+});
+
+function qmlTestRunner(): string | null {
+  const onPath = Bun.which("qmltestrunner");
+  if (onPath) return onPath;
+  return existsSync("/usr/lib/qt6/bin/qmltestrunner") ? "/usr/lib/qt6/bin/qmltestrunner" : null;
+}
+
+test("clicking blank space inside scroller, controls, or another row cancels Remove? while second press removes", () => {
+  const runner = qmlTestRunner();
+  if (!runner) {
+    console.log("skipping Qt Quick Remove? interaction test: qmltestrunner is not installed");
+    return;
+  }
+
+  const scratch = mkdtempSync(join(tmpdir(), "omastoic-qmltest-"));
+  try {
+    const write = (rel: string, content: string) => {
+      const full = join(scratch, rel);
+      mkdirSync(join(full, ".."), { recursive: true });
+      writeFileSync(full, content);
+    };
+
+    write("MockQuickshell/qmldir", "module MockQuickshell\nPlaceholder 1.0 Placeholder.qml\n");
+    write("MockQuickshell/Placeholder.qml", "import QtQuick\nQtObject {}\n");
+
+    write("MockQuickshell/Io/qmldir", "module MockQuickshell.Io\nProcess 1.0 Process.qml\nStdioCollector 1.0 StdioCollector.qml\n");
+    write(
+      "MockQuickshell/Io/Process.qml",
+      `import QtQuick
+Item {
+  property var command: []
+  property bool running: false
+  property QtObject stdout: null
+  property QtObject stderr: null
+  signal exited(int exitCode)
+}
+`,
+    );
+    write(
+      "MockQuickshell/Io/StdioCollector.qml",
+      `import QtQuick
+QtObject {
+  property bool waitForEnd: true
+  property string text: ""
+  signal streamFinished()
+}
+`,
+    );
+
+    write("MockQuickshell/Wayland/qmldir", "module MockQuickshell.Wayland\nPanelWindow 1.0 PanelWindow.qml\n");
+    write(
+      "MockQuickshell/Wayland/PanelWindow.qml",
+      `import QtQuick
+Item {
+  property color color: "transparent"
+  property int exclusionMode: 0
+}
+`,
+    );
+
+    write("MockCommons/qmldir", "module MockCommons\nsingleton Style 1.0 Style.qml\nsingleton Color 1.0 Color.qml\n");
+    write(
+      "MockCommons/Style.qml",
+      `pragma Singleton
+import QtQuick
+QtObject {
+  property real cornerRadius: 6
+  property var font: ({ family: "sans-serif", body: 14, bodySmall: 12, heading: 18 })
+  property var spacing: ({ popupPadding: 16 })
+  function space(n) { return n }
+}
+`,
+    );
+    write(
+      "MockCommons/Color.qml",
+      `pragma Singleton
+import QtQuick
+QtObject {
+  property color accent: "#7aa2f7"
+  property color urgent: "#f7768e"
+  property var menu: ({ scrim: "#80000000" })
+  property var popups: ({ background: "#1a1b26", border: "#414868", text: "#c0caf5" })
+}
+`,
+    );
+
+    write(
+      "MockUi/qmldir",
+      "module MockUi\nButton 1.0 Button.qml\nTextField 1.0 TextField.qml\nNumberField 1.0 NumberField.qml\nPanelSeparator 1.0 PanelSeparator.qml\nPanelSectionHeader 1.0 PanelSectionHeader.qml\n",
+    );
+    write(
+      "MockUi/Button.qml",
+      `import QtQuick
+Item {
+  id: root
+  property string text: ""
+  property bool selected: false
+  property bool focusable: true
+  property bool bordered: true
+  property color foreground: "white"
+  signal clicked()
+  signal rightClicked()
+  implicitWidth: 80
+  implicitHeight: 32
+  MouseArea {
+    anchors.fill: parent
+    acceptedButtons: Qt.LeftButton | Qt.RightButton
+    onClicked: function(mouse) {
+      if (root.focusable) root.forceActiveFocus()
+      if (mouse.button === Qt.RightButton) root.rightClicked()
+      else root.clicked()
+    }
+  }
+}
+`,
+    );
+    write(
+      "MockUi/TextField.qml",
+      `import QtQuick
+import QtQuick.Controls as QQC
+QQC.TextField {
+  property color foreground: "white"
+  implicitWidth: 200
+  implicitHeight: 32
+}
+`,
+    );
+    write(
+      "MockUi/NumberField.qml",
+      `import QtQuick
+Item {
+  property string label: ""
+  property int value: 60
+  property int from: 5
+  property int to: 3600
+  property int stepSize: 5
+  property color foreground: "white"
+  property QtObject field: QtObject { property int value: 60; property bool activeFocus: false; property QtObject contentItem: QtObject { property string text: "60" } }
+  signal modified(int value)
+  implicitWidth: 80
+  implicitHeight: 32
+}
+`,
+    );
+    write("MockUi/PanelSeparator.qml", 'import QtQuick\nRectangle { property color foreground: "white"; width: parent ? parent.width : 100; height: 1 }\n');
+    write("MockUi/PanelSectionHeader.qml", 'import QtQuick\nText { property color foreground: "white"; width: parent ? parent.width : 100 }\n');
+
+    // Adapt only module imports and Quickshell Window attached flags while keeping layout & interaction code verbatim.
+    const testPanelSource = panel()
+      .replace(/^import Quickshell\.Io$/gm, "import MockQuickshell.Io")
+      .replace(/^import Quickshell\.Wayland$/gm, "import MockQuickshell.Wayland")
+      .replace(/^import Quickshell$/gm, "import MockQuickshell")
+      .replace(/^import qs\.Commons as Commons$/gm, "import MockCommons as Commons")
+      .replace(/^import qs\.Commons$/gm, "import MockCommons")
+      .replace(/^import qs\.Ui$/gm, "import MockUi")
+      .replace(/anchors\s*\{\s*top:\s*true;\s*bottom:\s*true;\s*left:\s*true;\s*right:\s*true\s*\}/, "anchors.fill: parent")
+      .replace(/^\s*exclusionMode:.*$/gm, "")
+      .replace(/^\s*WlrLayershell\..*$/gm, "");
+    write("PanelUnderTest.qml", testPanelSource);
+
+    write(
+      "tst_panel.qml",
+      `import QtQuick
+import QtTest
+
+Item {
+  id: harness
+  width: 800
+  height: 900
+
+  PanelUnderTest {
+    id: panel
+    anchors.fill: parent
+  }
+
+  TestCase {
+    name: "RemoveConfirmCancellation"
+    when: windowShown
+
+    function findAll(node, pred, out) {
+      if (!out) out = []
+      if (!node) return out
+      if (pred(node)) out.push(node)
+      var kids = node.children || []
+      for (var i = 0; i < kids.length; i++) findAll(kids[i], pred, out)
+      return out
+    }
+
+    function findOne(node, pred) {
+      var list = findAll(node, pred)
+      return list.length > 0 ? list[0] : null
+    }
+
+    function seedPanel() {
+      panel.opened = true
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius", "hierocles"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "121–180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. 30–100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+          { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elem", text: "Circles." },
+        ],
+      }))
+      compare(ok, true)
+      waitForRendering(panel)
+    }
+
+    function removeButtons() {
+      return findAll(panel, function(item) {
+        return item.hasOwnProperty("keepsRemoveConfirm") && item.keepsRemoveConfirm === true && item.visible
+      })
+    }
+
+    function test_remove_confirm_cancels_everywhere_outside_and_second_press_removes() {
+      seedPanel()
+
+      // Only the 2 custom authors have visible Remove buttons; bundled marcus does not.
+      var allRemoveBtns = findAll(panel, function(item) {
+        return item.hasOwnProperty("keepsRemoveConfirm") && item.keepsRemoveConfirm === true
+      })
+      compare(allRemoveBtns.length, 3)
+      var removes = removeButtons()
+      compare(removes.length, 2)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      var musoniusRemove = removes[0]
+      var hieroclesRemove = removes[1]
+
+      // 1. First click arms musonius without removing.
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      compare(musoniusRemove.label, "Remove?")
+      compare(panel.saving, false)
+
+      // 2. Clicking blank space or non-interactive header INSIDE the scrolling card cancels Remove?.
+      mouseClick(scroller, 20, 20)
+      compare(panel.confirmRemoveAuthor, "")
+      compare(musoniusRemove.label, "Remove")
+
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      mouseClick(scroller, scroller.width - 10, scroller.height - 10)
+      compare(panel.confirmRemoveAuthor, "")
+
+      // 3. Clicking blank space after Flickable scrolls AND clicking a TextField or disabled RingButton both cancel Remove?.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      if (scroller.contentHeight > scroller.height) scroller.contentY = Math.min(40, scroller.contentHeight - scroller.height)
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      mouseClick(scroller, scroller.width - 12, 20)
+      compare(panel.confirmRemoveAuthor, "")
+
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      verify(nameField !== null)
+      mouseClick(nameField)
+      compare(panel.confirmRemoveAuthor, "")
+
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      var disabledAddAuthor = findOne(panel, function(item) { return item.label === "Add author" && item.visible && !item.available })
+      verify(disabledAddAuthor !== null)
+      panel.reveal(disabledAddAuthor)
+      waitForRendering(panel)
+      mouseClick(disabledAddAuthor)
+      compare(panel.opened, true)
+      compare(panel.confirmRemoveAuthor, "")
+
+      scroller.contentY = 0
+      waitForRendering(panel)
+      var closeAuthorBtn = findOne(panel, function(item) { return item.label === "Close" && item.visible })
+      verify(closeAuthorBtn !== null)
+      mouseClick(closeAuthorBtn)
+      scroller.contentY = 0
+      waitForRendering(panel)
+
+      // 4. Clicking Edit cancels Remove?.
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      var editButtons = findAll(panel, function(item) { return item.label === "Edit" && item.visible })
+      compare(editButtons.length, 2)
+      mouseClick(editButtons[0])
+      compare(panel.confirmRemoveAuthor, "")
+      var cancelEditBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelEditBtn !== null)
+      panel.reveal(cancelEditBtn)
+      waitForRendering(panel)
+      mouseClick(cancelEditBtn)
+      compare(panel.opened, true)
+      scroller.contentY = 0
+      waitForRendering(panel)
+
+      // 5. Clicking another author row (marcus) cancels Remove?.
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      var marcusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Marcus Aurelius" })
+      verify(marcusRow !== null)
+      mouseClick(marcusRow, 20, marcusRow.height / 2)
+      compare(panel.confirmRemoveAuthor, "")
+
+      // Reset any pending debounced apply so we cleanly observe the second-press remove commit.
+      panel.saving = false
+      panel.notice = ""
+
+      // 6. Clicking a different custom author's Remove switches confirm to that author instead of removing.
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      mouseClick(hieroclesRemove)
+      compare(panel.confirmRemoveAuthor, "hierocles")
+
+      // 7. Escape cancels Remove? without closing the panel.
+      keyClick(Qt.Key_Escape)
+      compare(panel.confirmRemoveAuthor, "")
+      compare(panel.opened, true)
+
+      // 8. Second click on the same armed Remove? button commits removal.
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      compare(panel.saving, false)
+      mouseClick(musoniusRemove)
+      compare(panel.confirmRemoveAuthor, "")
+      compare(panel.saving, true)
+    }
+  }
+}
+`,
+    );
+
+    const run = Bun.spawnSync(
+      [runner, "-input", join(scratch, "tst_panel.qml"), "-import", scratch],
+      {
+        env: { ...process.env, QT_QPA_PLATFORM: "offscreen" },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
+    expect(run.exitCode, combined).toBe(0);
+    expect(combined, combined).toContain("3 passed, 0 failed");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
