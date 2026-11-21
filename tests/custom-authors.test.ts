@@ -994,6 +994,13 @@ test("bundled slug protection, replace hint on duplicate add, repeated --image, 
     expect((await s.cli(["config", "--add-author", "a", "--replace-author", "musonius", "--image", pngB])).code).toBe(1);
     expect((await s.cli(["config", "--remove-author", "musonius", "--image", pngB])).code).toBe(1);
     expect((await s.cli(["config", "--remove-author", "musonius", "--add", "marcus\tCite\tLine."])).code).toBe(1);
+    const doubleAuthors = await s.cli(["config", "--authors", "marcus", "--authors", "seneca"]);
+    expect(doubleAuthors.code).toBe(1);
+    expect(doubleAuthors.stderr).toContain("--authors");
+    const doubleInterval = await s.cli(["config", "--interval", "30", "--interval", "60"]);
+    expect(doubleInterval.code).toBe(1);
+    expect(doubleInterval.stderr).toContain("--interval");
+    expect(existsSync(join(s.config, "omastoic/config.json"))).toBe(false);
     expect(existsSync(join(s.config, "omastoic/art/musonius.txt"))).toBe(true);
   } finally { s.cleanup(); }
 }, 30000);
@@ -1091,5 +1098,105 @@ test("panel state and panel apply replace and remove custom authors while protec
     const missingRemove = await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: "musonius" })]);
     expect(missingRemove.code).toBe(1);
     expect(missingRemove.stderr).toContain("not a custom author");
+
+    // Panel errors use UI wording rather than CLI flags or file paths.
+    expectOk(await s.cli(["panel", "apply", JSON.stringify({
+      addAuthor: {
+        slug: "hierocles",
+        name: "Hierocles",
+        image: pngA,
+        citation: "Elements",
+        text: "Circle line.",
+      },
+    })]), "add hierocles via panel");
+    const dupPanelAdd = await s.cli(["panel", "apply", JSON.stringify({
+      addAuthor: {
+        slug: "hierocles",
+        name: "Hierocles",
+        image: pngA,
+        citation: "Elements",
+        text: "Another line.",
+      },
+    })]);
+    expect(dupPanelAdd.code).toBe(1);
+    expect(dupPanelAdd.stderr).toContain("Edit");
+    expect(dupPanelAdd.stderr).not.toContain("--replace-author");
+    expect(dupPanelAdd.stderr).not.toContain("authors.tsv");
+
+    const emptyPanelReplace = await s.cli(["panel", "apply", JSON.stringify({
+      replaceAuthor: { slug: "hierocles" },
+    })]);
+    expect(emptyPanelReplace.code).toBe(1);
+    expect(emptyPanelReplace.stderr).not.toContain("--image");
+    expect(emptyPanelReplace.stderr).not.toContain("--name");
   } finally { s.cleanup(); }
+}, 30000);
+
+test("remove rollback on read-only art/ and replace rollback when config.json save fails", async () => {
+  const s = sandbox();
+  const pngA = join(s.home, "a.png");
+  const pngB = join(s.home, "b.png");
+  const roCfgDir = join(s.home, "ro-cfg");
+  const artDir = join(s.config, "omastoic/art");
+  writePortraitPng(pngA);
+  writePhotoPng(pngB);
+
+  try {
+    expectOk(await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--dates", "c. AD 30 – 100",
+      "--image", pngA,
+      "--citation", "Lectures VI",
+      "--text", "Musonius initial line.",
+    ]), "add musonius");
+    expectOk(await s.cli(["config", "--add", "seneca\tDesk note\tSeneca custom line."]), "add seneca custom");
+    expectOk(await s.cli(["config", "--authors", "marcus,musonius", "--quotes", "seneca=q19,c02"]), "save config");
+
+    const authorsPath = join(s.config, "omastoic/authors.tsv");
+    const quotesPath = join(s.config, "omastoic/quotes.tsv");
+    const configPath = join(s.config, "omastoic/config.json");
+    const artPath = join(artDir, "musonius.txt");
+
+    const authorsBefore = readFileSync(authorsPath, "utf8");
+    const quotesBefore = readFileSync(quotesPath, "utf8");
+    const configBefore = readFileSync(configPath, "utf8");
+    const artBefore = readFileSync(artPath, "utf8");
+
+    // 1. Remove with read-only art/ fails and restores authors.tsv, quotes.tsv, config.json, and art/.
+    chmodSync(artDir, 0o555);
+    const failedRemove = await s.cli(["config", "--remove-author", "musonius"]);
+    chmodSync(artDir, 0o755);
+    expect(failedRemove.code).toBe(1);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+    expect(readFileSync(configPath, "utf8")).toBe(configBefore);
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+
+    // 2. Replace whose config.json save fails restores art, authors.tsv, quotes.tsv, and config.json.
+    mkdirSync(roCfgDir, { recursive: true });
+    const roCfg = join(roCfgDir, "config.json");
+    writeFileSync(roCfg, configBefore);
+    rmSync(configPath);
+    symlinkSync(roCfg, configPath);
+    chmodSync(roCfgDir, 0o555);
+    const failedReplaceSave = await s.cli([
+      "config", "--replace-author", "musonius",
+      "--name", "Rolled Back Name",
+      "--image", pngB,
+      "--add", "musonius\tNew I\tFirst replacement.",
+      "--add", "musonius\tNew II\tSecond replacement.",
+    ]);
+    chmodSync(roCfgDir, 0o755);
+    expect(failedReplaceSave.code).toBe(1);
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+    expect(readFileSync(configPath, "utf8")).toBe(configBefore);
+  } finally {
+    try { chmodSync(artDir, 0o755); } catch { /* may not exist */ }
+    try { chmodSync(roCfgDir, 0o755); } catch { /* may not exist */ }
+    s.cleanup();
+  }
 }, 30000);

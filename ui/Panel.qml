@@ -39,6 +39,7 @@ Item {
   property bool replacingAuthor: false
   property string pendingRemove: ""
   property string pendingRemoveAuthor: ""
+  property string confirmRemoveAuthor: ""
   property string editingAuthorSlug: ""
   property string editingAuthorOrigName: ""
   property string editingAuthorOrigDates: ""
@@ -112,6 +113,7 @@ Item {
     editingAuthorOrigDates = ""
     pendingReplaceAuthor = null
     pendingRemoveAuthor = ""
+    confirmRemoveAuthor = ""
     reload()
     Qt.callLater(function() { if (root.opened) previewButton.takeFocus() })
   }
@@ -124,7 +126,10 @@ Item {
       .slice(0, 64)
   }
 
-  function close() { opened = false }
+  function close() {
+    opened = false
+    confirmRemoveAuthor = ""
+  }
 
   function reveal(item) {
     if (!item) return
@@ -188,6 +193,7 @@ Item {
       pendingQuote = null
       pendingRemove = ""
       pendingRemoveAuthor = ""
+      confirmRemoveAuthor = ""
       Qt.callLater(function() { root.reveal(statusSlot) })
     } else {
       error = ""
@@ -209,6 +215,7 @@ Item {
     catch (failure) { return false }
     if (!parsed || typeof parsed !== "object") return false
     adopting = true
+    confirmRemoveAuthor = ""
     var saved = parsed.settings && parsed.settings.authors instanceof Array ? parsed.settings.authors : []
     settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
     samples = parsed.samples instanceof Array ? parsed.samples : []
@@ -250,6 +257,7 @@ Item {
   }
 
   function toggleAuthor(slug) {
+    confirmRemoveAuthor = ""
     var next = []
     var found = false
     for (var i = 0; i < samples.length; i++) {
@@ -349,6 +357,7 @@ Item {
   }
 
   function openAddAuthor() {
+    confirmRemoveAuthor = ""
     if (authorOpen && editingAuthorSlug === "") {
       authorOpen = false
       return
@@ -369,6 +378,7 @@ Item {
   }
 
   function startEditAuthor(author) {
+    confirmRemoveAuthor = ""
     if (authorOpen && editingAuthorSlug === author.slug) {
       closeAuthorForm()
       return
@@ -464,8 +474,19 @@ Item {
     applyNow()
   }
 
+  function requestRemoveAuthor(slug) {
+    if (root.busy) return
+    if (confirmRemoveAuthor !== slug) {
+      confirmRemoveAuthor = slug
+      return
+    }
+    confirmRemoveAuthor = ""
+    removeAuthor(slug)
+  }
+
   function removeAuthor(slug) {
     if (root.busy) return
+    confirmRemoveAuthor = ""
     if (editingAuthorSlug === slug) closeAuthorForm()
     applyTimer.stop()
     pendingRemoveAuthor = slug
@@ -473,6 +494,7 @@ Item {
   }
 
   function removeQuote(id) {
+    confirmRemoveAuthor = ""
     pendingRemove = id
     applyNow()
   }
@@ -605,7 +627,13 @@ Item {
       id: keyCatcher
       anchors.fill: parent
       focus: true
-      Keys.onEscapePressed: root.dismiss()
+      Keys.onEscapePressed: {
+        if (root.confirmRemoveAuthor !== "") {
+          root.confirmRemoveAuthor = ""
+          return
+        }
+        root.dismiss()
+      }
       Keys.onPressed: function(event) {
         if ((event.key === Qt.Key_S) && (event.modifiers & Qt.ControlModifier)) {
           root.applyNow()
@@ -624,7 +652,7 @@ Item {
         color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
         border.color: Commons.Color.popups.border
-        MouseArea { anchors.fill: parent; onClicked: {} }
+        MouseArea { anchors.fill: parent; onClicked: root.confirmRemoveAuthor = "" }
 
         Flickable {
           id: scroller
@@ -688,6 +716,7 @@ Item {
                     id: previewButton
                     label: "Preview"
                     onActivated: {
+                      root.confirmRemoveAuthor = ""
                       root.error = ""
                       root.notice = "Opening preview…"
                       previewProcess.command = root.preview && root.preview.id
@@ -827,9 +856,10 @@ Item {
                       onActivated: root.startEditAuthor(modelData)
                     }
                     RingButton {
-                      label: "Remove"
+                      label: root.confirmRemoveAuthor === modelData.slug ? "Remove?" : "Remove"
+                      picked: root.confirmRemoveAuthor === modelData.slug
                       available: !root.busy
-                      onActivated: root.removeAuthor(modelData.slug)
+                      onActivated: root.requestRemoveAuthor(modelData.slug)
                     }
                   }
                 }
@@ -865,7 +895,7 @@ Item {
                 to: 3600
                 stepSize: 5
                 foreground: root.ink
-                onModified: function(value) { root.interval = value; root.scheduleApply() }
+                onModified: function(value) { root.confirmRemoveAuthor = ""; root.interval = value; root.scheduleApply() }
                 onActiveFocusChanged: if (activeFocus) root.reveal(secondsField)
               }
               Rectangle {
@@ -887,6 +917,7 @@ Item {
               RingButton {
                 label: root.quoteOpen ? "Close" : "Add your own quote"
                 onActivated: {
+                  root.confirmRemoveAuthor = ""
                   root.quoteOpen = !root.quoteOpen
                   if (root.quoteOpen) root.authorOpen = false
                 }

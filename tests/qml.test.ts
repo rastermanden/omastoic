@@ -57,6 +57,10 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("addAuthor");
   expect(source).toContain("replaceAuthor");
   expect(source).toContain("removeAuthor");
+  expect(source).toContain("confirmRemoveAuthor");
+  expect(source).toContain("requestRemoveAuthor");
+  expect(source).toContain('"Remove?"');
+  expect(source).toContain('root.confirmRemoveAuthor = ""');
   expect(source).toContain("modelData.custom === true");
   expect(source).toContain("removeQuote");
   expect(source).not.toContain("authors.tsv");

@@ -1153,6 +1153,7 @@ async function commitNewAuthor(
   validated: ValidatedNewAuthor,
   artText: string,
   quiet = false,
+  source: "cli" | "panel" = "cli",
 ): Promise<{ ok: true; author: Author; quotes: Quote[] } | { ok: false; error: string }> {
   const { author, quotes: parsedQuotes } = validated;
   const slug = author.slug;
@@ -1165,7 +1166,12 @@ async function commitNewAuthor(
     existingAuthorsText = read.missing ? "" : read.text;
     const existingAuthors = existingAuthorsText ? parseAuthors(existingAuthorsText) : new Map<string, Author>();
     if (existingAuthors.has(slug)) {
-      return { ok: false, error: `author "${slug}" already exists in ${USER_AUTHORS_FILE}. Use --replace-author ${slug} to update it.` };
+      return {
+        ok: false,
+        error: source === "panel"
+          ? `"${slug}" already exists. Use Edit on that author to update it.`
+          : `author "${slug}" already exists in ${USER_AUTHORS_FILE}. Use --replace-author ${slug} to update it.`,
+      };
     }
   } catch (error) {
     return { ok: false, error: (error as Error).message };
@@ -1422,6 +1428,7 @@ async function checkEditableCustomSlug(
 
 async function validateReplaceAuthorInput(
   input: ReplaceAuthorInput,
+  source: "cli" | "panel" = "cli",
 ): Promise<{ ok: true; value: ValidatedReplaceAuthor } | { ok: false; error: string }> {
   const checkedSlug = await checkEditableCustomSlug(input.slug, "replaced");
   if (!checkedSlug.ok) return checkedSlug;
@@ -1432,7 +1439,12 @@ async function validateReplaceAuthorInput(
   const hasImage = input.image !== undefined;
   const hasQuotes = input.quotes !== undefined;
   if (!hasName && !hasDates && !hasImage && !hasQuotes) {
-    return { ok: false, error: "replace requires at least one change (--image, --name, --dates, or quotes via --citation/--text or --add)" };
+    return {
+      ok: false,
+      error: source === "panel"
+        ? "Change the portrait, name, dates, or quote first."
+        : "replace requires at least one change (--image, --name, --dates, or quotes via --citation/--text or --add)",
+    };
   }
 
   let cleanName: string | undefined;
@@ -1929,7 +1941,7 @@ async function configure(rest: string[]): Promise<number> {
     const list = parsedFlags.values.get(`--${name}`);
     return list ? { present: true, value: list[0] } : { present: false };
   };
-  for (const key of ["name", "dates", "image", "citation", "text"]) {
+  for (const key of ["authors", "interval", "name", "dates", "image", "citation", "text"]) {
     if ((parsedFlags.values.get(`--${key}`)?.length ?? 0) > 1) {
       console.error(`omastoic: --${key} can only be passed once`);
       return 1;
@@ -1945,8 +1957,8 @@ async function configure(rest: string[]): Promise<number> {
     console.error("omastoic: --interval requires a value");
     return 1;
   }
-  const authorsFlag = authorsValues.length ? authorsValues[authorsValues.length - 1] : undefined;
-  const intervalFlag = intervalValues.length ? intervalValues[intervalValues.length - 1] : undefined;
+  const authorsFlag = authorsValues[0];
+  const intervalFlag = intervalValues[0];
   const quoteFlags = (parsedFlags.values.get("--quotes") ?? []).map((v) => v ?? "");
   let addFlags = (parsedFlags.values.get("--add") ?? []).map((v) => v ?? "");
   const addAuthorFlags = (parsedFlags.values.get("--add-author") ?? []).map((v) => v ?? "");
@@ -2449,6 +2461,8 @@ async function configure(rest: string[]): Promise<number> {
       if (authorsFlag != null) {
         const parsed = parseAuthorList(authorsFlag, slugs);
         if (parsed == null) {
+          replaceRollback?.();
+          removeRollback?.();
           console.error(`omastoic: unknown author — try: ${slugs.join(", ")} (or all)`);
           return 1;
         }
@@ -2457,6 +2471,8 @@ async function configure(rest: string[]): Promise<number> {
       if (quoteFlags.length) {
         const applied = applyQuoteFlags(next.quotes, quoteFlags, slugs, catalog, customBook.readable);
         if (!applied.ok) {
+          replaceRollback?.();
+          removeRollback?.();
           console.error(`omastoic: ${applied.error}`);
           return 1;
         }
@@ -2764,7 +2780,7 @@ async function panelApply(raw: string): Promise<number> {
     }
     const preRoster = await authors();
     if (preRoster.has(checked.value.author.slug)) {
-      console.error(`omastoic: author "${checked.value.author.slug}" already exists in ${USER_AUTHORS_FILE}. Use --replace-author ${checked.value.author.slug} to update it.`);
+      console.error(`omastoic: "${checked.value.author.slug}" already exists. Use Edit on that author to update it.`);
       return 1;
     }
     if (Object.hasOwn(value, "authors")) {
@@ -2795,7 +2811,7 @@ async function panelApply(raw: string): Promise<number> {
       console.error(`omastoic: ${parsedReplace.error}`);
       return 1;
     }
-    const checked = await validateReplaceAuthorInput(parsedReplace.input);
+    const checked = await validateReplaceAuthorInput(parsedReplace.input, "panel");
     if (!checked.ok) {
       console.error(`omastoic: ${checked.error}`);
       return 1;
@@ -2902,7 +2918,7 @@ async function panelApply(raw: string): Promise<number> {
     let removeRollback: (() => void) | null = null;
 
     if (preparedAuthor) {
-      const created = await commitNewAuthor(preparedAuthor.validated, preparedAuthor.artText, true);
+      const created = await commitNewAuthor(preparedAuthor.validated, preparedAuthor.artText, true, "panel");
       if (!created.ok) {
         console.error(`omastoic: ${created.error}`);
         return 1;
