@@ -223,8 +223,12 @@ function decode(buffer: string): { key: Key; rest: string } | "more" {
   return { key: { kind: "ignore" }, rest };
 }
 
-const HINTS = "space/x toggle · 1-6 · j/k move · a all · n none · enter save · q cancel";
 const HEADER = "Stoics on the screensaver";
+
+function hintsFor(count: number): string {
+  const digits = count > 1 ? `1-${Math.min(count, 9)}` : "1";
+  return `space/x toggle · ${digits} · j/k move · a all · n none · enter save · q cancel`;
+}
 
 /** One line per row keeps the frame's line count fixed, so a redraw can clear it. */
 function frameLines(rows: AuthorRow[], checked: Set<string>, focus: number, columns: number): string[] {
@@ -234,7 +238,7 @@ function frameLines(rows: AuthorRow[], checked: Set<string>, focus: number, colu
   rows.forEach((row, index) => {
     lines.push(`${index === focus ? ">" : " "} ${index + 1} [${checked.has(row.slug) ? "x" : " "}] ${row.name}`);
   });
-  lines.push(HINTS);
+  lines.push(hintsFor(rows.length));
   return lines.map(fit);
 }
 
@@ -334,7 +338,9 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
     if (fatal) io.fatal?.(fatal);
   }
 }
-const PLAIN_PROMPT = "Select Stoics [1-6, all, none, or a list; empty keeps the current set]: ";
+function plainPromptFor(count: number): string {
+  return `Select Stoics [1-${Math.max(1, count)}, all, none, or a list; empty keeps the current set]: `;
+}
 
 /**
  * The numbered prompt. It is used when raw mode is unavailable or when the
@@ -372,9 +378,10 @@ export async function pickAuthorsPlain(rows: AuthorRow[], selected: string[], io
     output.write(`  ${index + 1} ${checked.has(row.slug) ? "[x]" : "[ ]"} ${row.name}\n`);
   }
 
+  const prompt = plainPromptFor(rows.length);
   try {
     for (;;) {
-      output.write(PLAIN_PROMPT);
+      output.write(prompt);
       const line = await readLine();
       if (line == null) { output.write("\n"); return undefined; }
       const text = line.replace(/\r$/, "").trim().toLowerCase();

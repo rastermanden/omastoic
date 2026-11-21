@@ -33,11 +33,15 @@ Item {
   property bool saving: false
   property bool applyQueued: false
   property var pendingQuote: null
+  property var pendingAuthor: null
+  property bool addingAuthor: false
   property string pendingRemove: ""
   property string notice: ""
   property string error: ""
   property bool quoteOpen: false
   onQuoteOpenChanged: if (quoteOpen) Qt.callLater(function() { root.reveal(quoteForm) })
+  property bool authorOpen: false
+  onAuthorOpenChanged: if (authorOpen) Qt.callLater(function() { root.reveal(authorForm) })
   property bool listOpen: false
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
   readonly property string statusText: error !== "" ? error : notice
@@ -49,8 +53,16 @@ Item {
   property string newAuthor: "marcus"
   property string newCitation: ""
   property string newText: ""
+  property string newAuthorName: ""
+  property string newAuthorSlug: ""
+  property bool authorSlugEdited: false
+  property string newAuthorDates: ""
+  property string newAuthorImage: ""
+  property string newAuthorCitation: ""
+  property string newAuthorText: ""
 
   readonly property bool quoteReady: newAuthor !== "" && newCitation.trim() !== "" && newText.trim() !== ""
+  readonly property bool authorReady: newAuthorSlug.trim() !== "" && newAuthorName.trim() !== "" && newAuthorImage.trim() !== "" && newAuthorCitation.trim() !== "" && newAuthorText.trim() !== ""
   readonly property var preview: {
     for (var i = 0; i < samples.length; i++) {
       if (selectedAuthors.indexOf(samples[i].slug) !== -1) return samples[i]
@@ -70,9 +82,18 @@ Item {
   function open(payloadJson) {
     opened = true
     quoteOpen = false
+    authorOpen = false
     listOpen = false
     reload()
     Qt.callLater(function() { if (root.opened) previewButton.takeFocus() })
+  }
+
+  function slugFromName(name) {
+    return String(name || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64)
   }
 
   function close() { opened = false }
@@ -134,12 +155,17 @@ Item {
       notice = ""
       error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       applyQueued = false
+      pendingAuthor = null
+      pendingQuote = null
+      pendingRemove = ""
+      Qt.callLater(function() { root.reveal(statusSlot) })
     } else {
       error = ""
       notice = saving ? "Saved" : ""
       if (saving) savedTimer.restart()
     }
     saving = false
+    addingAuthor = false
     if (applyQueued) {
       applyQueued = false
       applyNow()
@@ -172,6 +198,16 @@ Item {
       newAuthor = samples[0].slug
     citationField.text = ""
     textField.text = ""
+    if (addingAuthor) {
+      authorOpen = false
+      authorSlugEdited = false
+      authorNameField.text = ""
+      authorSlugField.text = ""
+      authorDatesField.text = ""
+      authorImageField.text = ""
+      authorCitationField.text = ""
+      authorTextField.text = ""
+    }
     if (secondsField.field) secondsField.field.value = interval
     adopting = false
     return true
@@ -218,15 +254,25 @@ Item {
       return
     }
     if (busy) { applyQueued = true; return }
-    var payload = { authors: selectedAuthors }
-    if (intervalApplied) payload.interval = interval
-    if (pendingRemove !== "") {
-      payload.removeQuote = pendingRemove
-      pendingRemove = ""
-      if (pendingQuote) applyQueued = true
-    } else if (pendingQuote) {
-      payload.addQuote = pendingQuote
-      pendingQuote = null
+    var payload = {}
+    if (pendingAuthor) {
+      payload.addAuthor = pendingAuthor
+      if (selectedAuthors.join(",") !== committedAuthors.join(",")) payload.authors = selectedAuthors
+      if (intervalApplied && interval !== committedInterval) payload.interval = interval
+      pendingAuthor = null
+      addingAuthor = true
+      if (pendingRemove !== "" || pendingQuote) applyQueued = true
+    } else {
+      payload.authors = selectedAuthors
+      if (intervalApplied) payload.interval = interval
+      if (pendingRemove !== "") {
+        payload.removeQuote = pendingRemove
+        pendingRemove = ""
+        if (pendingQuote) applyQueued = true
+      } else if (pendingQuote) {
+        payload.addQuote = pendingQuote
+        pendingQuote = null
+      }
     }
     saving = true
     error = ""
@@ -238,11 +284,32 @@ Item {
 
   function addQuote() {
     if (!quoteReady) {
+      error = ""
       notice = "A quote needs a citation and the words."
+      Qt.callLater(function() { root.reveal(statusSlot) })
       return
     }
     pendingQuote = { author: newAuthor, citation: newCitation.trim(), text: newText.trim() }
     quoteOpen = false
+    applyNow()
+  }
+
+  function addAuthor() {
+    if (!authorReady) {
+      error = ""
+      notice = "An author needs a name, id, image, citation and quote."
+      Qt.callLater(function() { root.reveal(statusSlot) })
+      return
+    }
+    applyTimer.stop()
+    pendingAuthor = {
+      slug: newAuthorSlug.trim(),
+      name: newAuthorName.trim(),
+      dates: newAuthorDates.trim(),
+      image: newAuthorImage.trim(),
+      citation: newAuthorCitation.trim(),
+      text: newAuthorText.trim(),
+    }
     applyNow()
   }
 
@@ -295,6 +362,9 @@ Item {
       id: labelText
       z: 3
       anchors.centerIn: parent
+      width: Math.min(implicitWidth, Math.max(0, host.width - Style.space(16)))
+      horizontalAlignment: Text.AlignHCenter
+      elide: Text.ElideRight
       text: host.label
       color: root.ink
       font.family: Style.font.family
@@ -477,7 +547,7 @@ Item {
                   Text {
                     width: parent.width
                     anchors.verticalCenter: quoteSlot.verticalCenter
-                    text: root.preview ? root.preview.text : "Pick at least one Stoic."
+                    text: root.preview ? (root.preview.text !== "" ? root.preview.text : "No quotes yet.") : "Pick at least one Stoic."
                     color: root.ink
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
@@ -489,7 +559,7 @@ Item {
                 Text {
                   width: parent.width
                   visible: root.preview !== null
-                  text: root.preview ? (root.preview.name + ", " + root.preview.citation) : ""
+                  text: root.preview ? (root.preview.citation !== "" ? (root.preview.name + ", " + root.preview.citation) : root.preview.name) : ""
                   color: root.quiet
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
@@ -555,14 +625,19 @@ Item {
                     }
                   }
                   Column {
-                    width: parent.width - Style.space(80)
+                    width: parent.width - Style.space(32)
                     Text {
+                      width: parent.width
+                      elide: Text.ElideRight
                       text: modelData.name
                       color: root.ink
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
                     }
                     Text {
+                      width: parent.width
+                      elide: Text.ElideRight
+                      visible: modelData.dates !== ""
                       text: modelData.dates
                       color: root.dates
                       font.family: Style.font.family
@@ -624,9 +699,23 @@ Item {
 
             PanelSeparator { foreground: root.ink }
 
-            RingButton {
-              label: root.quoteOpen ? "Close" : "Add your own quote"
-              onActivated: root.quoteOpen = !root.quoteOpen
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+              RingButton {
+                label: root.quoteOpen ? "Close" : "Add your own quote"
+                onActivated: {
+                  root.quoteOpen = !root.quoteOpen
+                  if (root.quoteOpen) root.authorOpen = false
+                }
+              }
+              RingButton {
+                label: root.authorOpen ? "Close" : "Add an author"
+                onActivated: {
+                  root.authorOpen = !root.authorOpen
+                  if (root.authorOpen) root.quoteOpen = false
+                }
+              }
             }
 
             Column {
@@ -758,6 +847,197 @@ Item {
               }
             }
 
+            Column {
+              id: authorForm
+              width: parent.width
+              visible: root.authorOpen
+              spacing: Style.space(8)
+
+              Text {
+                text: "Name"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              Item {
+                width: parent.width
+                height: authorNameField.implicitHeight
+                TextField {
+                  id: authorNameField
+                  width: parent.width
+                  placeholderText: "Musonius Rufus"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: {
+                    root.newAuthorName = text
+                    if (!root.authorSlugEdited) {
+                      var suggested = root.slugFromName(text)
+                      if (authorSlugField.text !== suggested) authorSlugField.text = suggested
+                    }
+                  }
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorNameField)
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: authorNameField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
+              }
+              Text {
+                text: "Short id"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              Item {
+                width: parent.width
+                height: authorSlugField.implicitHeight
+                TextField {
+                  id: authorSlugField
+                  width: parent.width
+                  placeholderText: "musonius"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: {
+                    root.newAuthorSlug = text
+                    if (activeFocus) root.authorSlugEdited = text.trim() !== ""
+                  }
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField)
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: authorSlugField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
+              }
+              Text {
+                text: "Dates (optional)"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              Item {
+                width: parent.width
+                height: authorDatesField.implicitHeight
+                TextField {
+                  id: authorDatesField
+                  width: parent.width
+                  placeholderText: "c. AD 30 – 100"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: root.newAuthorDates = text
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorDatesField)
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: authorDatesField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
+              }
+              Text {
+                text: "Portrait image (JPEG or PNG)"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              Item {
+                width: parent.width
+                height: authorImageField.implicitHeight
+                TextField {
+                  id: authorImageField
+                  width: parent.width
+                  placeholderText: "/path/to/portrait.png"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: root.newAuthorImage = text
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorImageField)
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: authorImageField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
+              }
+              Text {
+                text: "Citation"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              Item {
+                width: parent.width
+                height: authorCitationField.implicitHeight
+                TextField {
+                  id: authorCitationField
+                  width: parent.width
+                  placeholderText: "Lectures VI"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: root.newAuthorCitation = text
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorCitationField)
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: authorCitationField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
+              }
+              Text {
+                text: "Quote"
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              Item {
+                width: parent.width
+                height: authorTextField.implicitHeight
+                TextField {
+                  id: authorTextField
+                  width: parent.width
+                  placeholderText: "The line itself"
+                  placeholderTextColor: root.hint
+                  foreground: root.ink
+                  onTextChanged: root.newAuthorText = text
+                  Keys.onReturnPressed: root.addAuthor()
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorTextField)
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -2
+                  enabled: false
+                  color: "transparent"
+                  radius: Style.cornerRadius
+                  border.width: authorTextField.activeFocus ? 2 : 0
+                  border.color: Commons.Color.accent
+                }
+              }
+              RingButton {
+                label: "Add author"
+                available: root.authorReady && !root.busy
+                onActivated: root.addAuthor()
+              }
+            }
+
             RingButton {
               visible: root.custom.length > 0
               label: root.custom.length === 1 ? "1 of your own" : (root.custom.length + " of your own")
@@ -791,6 +1071,7 @@ Item {
             }
 
             Item {
+              id: statusSlot
               width: parent.width
               implicitHeight: Style.font.bodySmall * 2 + Style.space(4)
               Text {

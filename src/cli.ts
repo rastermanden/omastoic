@@ -20,8 +20,8 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
 import { dirname, join } from "node:path";
-import { compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type BundledQuote, type Quote } from "./canvas.ts";
-import { headerPortraitLayout, padPortrait, portraitDownscale } from "./portrait.ts";
+import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
+import { headerPortraitLayout, padPortrait, portraitDownscale, transcodePortrait } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
@@ -80,6 +80,8 @@ const PRUNE_PATH = join(CONFIG_HOME, "systemd/user/omastoic-prune.path");
 const PLUGINS_DIR = join(CONFIG_HOME, "omarchy/plugins");
 
 const SETTINGS_FILE = join(USER_CONFIG, "config.json");
+const USER_AUTHORS_FILE = join(USER_CONFIG, "authors.tsv");
+const USER_ART_DIR = join(USER_CONFIG, "art");
 const owned = new OwnedFiles(STATE);
 const DISPLACED = join(STATE, "displaced.kind");
 
@@ -110,12 +112,19 @@ function readExisting(path: string): { missing: true } | { missing: false; text:
 /** Settings for a write. Throws when an existing file cannot be read whole. */
 async function loadSettings(): Promise<Settings> {
   const read = readExisting(SETTINGS_FILE);
+  // Refuse to rewrite settings while custom authors cannot be parsed, so saved
+  // custom slugs in config.json are not silently dropped.
+  const customAuthorMap = await customAuthors();
   if (read.missing) return {};
   if (Buffer.byteLength(read.text) > 65536) throw new Error(`refusing to replace unreadable ${SETTINGS_FILE}`);
   let raw: unknown;
   try { raw = JSON.parse(read.text); }
   catch { throw new Error(`refusing to replace unreadable ${SETTINGS_FILE}`); }
-  const roster = [...(await authors()).keys()];
+  const merged = await bundledAuthors();
+  for (const [slug, author] of customAuthorMap) {
+    if (!merged.has(slug)) merged.set(slug, author);
+  }
+  const roster = [...merged.keys()];
   const custom = await indexedCustom();
   const catalog = [...choicesOf(await bundledBook()), ...choicesOf(custom.quotes)];
   return normalizeSettings(raw, roster, catalog, custom.readable);
@@ -188,7 +197,39 @@ async function quoteBook(): Promise<Quote[]> {
   return inRotation(bundled, custom, cfg).quotes;
 }
 
-const authors = async () => parseAuthors(await Bun.file(join(ROOT, "data/authors.tsv")).text());
+async function bundledAuthors(): Promise<Map<string, Author>> {
+  return parseAuthors(await Bun.file(join(ROOT, "data/authors.tsv")).text());
+}
+
+async function customAuthors(): Promise<Map<string, Author>> {
+  const read = readExisting(USER_AUTHORS_FILE);
+  if (read.missing) return new Map();
+  if (Buffer.byteLength(read.text) > 1024 * 1024) throw new Error("custom author file exceeds 1 MiB");
+  return parseAuthors(read.text);
+}
+
+async function authors(): Promise<Map<string, Author>> {
+  const merged = await bundledAuthors();
+  try {
+    for (const [slug, author] of await customAuthors()) {
+      if (!merged.has(slug)) merged.set(slug, author);
+    }
+  } catch (error) {
+    console.error(`omastoic: ignoring unreadable ${USER_AUTHORS_FILE}: ${(error as Error).message}`);
+  }
+  return merged;
+}
+
+async function loadPortrait(slug: string): Promise<string[] | null> {
+  const bundled = await loadArt(join(ROOT, "art"), slug);
+  if (bundled) return bundled;
+  try {
+    return await loadArt(USER_ART_DIR, slug);
+  } catch (error) {
+    console.error(`omastoic: ignoring unreadable portrait for ${slug}: ${(error as Error).message}`);
+    return null;
+  }
+}
 
 async function recent(): Promise<number[]> {
   try {
@@ -329,7 +370,7 @@ async function renderQuote(size?: { cols: number; rows: number }, forced?: Quote
 
   const chosen = forced ? { quote: forced, recent: await recent() } : pick(quotes, await recent());
   const grid = size ?? (await screensaverSize());
-  const art = await loadArt(join(ROOT, "art"), chosen.quote.author);
+  const art = await loadPortrait(chosen.quote.author);
   return {
     text: compose(chosen.quote, (await authors()).get(chosen.quote.author), {
       cols: grid.cols,
@@ -907,6 +948,18 @@ function stringFlag(rest: string[], name: string): string | undefined {
   return i >= 0 && rest[i + 1] ? rest[i + 1] : undefined;
 }
 
+const CONFIG_FLAGS = new Set([
+  "--authors", "--interval", "--quotes", "--add", "--add-author",
+  "--name", "--dates", "--image", "--citation", "--text", "--list", "--plain",
+]);
+
+function flagArg(rest: string[], name: string): { present: boolean; value?: string } {
+  const i = rest.indexOf(`--${name}`);
+  if (i < 0) return { present: false };
+  const next = rest[i + 1];
+  return { present: true, value: next !== undefined && !CONFIG_FLAGS.has(next) ? next : undefined };
+}
+
 function flagValues(rest: string[], name: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < rest.length; i++) {
@@ -961,8 +1014,17 @@ async function pickQuoteList(name: string, choices: BundledQuote[], selected: st
 /** The quote picker is the id-keyed checklist; the labels live in quote-picker.ts. */
 
 const QUOTE_HEADER = "# author-slug <TAB> citation <TAB> text\n";
+const AUTHORS_HEADER = "# slug <TAB> display name <TAB> dates\n";
 
 type PromptedQuote = { kind: "quote"; quote: Quote } | { kind: "cancel" } | { kind: "invalid" };
+type NewAuthorInput = {
+  slug: string;
+  name: string;
+  dates?: string;
+  image: string;
+  quotes: Array<{ citation: string; text: string }>;
+};
+type PromptedAuthor = { kind: "author"; input: NewAuthorInput } | { kind: "cancel" };
 
 /** Collapse tabs and newlines so an answer stays one quotes.tsv row. */
 function flatField(value: string): string {
@@ -977,6 +1039,188 @@ function addUsage(): void {
   console.error("omastoic: --add expects one author, citation and text, separated by tabs");
   console.error("          omastoic config --add");
   console.error("          omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'");
+}
+
+function addAuthorUsage(): void {
+  console.error("omastoic: --add-author needs a slug, --name, --image (JPEG or PNG), and at least one quote");
+  console.error("          omastoic config --add-author");
+  console.error("          omastoic config --add-author musonius --name \"Musonius Rufus\" --dates \"c. AD 30 – 100\" --image portrait.jpg --citation \"Lectures VI\" --text \"Your line.\"");
+  console.error("          omastoic config --add-author musonius --name \"Musonius Rufus\" --image portrait.png --add $'musonius\\tLectures VI\\tYour line.'");
+}
+
+async function promptNewAuthor(io: ConfigIo): Promise<PromptedAuthor> {
+  const slug = await askLine({ header: "Author slug", value: "", charLimit: 64 }, io);
+  if (slug == null) return { kind: "cancel" };
+  const name = await askLine({ header: "Display name", value: "", charLimit: 128 }, io);
+  if (name == null) return { kind: "cancel" };
+  const dates = await askLine({ header: "Dates (optional)", value: "", charLimit: 128 }, io);
+  if (dates == null) return { kind: "cancel" };
+  const image = await askLine({ header: "Portrait image (JPEG or PNG)", value: "", charLimit: 1024 }, io);
+  if (image == null) return { kind: "cancel" };
+  const citation = await askLine({ header: "Citation", value: "", charLimit: 256 }, io);
+  if (citation == null) return { kind: "cancel" };
+  const text = await askText({ header: "Quote text (ctrl-d to finish)", value: "", charLimit: 4096 }, io);
+  if (text == null) return { kind: "cancel" };
+  return {
+    kind: "author",
+    input: {
+      slug,
+      name,
+      dates,
+      image,
+      quotes: [{ citation, text }],
+    },
+  };
+}
+
+/**
+ * Validate metadata, quotes and portrait conversion before touching disk.
+ * Writes art/<slug>.txt, authors.tsv and quotes.tsv under USER_CONFIG and rolls
+ * back earlier writes if a later step fails.
+ */
+async function addNewAuthor(
+  input: NewAuthorInput,
+  quiet = false,
+): Promise<{ ok: true; author: Author; quotes: Quote[] } | { ok: false; error: string }> {
+  const slug = flatField(input.slug);
+  const name = flatField(input.name);
+  const dates = flatField(input.dates ?? "");
+  const image = input.image.trim();
+
+  if (!slug || !AUTHOR_SLUG.test(slug)) {
+    return { ok: false, error: "invalid author slug (use lowercase letters, digits, _ or -, up to 64 characters)" };
+  }
+  if (slug === "all") {
+    return { ok: false, error: "\"all\" is reserved and cannot be used as an author slug" };
+  }
+  const bundled = await bundledAuthors();
+  if (bundled.has(slug)) {
+    return { ok: false, error: `author "${slug}" is already a bundled author` };
+  }
+  if (!name) return { ok: false, error: "author needs a display name" };
+  if (name.length > 128) return { ok: false, error: "author display name must be at most 128 characters" };
+  if (dates.length > 128) return { ok: false, error: "author dates must be at most 128 characters" };
+
+  let author: Author;
+  try {
+    const parsed = parseAuthors(`${slug}\t${name}\t${dates}\n`).get(slug);
+    if (!parsed) return { ok: false, error: "invalid author metadata" };
+    author = parsed;
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  if (!input.quotes.length) return { ok: false, error: "adding an author requires at least one quote" };
+  const parsedQuotes: Quote[] = [];
+  for (const item of input.quotes) {
+    const citation = flatField(item.citation);
+    const text = flatField(item.text);
+    if (!citation || !text) return { ok: false, error: "each quote needs a citation and text" };
+    try {
+      const rows = parseQuotes(`${slug}\t${citation}\t${text}\n`);
+      if (rows.length !== 1) return { ok: false, error: "each quote needs a citation and text" };
+      parsedQuotes.push(rows[0]);
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+
+  if (!image) return { ok: false, error: "author needs a portrait image (JPEG or PNG)" };
+
+  // Validate existing user files before converting the image or writing anything.
+  let existingAuthorsText = "";
+  let hadAuthorsFile = false;
+  try {
+    const read = readExisting(USER_AUTHORS_FILE);
+    hadAuthorsFile = !read.missing;
+    existingAuthorsText = read.missing ? "" : read.text;
+    const existingAuthors = existingAuthorsText ? parseAuthors(existingAuthorsText) : new Map<string, Author>();
+    if (existingAuthors.has(slug)) {
+      return { ok: false, error: `author "${slug}" already exists in ${USER_AUTHORS_FILE}` };
+    }
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  const authorBody = existingAuthorsText === ""
+    ? AUTHORS_HEADER
+    : existingAuthorsText.endsWith("\n") ? existingAuthorsText : `${existingAuthorsText}\n`;
+  const nextAuthorsText = `${authorBody}${author.slug}\t${author.name}\t${author.dates}\n`;
+  if (Buffer.byteLength(nextAuthorsText) > 1024 * 1024) {
+    return { ok: false, error: "custom author file exceeds 1 MiB" };
+  }
+
+  const quotesPath = join(USER_CONFIG, "quotes.tsv");
+  let existingQuotesText = "";
+  let haveQuotes: Quote[] = [];
+  try {
+    const read = readExisting(quotesPath);
+    existingQuotesText = read.missing ? "" : read.text;
+    haveQuotes = existingQuotesText ? parseQuotes(existingQuotesText) : [];
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  const seenQuotes = new Set(haveQuotes.map(quoteRow));
+  const newQuoteRows: string[] = [];
+  for (const quote of parsedQuotes) {
+    const row = quoteRow(quote);
+    if (seenQuotes.has(row)) {
+      return { ok: false, error: `that quote is already in ${quotesPath}` };
+    }
+    seenQuotes.add(row);
+    newQuoteRows.push(`${row}\n`);
+  }
+  const quoteBody = existingQuotesText === ""
+    ? QUOTE_HEADER
+    : existingQuotesText.endsWith("\n") ? existingQuotesText : `${existingQuotesText}\n`;
+  const nextQuotesText = `${quoteBody}${newQuoteRows.join("")}`;
+  if (Buffer.byteLength(nextQuotesText) > 1024 * 1024) {
+    return { ok: false, error: "custom quote file exceeds 1 MiB" };
+  }
+
+  const artPath = join(USER_ART_DIR, `${slug}.txt`);
+  let hadArtFile = false;
+  let existingArtText = "";
+  try {
+    const existingArt = readExisting(artPath);
+    hadArtFile = !existingArt.missing;
+    existingArtText = existingArt.missing ? "" : existingArt.text;
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  let artText: string;
+  try {
+    artText = await transcodePortrait(image);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  const rollbackArt = () => {
+    if (hadArtFile) atomicWrite(artPath, existingArtText);
+    else rmSync(artPath, { force: true });
+  };
+  mkdirSync(USER_ART_DIR, { recursive: true });
+  atomicWrite(artPath, artText);
+  try {
+    atomicWrite(USER_AUTHORS_FILE, nextAuthorsText);
+  } catch (error) {
+    rollbackArt();
+    throw error;
+  }
+  try {
+    atomicWrite(quotesPath, nextQuotesText);
+  } catch (error) {
+    if (hadAuthorsFile) atomicWrite(USER_AUTHORS_FILE, existingAuthorsText);
+    else rmSync(USER_AUTHORS_FILE, { force: true });
+    rollbackArt();
+    throw error;
+  }
+
+  if (!quiet) {
+    console.log(`→ added author ${author.name} (${author.slug}) with portrait and ${parsedQuotes.length} ${parsedQuotes.length === 1 ? "quote" : "quotes"}`);
+  }
+  return { ok: true, author, quotes: parsedQuotes };
 }
 
 async function promptCustomQuote(io: ConfigIo): Promise<PromptedQuote> {
@@ -1097,10 +1341,10 @@ function printSettings(settings: Settings, names: Map<string, { name: string }>,
 }
 
 async function configure(rest: string[]): Promise<number> {
-  const roster = await authors();
-  const slugs = [...roster.keys()];
+  let roster = await authors();
+  let slugs = [...roster.keys()];
   const bundled = await bundledBook();
-  const customBook = await indexedCustom();
+  let customBook = await indexedCustom();
   let catalog = [...choicesOf(bundled), ...choicesOf(customBook.quotes)];
   let current: Settings;
   try { current = await loadSettings(); }
@@ -1111,12 +1355,23 @@ async function configure(rest: string[]): Promise<number> {
   const authorsFlag = stringFlag(rest, "authors");
   const intervalFlag = stringFlag(rest, "interval");
   const quoteFlags = flagValues(rest, "quotes");
-  const addFlags = flagValues(rest, "add");
+  let addFlags = flagValues(rest, "add");
+  const addAuthorFlags = flagValues(rest, "add-author");
+  const nameFlag = flagArg(rest, "name");
+  const datesFlag = flagArg(rest, "dates");
+  const imageFlag = flagArg(rest, "image");
+  const citationFlag = flagArg(rest, "citation");
+  const textFlag = flagArg(rest, "text");
   const list = rest.includes("--list");
   // --plain asks for numbers instead of keys for the Stoics and their quotes; the
   // interval and custom-quote prompts read a line either way.
   const plain = rest.includes("--plain");
-  const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && !list;
+  const authorSubFlags = nameFlag.present || datesFlag.present || imageFlag.present || citationFlag.present || textFlag.present;
+  if (authorSubFlags && addAuthorFlags.length === 0) {
+    console.error("omastoic: --name, --dates, --image, --citation and --text require --add-author");
+    return 1;
+  }
+  const interactive = authorsFlag == null && intervalFlag == null && quoteFlags.length === 0 && addFlags.length === 0 && addAuthorFlags.length === 0 && !list;
 
   if (interactive && !process.stdin.isTTY && !plain) {
     printSettings(current, roster, catalog);
@@ -1126,6 +1381,7 @@ async function configure(rest: string[]): Promise<number> {
     console.log(`  omastoic config --quotes all`);
     console.log(`  omastoic config --add`);
     console.log(`  omastoic config --add $'marcus\\tMeditations IX.1\\tYour line.'`);
+    console.log(`  omastoic config --add-author musonius --name "Musonius Rufus" --image portrait.jpg --citation "Lectures VI" --text "Your line."`);
     console.log(`  omastoic config --list`);
     console.log(`  omastoic config --plain`);
     return 0;
@@ -1134,6 +1390,7 @@ async function configure(rest: string[]): Promise<number> {
   let next: Settings = { ...current };
   let quoteLines: string[] | null = null;
   let quoteFailure: number | null = null;
+  let authorAdded = false;
 
   if (interactive) {
     const io: ConfigIo = configIo(plain);
@@ -1171,14 +1428,6 @@ async function configure(rest: string[]): Promise<number> {
       io.source.close();
     }
   } else {
-    if (authorsFlag != null) {
-      const parsed = parseAuthorList(authorsFlag, slugs);
-      if (parsed == null) {
-        console.error(`omastoic: unknown author — try: ${slugs.join(", ")} (or all)`);
-        return 1;
-      }
-      next.authors = parsed;
-    }
     if (intervalFlag != null) {
       const parsed = parseInterval(intervalFlag);
       if (parsed == null) {
@@ -1186,6 +1435,122 @@ async function configure(rest: string[]): Promise<number> {
         return 1;
       }
       next.interval = parsed;
+    }
+
+    if (addAuthorFlags.length) {
+      if (addAuthorFlags.length > 1) {
+        console.error("omastoic: --add-author accepts one author at a time");
+        return 1;
+      }
+      const slugArg = addAuthorFlags[0]!;
+      let authorInput: NewAuthorInput | null = null;
+      const promptMode = !slugArg && !authorSubFlags && addFlags.length === 0;
+      if (promptMode) {
+        if (!process.stdin.isTTY && !plain) {
+          addAuthorUsage();
+          return 1;
+        }
+        const io = configIo(plain);
+        try {
+          const prompted = await promptNewAuthor(io);
+          if (prompted.kind === "author") authorInput = prompted.input;
+        } finally {
+          io.source.close();
+        }
+      } else {
+        if (!slugArg || !nameFlag.value || !imageFlag.value) {
+          addAuthorUsage();
+          return 1;
+        }
+        if (citationFlag.present !== textFlag.present) {
+          console.error("omastoic: --citation and --text must be given together");
+          return 1;
+        }
+        const quotesForAuthor: Array<{ citation: string; text: string }> = [];
+        if (citationFlag.present && textFlag.present) {
+          if (!citationFlag.value || !textFlag.value) {
+            console.error("omastoic: --citation and --text cannot be empty");
+            return 1;
+          }
+          quotesForAuthor.push({ citation: citationFlag.value, text: textFlag.value });
+        }
+        if (addFlags.length) {
+          if (addFlags.some((line) => !line)) {
+            addUsage();
+            return 1;
+          }
+          for (const line of addFlags) {
+            let rows: Quote[];
+            try {
+              rows = parseQuotes(line.endsWith("\n") ? line : `${line}\n`);
+            } catch (error) {
+              console.error(`omastoic: ${(error as Error).message}`);
+              return 1;
+            }
+            if (rows.length !== 1) {
+              addUsage();
+              return 1;
+            }
+            if (rows[0].author !== slugArg.trim()) {
+              console.error(`omastoic: --add quote author "${rows[0].author}" does not match --add-author "${slugArg.trim()}"`);
+              return 1;
+            }
+            quotesForAuthor.push({ citation: rows[0].citation, text: rows[0].text });
+          }
+          addFlags = [];
+        }
+        if (!quotesForAuthor.length) {
+          console.error("omastoic: adding an author requires at least one quote (--add or --citation and --text)");
+          return 1;
+        }
+        authorInput = {
+          slug: slugArg,
+          name: nameFlag.value,
+          dates: datesFlag.value ?? "",
+          image: imageFlag.value,
+          quotes: quotesForAuthor,
+        };
+      }
+
+      if (authorInput) {
+        const newSlug = flatField(authorInput.slug);
+        const candidateSlugs = slugs.includes(newSlug) ? slugs : [...slugs, newSlug];
+        if (authorsFlag != null && parseAuthorList(authorsFlag, candidateSlugs) == null) {
+          console.error(`omastoic: unknown author — try: ${candidateSlugs.join(", ")} (or all)`);
+          return 1;
+        }
+        if (quoteFlags.length) {
+          const prospective = authorInput.quotes.map((_, offset) => ({
+            id: `c${String(customBook.quotes.length + offset + 1).padStart(2, "0")}`,
+            author: newSlug,
+          }));
+          const candidateCatalog = [...catalog, ...prospective];
+          const checkedQuotes = applyQuoteFlags(next.quotes, quoteFlags, candidateSlugs, candidateCatalog, customBook.readable);
+          if (!checkedQuotes.ok) {
+            console.error(`omastoic: ${checkedQuotes.error}`);
+            return 1;
+          }
+        }
+        const created = await addNewAuthor(authorInput);
+        if (!created.ok) {
+          console.error(`omastoic: ${created.error}`);
+          return 1;
+        }
+        authorAdded = true;
+        roster = await authors();
+        slugs = [...roster.keys()];
+        customBook = await indexedCustom();
+        catalog = [...choicesOf(bundled), ...choicesOf(customBook.quotes)];
+      }
+    }
+
+    if (authorsFlag != null) {
+      const parsed = parseAuthorList(authorsFlag, slugs);
+      if (parsed == null) {
+        console.error(`omastoic: unknown author — try: ${slugs.join(", ")} (or all)`);
+        return 1;
+      }
+      next.authors = parsed;
     }
     if (quoteFlags.length) {
       const applied = applyQuoteFlags(next.quotes, quoteFlags, slugs, catalog, customBook.readable);
@@ -1231,17 +1596,17 @@ async function configure(rest: string[]): Promise<number> {
   }
   if (settingsTouched || selectionTouched) await saveSettings(next, slugs, catalog, customBook.readable);
   if (quoteFailure != null) {
-    if (settingsTouched) {
+    if (settingsTouched || authorAdded) {
       await restartDaemon();
       printSettings(await config(), roster, catalog);
     }
     return quoteFailure;
   }
-  if (!settingsTouched && !quoteLines && !list) return 0;
-  if (settingsTouched || quoteLines) await restartDaemon();
+  if (!settingsTouched && !quoteLines && !authorAdded && !list) return 0;
+  if (settingsTouched || quoteLines || authorAdded) await restartDaemon();
   const saved = await config();
   printSettings(saved, roster, catalog);
-  const custom = quoteLines && quoteFailure == null ? indexCustom(await customQuotes()) : customBook.quotes;
+  const custom = (quoteLines || authorAdded) && quoteFailure == null ? indexCustom(await customQuotes()) : customBook.quotes;
   warnIgnoredRotation(bundled, custom, saved);
   if (list) {
     if (customBook.error) console.error(`omastoic: ${customBook.error}`);
@@ -1267,10 +1632,11 @@ async function panelState(): Promise<string> {
   const header = headerPortraitLayout();
   const samples = [];
   for (const author of roster.values()) {
-    const quote = bundled
-      .filter((row) => row.author === author.slug)
+    const authored = bundled.filter((row) => row.author === author.slug);
+    const pool = authored.length ? authored : custom.quotes.filter((row) => row.author === author.slug);
+    const quote = pool
       .sort((a, b) => a.text.length - b.text.length || a.id.localeCompare(b.id))[0];
-    const art = await loadArt(join(ROOT, "art"), author.slug);
+    const art = await loadPortrait(author.slug);
     const block = art?.join("\n") ?? "";
     samples.push({
       slug: author.slug,
@@ -1311,6 +1677,7 @@ async function panelState(): Promise<string> {
       customQuotesError: custom.error ?? "",
       configPath: SETTINGS_FILE,
       quotesPath: join(USER_CONFIG, "quotes.tsv"),
+      authorsPath: USER_AUTHORS_FILE,
     },
     null,
     2,
@@ -1358,7 +1725,37 @@ function panelQuote(raw: unknown): { quote: Quote } | { error: string } {
   }
 }
 
-/** One JSON object from the panel: the fields `config` owns, plus one quote to add. */
+function panelAuthor(raw: unknown): { input: NewAuthorInput } | { error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "panel addAuthor expects an object with slug, name, image, citation and text" };
+  }
+  const row = raw as Record<string, unknown>;
+  const slug = typeof row.slug === "string" ? row.slug : "";
+  const name = typeof row.name === "string" ? row.name : "";
+  const dates = typeof row.dates === "string" ? row.dates : "";
+  const image = typeof row.image === "string" ? row.image : "";
+  const quotes: Array<{ citation: string; text: string }> = [];
+  if (Array.isArray(row.quotes)) {
+    for (const item of row.quotes) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return { error: "panel addAuthor quotes must be objects with citation and text" };
+      }
+      const entry = item as Record<string, unknown>;
+      quotes.push({
+        citation: typeof entry.citation === "string" ? entry.citation : "",
+        text: typeof entry.text === "string" ? entry.text : "",
+      });
+    }
+  } else if (typeof row.citation === "string" || typeof row.text === "string") {
+    quotes.push({
+      citation: typeof row.citation === "string" ? row.citation : "",
+      text: typeof row.text === "string" ? row.text : "",
+    });
+  }
+  return { input: { slug, name, dates, image, quotes } };
+}
+
+/** One JSON object from the panel: the fields `config` owns, plus one quote or author to add. */
 async function panelApply(raw: string): Promise<number> {
   let payload: unknown;
   try {
@@ -1372,10 +1769,10 @@ async function panelApply(raw: string): Promise<number> {
   }
 
   const value = payload as Record<string, unknown>;
-  const roster = await authors();
-  const slugs = [...roster.keys()];
+  let roster = await authors();
+  let slugs = [...roster.keys()];
   const bundled = await bundledBook();
-  const custom = await indexedCustom();
+  let custom = await indexedCustom();
   let catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   let next: Settings;
   try { next = { ...(await loadSettings()) }; }
@@ -1395,18 +1792,50 @@ async function panelApply(raw: string): Promise<number> {
     next.interval = seconds;
   }
 
+  let pendingAuthorInput: NewAuthorInput | null = null;
+  if (Object.hasOwn(value, "addAuthor")) {
+    if (Object.hasOwn(value, "addQuote") || Object.hasOwn(value, "removeQuote")) {
+      console.error("omastoic: Add one author or quote at a time.");
+      return 1;
+    }
+    const parsedAuthor = panelAuthor(value.addAuthor);
+    if ("error" in parsedAuthor) {
+      console.error(`omastoic: ${parsedAuthor.error}`);
+      return 1;
+    }
+    pendingAuthorInput = parsedAuthor.input;
+  }
+
+  const allowedSlugs = pendingAuthorInput && flatField(pendingAuthorInput.slug) && !slugs.includes(flatField(pendingAuthorInput.slug))
+    ? [...slugs, flatField(pendingAuthorInput.slug)]
+    : slugs;
+
   if (Object.hasOwn(value, "authors")) {
     if (!Array.isArray(value.authors) || !value.authors.every((slug) => typeof slug === "string")) {
-      console.error("omastoic: panel authors must be a list of Stoic slugs — an empty list means all six");
+      console.error("omastoic: panel authors must be a list of author slugs — an empty list means all");
       return 1;
     }
     const wanted = [...new Set(value.authors as string[])];
-    const unknown = wanted.find((slug) => !slugs.includes(slug));
+    const unknown = wanted.find((slug) => !allowedSlugs.includes(slug));
     if (unknown) {
       console.error("omastoic: That is not one of the Stoics. Pick a name from the list.");
       return 1;
     }
     next.authors = wanted;
+  }
+
+  let addedAuthor = false;
+  if (pendingAuthorInput) {
+    const created = await addNewAuthor(pendingAuthorInput, true);
+    if (!created.ok) {
+      console.error(`omastoic: ${created.error}`);
+      return 1;
+    }
+    addedAuthor = true;
+    roster = await authors();
+    slugs = [...roster.keys()];
+    custom = await indexedCustom();
+    catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
   }
 
   let added: Quote | null = null;
@@ -1481,7 +1910,7 @@ async function panelApply(raw: string): Promise<number> {
   const settingsChanged = JSON.stringify(savedBefore) !== JSON.stringify(after) || selectionTouched;
   if (settingsChanged) await saveSettings(next, slugs, catalog, custom.readable);
   if (pendingQuoteFile) atomicWrite(pendingQuoteFile.path, pendingQuoteFile.body);
-  if (settingsChanged || added || removedId) await restartDaemon();
+  if (settingsChanged || added || addedAuthor || removedId) await restartDaemon();
   console.log(await panelState());
   return 0;
 }
@@ -1494,7 +1923,7 @@ async function status(): Promise<number> {
   const names = await authors();
   console.log(`${quotes.length} quotes:`);
   for (const [slug, count] of [...byAuthor].sort((a, b) => b[1] - a[1])) {
-    const art = (await loadArt(join(ROOT, "art"), slug)) ? "portrait" : "no portrait";
+    const art = (await loadPortrait(slug)) ? "portrait" : "no portrait";
     console.log(`  ${(names.get(slug)?.name ?? slug).padEnd(18)} ${String(count).padStart(3)}  ${art}`);
   }
 
@@ -1533,7 +1962,7 @@ function usage(): string {
   omastoic preview     write a new canvas and start the screensaver now
                        (native: passes that file with --input)
   omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
-  omastoic config      choose Stoics, their quotes, and seconds, or add a quote
+  omastoic config      choose authors, their quotes, and seconds, or add a quote or author
                        (--plain asks for numbers instead of keys)
   omastoic ui          open the settings panel in the Omarchy shell
   omastoic status      who has the screensaver, and what is in the quote book
@@ -1555,6 +1984,7 @@ written when that start ends. The terminal screensaver still changes quote
 on the interval while it is up. The native program is not on PATH; Omarchy's
 launcher starts it.
 
+Authors:  ${USER_AUTHORS_FILE}
 Quotes:   ${join(USER_CONFIG, "quotes.tsv")}
 Settings: ${join(USER_CONFIG, "config.json")}`;
 }

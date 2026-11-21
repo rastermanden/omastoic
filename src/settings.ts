@@ -153,6 +153,9 @@ export function applyQuoteFlags(
     const unknown = parsed.ids.find((id) => !known.some((row) => row.id === id));
     if (unknown) return { ok: false, error: `unknown quote ${unknown} for ${parsed.author} — omastoic config --list` };
     const nextIds = known.filter((row) => parsed.ids.includes(row.id)).map((row) => row.id);
+    if (parsed.ids.length === 0 && known.some((row) => row.id.startsWith("c")) && !nextIds.includes("c00")) {
+      nextIds.push("c00");
+    }
     if (!dropUnknownCustom) {
       for (const id of quotes?.[parsed.author] ?? []) {
         if (id.startsWith("c") && !nextIds.includes(id)) nextIds.push(id);
@@ -223,7 +226,7 @@ export function describeSettings(settings: Settings, names: Map<string, { name: 
   const seconds = settings.interval ?? DEFAULT_INTERVAL;
   const who = settings.authors?.length
     ? settings.authors.map((slug) => names.get(slug)?.name ?? slug).join(", ")
-    : "all six";
+    : names.size > 6 ? `all ${names.size}` : "all six";
   const active = catalog.filter((row) => !settings.authors?.length || settings.authors.includes(row.author));
   const restricted = !!settings.quotes && active.some((row) => Object.hasOwn(settings.quotes ?? {}, row.author));
   if (!restricted) return `${who} · every ${seconds}s`;

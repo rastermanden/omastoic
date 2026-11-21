@@ -52,7 +52,10 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("Every ");
   expect(source).toContain("seconds");
   expect(source).toContain("Add your own quote");
+  expect(source).toContain("Add an author");
+  expect(source).toContain("addAuthor");
   expect(source).toContain("removeQuote");
+  expect(source).not.toContain("authors.tsv");
   expect(source).toContain("intervalApplied");
   expect(source).toContain("placeholderTextColor");
   expect(source).toContain("Commons.Color.accent");
