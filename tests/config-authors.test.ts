@@ -21,7 +21,7 @@ test("every config prompt runs in the terminal, so gum is not needed", async () 
       { marker: SHOWS.confirm, keys: "n" },
     ]);
     expect(configured.code).toBe(0);
-    expect(configured.stdout).toContain("Stoics on the screensaver");
+    expect(configured.stdout).toContain("Authors on the screensaver");
     expect(configured.stdout).toContain("Quotes from Marcus Aurelius");
     expect(configured.stdout).toContain("Add a custom quote? [y/N]");
     expect(configured.stdout + configured.stderr).not.toContain("gum must not run any more");
@@ -55,7 +55,7 @@ test("cancelling the author picker writes nothing", async () => {
   try {
     const cancelled = await pty(s, ["config"], [{ marker: SHOWS.authors, keys: "q" }]);
     expect(cancelled.code).toBe(0);
-    expect(cancelled.stdout).toContain("Stoics on the screensaver");
+    expect(cancelled.stdout).toContain("Authors on the screensaver");
     expect(existsSync(join(s.config, "omastoic/config.json"))).toBe(false);
   } finally { s.cleanup(); }
 });
@@ -66,7 +66,7 @@ test("config --plain reads a numbered answer from a pipeline", async () => {
     const piped = await s.exec(["/bin/bash", "-c",
       `printf '%b' ${JSON.stringify("2\\n\\n45\\nn\\n")} | '${process.execPath}' '${join(root, "src/cli.ts")}' config --plain`]);
     expect(piped.code).toBe(0);
-    expect(piped.stdout).toContain("Select Stoics");
+    expect(piped.stdout).toContain("Select authors");
     expect(piped.stdout).toContain("2 [x] Seneca");
     expect(piped.stdout).toContain("Select quotes");
     expect(piped.stdout).toContain("Seconds between quotes while the screensaver is up: ");
@@ -82,7 +82,7 @@ test("config --plain stops at end of input instead of hanging", async () => {
     const empty = await s.exec(["/bin/bash", "-c",
       `printf '%b' '' | '${process.execPath}' '${join(root, "src/cli.ts")}' config --plain`]);
     expect(empty.code).toBe(0);
-    expect(empty.stdout).toContain("Select Stoics");
+    expect(empty.stdout).toContain("Select authors");
     expect(existsSync(join(s.config, "omastoic/config.json"))).toBe(false);
   } finally { s.cleanup(); }
 }, 15000);
@@ -92,7 +92,7 @@ test("config without a tty and without --plain still prints the settings", async
   try {
     const printed = await s.cli(["config"]);
     expect(printed.code).toBe(0);
-    expect(printed.stdout).not.toContain("Select Stoics");
+    expect(printed.stdout).not.toContain("Select authors");
     expect(printed.stdout).toContain("omastoic config --authors marcus,seneca --interval 15");
     expect(existsSync(join(s.config, "omastoic/config.json"))).toBe(false);
   } finally { s.cleanup(); }

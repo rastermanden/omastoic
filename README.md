@@ -75,7 +75,7 @@ omarchy plugin update io.github.rastermanden.omastoic
 ```
 
 `~/.config/omastoic/` sits outside the plugin tree, so an update does not
-replace `config.json` or `quotes.tsv`. A live upgrade from `2c9a0e9` kept both.
+replace `config.json`, `authors.tsv`, `quotes.tsv`, or custom portraits in `art/`. A live upgrade from `2c9a0e9` kept `config.json` and `quotes.tsv`.
 
 ## Use
 
@@ -149,8 +149,31 @@ A slug is lowercase letters, digits, `_`, or `-`, at most 64 characters.
 Citations stop at 256 characters, quote text at 4096, and the file at 1 MiB.
 Terminal control escapes are rejected. Custom lines are `c01`, `c02`, … in
 file order. A bundled-only id list still keeps them until you uncheck them
-(`c00` clears every custom line for that Stoic). An unknown author has no
-portrait. The file is never inside the plugin checkout.
+(`c00` clears every custom line for that Stoic). An author with no entry in
+`authors.tsv` has no portrait. The file is never inside the plugin checkout.
+
+### Your own authors
+
+Add an author with a JPEG or PNG portrait and at least one quote from
+`omastoic config --add-author` or the **Add an author** form in `omastoic ui`:
+
+```bash
+omastoic config --add-author musonius \
+  --name "Musonius Rufus" \
+  --dates "c. AD 30 – 100" \
+  --image portrait.jpg \
+  --citation "Lectures VI" \
+  --text "We will train both soul and body."
+```
+
+`--dates` is optional, and `--add $'musonius\tCitation\tQuote'` works in place
+of `--citation` and `--text`. Converting the portrait image requires
+`omarchy-transcode-ascii` (included on Omarchy) or ImageMagick (`magick` or
+`convert`). Omastoic turns the image into a 34×20 braille portrait and writes
+`~/.config/omastoic/authors.tsv`, `~/.config/omastoic/art/<slug>.txt`, and
+`~/.config/omastoic/quotes.tsv`. Nothing is written inside the plugin checkout.
+Slugs that belong to bundled authors are rejected, and a missing or unusable
+image fails without writing a partial author.
 
 ### On screen
 
@@ -186,7 +209,7 @@ screensaver file after that, we leave the new file in place and keep
 `screensaver.txt.pre-omastoic`. `omastoic uninstall` also asks Omarchy to remove the
 plugin. Removing it from Omarchy runs the same cleanup.
 
-Kept on purpose: `~/.config/omastoic/` (`config.json` and `quotes.tsv`).
+Kept on purpose: `~/.config/omastoic/` (`config.json`, `authors.tsv`, `quotes.tsv`, and `art/`).
 `omastoic uninstall --purge` deletes that directory too.
 
 Also removed: the other files under `~/.local/state/omastoic/` (`cell.json`,

@@ -8,6 +8,9 @@ export type Quote = { author: string; citation: string; text: string };
 export type Author = { slug: string; name: string; dates: string };
 
 export const ART_GAP = 4;
+export const AUTHOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const MAX_AUTHOR_FIELD = 128;
+const MAX_ART_BYTES = 64 * 1024;
 
 /** Bundled ids are `q01`, `q02`, … Custom ids are `c01`, `c02`, … `c00` means custom quotes were explicitly cleared. */
 export function canonicalQuoteId(raw: string): string | null {
@@ -44,11 +47,22 @@ export function parseQuotes(tsv: string): Quote[] {
 }
 
 export function parseAuthors(tsv: string): Map<string, Author> {
+  if (Buffer.byteLength(tsv) > 1024 * 1024) throw new Error("author file exceeds 1 MiB");
+  tsv = tsv.replace(/\r\n/g, "\n");
+  if (/[\x00-\x08\x0b-\x1f\x7f-\x9f]/u.test(tsv)) throw new Error("author file contains terminal control characters");
   const authors = new Map<string, Author>();
   for (const line of tsv.split("\n")) {
     if (!line.trim() || line.startsWith("#")) continue;
-    const [slug, name, dates] = line.split("\t");
-    if (slug && name) authors.set(slug.trim(), { slug: slug.trim(), name: name.trim(), dates: (dates ?? "").trim() });
+    const fields = line.split("\t");
+    if (fields.length < 2 || fields.length > 3) throw new Error("invalid author row");
+    const slug = fields[0]!.trim();
+    const name = fields[1]!.trim();
+    const dates = (fields[2] ?? "").trim();
+    if (!AUTHOR_SLUG.test(slug) || slug === "all") throw new Error("invalid author slug");
+    if (!name || name.length > MAX_AUTHOR_FIELD || dates.length > MAX_AUTHOR_FIELD) {
+      throw new Error("author name or dates is empty or too long");
+    }
+    authors.set(slug, { slug, name, dates });
   }
   return authors;
 }
@@ -114,7 +128,7 @@ export type Layout = { cols: number; rows: number; art: string[] | null };
 export function compose(quote: Quote, author: Author | undefined, layout: Layout): string {
   const { cols, rows, art } = layout;
   if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) throw new Error("invalid canvas grid");
-  if (/[\x00-\x1f\x7f-\x9f]/u.test(quote.text + quote.citation + quote.author + (author?.name ?? "") + (author?.dates ?? ""))) throw new Error("canvas contains terminal control characters");
+  if (/[\x00-\x1f\x7f-\x9f]/u.test(quote.text + quote.citation + quote.author + (author?.name ?? "") + (author?.dates ?? "") + (art ? art.join("") : ""))) throw new Error("canvas contains terminal control characters");
   const fits = (lines: string[]) => lines.length <= rows && lines.every((l) => cellWidth(l) <= cols);
   const finish = (lines: string[]) => lines.map((l) => l.trimEnd()).join("\n");
   const name = (author?.name ?? quote.author).toUpperCase();
@@ -122,31 +136,37 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
 
   if (art && art.length) {
     const artWidth = Math.max(...art.map(cellWidth));
-    const textWidth = Math.min(52, Math.max(30, cols - artWidth - ART_GAP - 2));
-    const body = wrap(`“${quote.text}”`, textWidth);
-    const text = [...body, "", right(quote.citation, textWidth)];
+    const margin = cols >= 72 ? 6 : 4;
+    const textWidth = Math.min(52, cols - artWidth - ART_GAP - margin);
+    if (textWidth >= 28) {
+      const body = wrap(`“${quote.text}”`, textWidth);
+      const citation = wrap(quote.citation, textWidth).map((l) => right(l, textWidth));
+      const text = [...body, "", ...citation];
 
-    const label = ["", centre(name, artWidth), ...(dates ? [centre(dates, artWidth)] : [])];
-    const left = [...art.map((l) => pad(l, artWidth)), ...label];
+      const nameLines = wrap(name, artWidth).map((l) => centre(l, artWidth));
+      const dateLines = dates ? wrap(dates, artWidth).map((l) => centre(l, artWidth)) : [];
+      const label = ["", ...nameLines, ...dateLines];
+      const left = [...art.map((l) => pad(l, artWidth)), ...label];
 
-    // Sit the quote against the portrait's optical centre, a little above the
-    // label so the two blocks read as one plate.
-    const offset = Math.max(0, Math.floor((art.length - text.length) / 2));
-    const height = Math.max(left.length, offset + text.length);
-    const gap = " ".repeat(ART_GAP);
+      // Sit the quote against the portrait's optical centre, a little above the
+      // label so the two blocks read as one plate.
+      const offset = Math.max(0, Math.floor((art.length - text.length) / 2));
+      const height = Math.max(left.length, offset + text.length);
+      const gap = " ".repeat(ART_GAP);
 
-    const out: string[] = [];
-    for (let i = 0; i < height; i++) {
-      const l = pad(left[i] ?? "", artWidth);
-      const r = i >= offset ? (text[i - offset] ?? "") : "";
-      out.push((l + gap + r).replace(/\s+$/, ""));
+      const out: string[] = [];
+      for (let i = 0; i < height; i++) {
+        const l = pad(left[i] ?? "", artWidth);
+        const r = i >= offset ? (text[i - offset] ?? "") : "";
+        out.push((l + gap + r).replace(/\s+$/, ""));
+      }
+      if (fits(out)) return finish(out);
     }
-    if (fits(out)) return finish(out);
   }
 
-  // Lose decoration before content. Try the quiet measure, then the full width,
-  // then remove dates/blank lines. Never truncate a quote or its citation.
-  for (const width of [...new Set([Math.min(64, Math.max(1, cols - 8)), cols])]) {
+  // Lose decoration before content. Try the quiet measure, then a smaller margin,
+  // then the full width, then remove dates/blank lines. Never truncate a quote or its citation.
+  for (const width of [...new Set([Math.min(64, Math.max(1, cols - 8)), Math.max(1, cols - 4), cols])]) {
     const body = wrap(`“${quote.text}”`, width);
     const citation = wrap(quote.citation, width).map((l) => right(l, width));
     for (const compact of [false, true]) {
@@ -164,8 +184,12 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
 
 /** Read the art for an author, or null when there is no portrait for them. */
 export async function loadArt(artDir: string, slug: string): Promise<string[] | null> {
+  if (!AUTHOR_SLUG.test(slug)) return null;
   const file = Bun.file(join(artDir, `${slug}.txt`));
   if (!(await file.exists())) return null;
-  const lines = (await file.text()).replace(/\n+$/, "").split("\n");
-  return lines.length ? lines : null;
+  if (file.size > MAX_ART_BYTES) throw new Error("portrait art file exceeds 64 KiB");
+  const text = (await file.text()).replace(/\r\n/g, "\n");
+  if (/[\x00-\x09\x0b-\x1f\x7f-\x9f]/u.test(text)) throw new Error("portrait art contains terminal control characters");
+  const lines = text.replace(/\n+$/, "").split("\n");
+  return lines.length && lines.some((line) => line.length > 0) ? lines : null;
 }

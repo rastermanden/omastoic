@@ -29,10 +29,14 @@ _omastoic() {
       COMPREPLY=("${hits[@]/#/${prefix}}")
       return 0
     fi
-    if [[ $prev == --interval || $prev == --quotes || $prev == --add ]]; then
+    if [[ $prev == --image ]]; then
+      mapfile -t COMPREPLY < <(compgen -f -- "$cur")
       return 0
     fi
-    mapfile -t COMPREPLY < <(compgen -W "--authors --interval --quotes --add --list --plain" -- "$cur")
+    if [[ $prev == --interval || $prev == --quotes || $prev == --add || $prev == --add-author || $prev == --name || $prev == --dates || $prev == --citation || $prev == --text ]]; then
+      return 0
+    fi
+    mapfile -t COMPREPLY < <(compgen -W "--authors --interval --quotes --add --add-author --name --dates --image --citation --text --list --plain" -- "$cur")
     ;;
   uninstall)
     mapfile -t COMPREPLY < <(compgen -W "--purge" -- "$cur")

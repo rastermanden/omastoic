@@ -92,12 +92,25 @@ test("the full canvas fits the grid it was asked for", () => {
   expect(block).toContain("Meditations VIII.47");
 });
 
-test("every portrait and quote pair fits the smallest grid the layout claims", () => {
+test("every portrait and quote pair fits the smallest grid the layout claims with horizontal margin", () => {
   for (const q of quotes) {
     const block = compose(q, authors.get(q.author), { cols: 92, rows: 25, art: art(q.author) });
-    expect(width(block)).toBeLessThanOrEqual(92);
+    expect(width(block)).toBeLessThanOrEqual(86);
     expect(height(block)).toBeLessThanOrEqual(25);
   }
+});
+
+test("a citation longer than 52 characters wraps instead of dropping the portrait", () => {
+  const longCitation = "A Conflict of Visions: Ideological Origins of Political Struggles, Chapter 2 (Revised Edition)";
+  const block = compose(
+    { author: "marcus", citation: longCitation, text: "There are no solutions, only trade-offs." },
+    authors.get("marcus"),
+    { cols: 92, rows: 25, art: art("marcus") },
+  );
+  expect(block).toMatch(/[\u2801-\u28ff]/);
+  expect(width(block)).toBeLessThanOrEqual(86);
+  expect(height(block)).toBeLessThanOrEqual(25);
+  expect(block.replace(/[\u2800-\u28ff\s]/gu, "")).toContain(longCitation.replace(/\s/g, ""));
 });
 
 test("a grid too small for the portrait falls back to the quote alone", () => {

@@ -15,7 +15,7 @@ test("a key typed after the author picker reaches the quote picker", async () =>
       { marker: SHOWS.confirm, keys: "n" },
     ]);
     expect(run.code).toBe(0);
-    expect(run.stdout).toContain("Stoics on the screensaver");
+    expect(run.stdout).toContain("Authors on the screensaver");
     expect(run.stdout).toContain("Quotes from Marcus Aurelius");
     const saved = JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"));
     expect(saved.authors).toEqual(["marcus"]);

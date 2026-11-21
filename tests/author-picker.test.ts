@@ -197,7 +197,7 @@ test("a resize redraws the frame and leaves no listeners behind", async () => {
   h.resize();
   h.send("\r");
   expect(await picked).toEqual(all);
-  expect(h.text().split("Stoics on the screensaver").length - 1).toBeGreaterThanOrEqual(2);
+  expect(h.text().split("Authors on the screensaver").length - 1).toBeGreaterThanOrEqual(2);
   expect(h.events.listenerCount("resize")).toBe(0);
   expect(h.modes).toEqual([true, false]);
 });
@@ -228,7 +228,7 @@ test("the plain prompt keeps the current selection on an empty line", async () =
   const shown = h.text();
   expect(shown).toContain("1 [ ] Marcus Aurelius");
   expect(shown).toContain("2 [x] Seneca");
-  expect(shown).toContain("Select Stoics");
+  expect(shown).toContain("Select authors");
   expect(h.modes).toEqual([]);
 });
 
@@ -308,7 +308,7 @@ test("redirected stdout falls back to the plain prompt", async () => {
   expect(await picked).toEqual(["marcus"]);
   expect(h.modes).toEqual([]);
   expect(h.text()).not.toContain("\x1b[?25l");
-  expect(h.text()).toContain("Select Stoics");
+  expect(h.text()).toContain("Select authors");
 });
 
 test("an already raw terminal is left as it was found", async () => {
@@ -335,7 +335,7 @@ test("a narrow terminal truncates every frame line and a resize re-fits them", a
   const wide = lines(frames[2]!);
   expect(wide.some((line) => line.length > 19)).toBe(true);
   expect(wide.every((line) => line.length <= 59)).toBe(true);
-  expect(wide[0]).toContain("Stoics on the screensaver");
+  expect(wide[0]).toContain("Authors on the screensaver");
 });
 
 test("a raw tty is required for the picker and plain mode is used otherwise", async () => {
