@@ -284,12 +284,17 @@ export function pgmToBraille(pgm: string): string {
   }
 
   const sorted = [...values].sort((a, b) => a - b);
-  const p2 = sorted[Math.floor(sorted.length * 0.02)]!;
-  const p98 = sorted[Math.floor(sorted.length * 0.98)]!;
-  const span = p98 - p2;
-  if (span < 8) return "";
+  let lo = sorted[Math.floor(sorted.length * 0.02)]!;
+  let hi = sorted[Math.floor(sorted.length * 0.98)]!;
+  let span = hi - lo;
+  if (span < 8) {
+    lo = sorted[0]!;
+    hi = sorted[sorted.length - 1]!;
+    span = hi - lo;
+    if (span < 16) return "";
+  }
 
-  const stretched = values.map((v) => Math.max(0, Math.min(255, Math.round(((v - p2) / span) * 255))));
+  const stretched = values.map((v) => Math.max(0, Math.min(255, Math.round(((v - lo) / span) * 255))));
 
   // Sample top, left, and right borders (bottom often holds shoulders/torso).
   const border: number[] = [];
@@ -372,8 +377,9 @@ function expandHome(path: string): string {
   return path;
 }
 
-function firstLine(text: string): string {
-  return text.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
+function primaryErrorLine(text: string): string {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines.find((line) => !/@\s*warning\//i.test(line)) ?? lines[0] ?? "";
 }
 
 const DECODE_WARNING =
@@ -391,12 +397,33 @@ export function hasDecodeWarning(stderr: string): boolean {
   return decodeWarningLines(stderr).length > 0;
 }
 
-function cleanTranscodeError(
+const NON_DECODE_ERROR_RE =
+  /memory allocation failed|cache resources exhausted|not allowed by the security policy|resource limit|no decode delegate/i;
+
+const DECODE_ERROR_RE =
+  /@\s*(?:error|fatal)\/(?:jpeg|png)\.c\/|JPEGErrorHandler|MagickPNGErrorHandler|Read(?:One)?(?:JPEG|PNG)Image|CorruptImageError|insufficient image data|corrupt (?:image|jpeg|png)|improper image header|negative or zero image size|not a (?:jpeg|png) file|premature end of|unexpected end[- ]of[- ]file|invalid (?:jpeg|png)|libpng error|Unable to read logo image/i;
+
+function sanitizeTranscodeLine(line: string, original: string): string {
+  return line
+    .replace(/[\x00-\x1f\x7f-\x9f]/gu, " ")
+    .replace(/\s*@\s*(?:error|fatal|warning)\/\S+\.?$/i, "")
+    .replace(/^(?:[^\s:]*\/)?(?:(?:magick|convert)(?:-[^\s:]+)?|omarchy-transcode-ascii):\s*/i, "")
+    .replace(/`[^']*omastoic-portrait-[^']*'/g, () => `"${original}"`)
+    .replace(/'[^']*omastoic-portrait-[^']*'/g, () => `"${original}"`)
+    .replace(/"[^"]*omastoic-portrait-[^"]*"/g, () => `"${original}"`)
+    .replace(/[^\s`'"()]*omastoic-portrait-[^\s`'"()]*/g, () => original)
+    .replace(/`([^']*)'/g, '"$1"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Turn converter stderr into a user-facing error without leaking temp paths or internals. */
+export function cleanTranscodeError(
   stderr: string,
   original: string,
   missingMagick = false,
 ): string {
-  const line = firstLine(stderr);
+  const line = primaryErrorLine(stderr);
   if (missingMagick && (!line || /Unable to read logo image|command not found|not found/i.test(line))) {
     return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
   }
@@ -406,14 +433,23 @@ function cleanTranscodeError(
   if (/command not found|No such file or directory.*\b(?:magick|convert)\b/i.test(line)) {
     return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
   }
-  if (
-    decodeWarningLines(stderr).some((entry) =>
-      /Premature end|unexpected end[- ]of[- ]file|incomplete image|Corrupt (?:JPEG|PNG|image)/i.test(entry),
-    )
-  ) {
-    return `could not convert portrait image: "${original}" looks damaged or truncated`;
+  if (!NON_DECODE_ERROR_RE.test(line)) {
+    if (
+      decodeWarningLines(stderr).some((entry) =>
+        /Premature end|unexpected end[- ]of[- ]file|incomplete image|Corrupt (?:JPEG|PNG|image)/i.test(entry),
+      )
+    ) {
+      return `could not convert portrait image: "${original}" looks damaged or truncated`;
+    }
+    if (DECODE_ERROR_RE.test(line)) {
+      return `could not convert portrait image: "${original}" is not a readable JPEG or PNG image`;
+    }
   }
-  return `could not convert portrait image: "${original}" is not a readable JPEG or PNG image`;
+  const reason = sanitizeTranscodeLine(line, original);
+  if (!reason) {
+    return "could not convert portrait image: image converter failed";
+  }
+  return `could not convert portrait image: ${reason}`;
 }
 
 function transcodeTimeoutMs(override?: number): number {
@@ -466,10 +502,10 @@ async function runWithTimeout(
 
 /**
  * Convert a user-supplied JPEG or PNG into a 34x20 braille portrait.
- * Light-paper drawings use Omarchy's `omarchy-transcode-ascii` (or ImageMagick
- * threshold fallback). Darker-background photographs use the halftone vignette
- * pipeline from `scripts/transcode.ts` so backgrounds do not turn into solid
- * braille blocks.
+ * When ImageMagick (`magick` or `convert`) is installed, it converts the image
+ * to grayscale ASCII PGM and encodes it with `pgmToBraille` (auto-contrast,
+ * Otsu thresholding, and border-aware background suppression). When ImageMagick
+ * is absent, it falls back to `omarchy-transcode-ascii`.
  */
 export async function transcodePortrait(
   imagePath: string,
