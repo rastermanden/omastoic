@@ -145,6 +145,7 @@ Item {
   }
 
   function dismiss() {
+    confirmRemoveAuthor = ""
     if (shell && typeof shell.hide === "function") shell.hide(root.pluginId)
     else close()
   }
@@ -504,7 +505,9 @@ Item {
     property string label: ""
     property bool picked: false
     property bool available: true
+    property bool keepsRemoveConfirm: false
     signal activated()
+    signal focusLost()
     implicitWidth: labelText.implicitWidth + Style.space(28)
     implicitHeight: labelText.implicitHeight + Style.space(16)
     opacity: available ? 1 : 0.45
@@ -524,8 +527,14 @@ Item {
       focusable: true
       bordered: true
       foreground: root.ink
-      onClicked: host.activated()
-      onActiveFocusChanged: if (activeFocus) root.reveal(host)
+      onClicked: {
+        if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""
+        host.activated()
+      }
+      onActiveFocusChanged: {
+        if (activeFocus) root.reveal(host)
+        else host.focusLost()
+      }
     }
     Rectangle {
       anchors.fill: inner
@@ -556,6 +565,7 @@ Item {
       z: 4
       enabled: !host.available
       hoverEnabled: true
+      onClicked: if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""
     }
   }
 
@@ -661,6 +671,13 @@ Item {
           contentHeight: content.implicitHeight
           clip: true
           flickableDirection: Flickable.VerticalFlick
+
+          MouseArea {
+            id: contentBackdrop
+            width: scroller.width
+            height: Math.max(scroller.height, content.implicitHeight)
+            onClicked: root.confirmRemoveAuthor = ""
+          }
 
           Column {
             id: content
@@ -859,7 +876,9 @@ Item {
                       label: root.confirmRemoveAuthor === modelData.slug ? "Remove?" : "Remove"
                       picked: root.confirmRemoveAuthor === modelData.slug
                       available: !root.busy
+                      keepsRemoveConfirm: true
                       onActivated: root.requestRemoveAuthor(modelData.slug)
+                      onFocusLost: if (root.confirmRemoveAuthor === modelData.slug) root.confirmRemoveAuthor = ""
                     }
                   }
                 }

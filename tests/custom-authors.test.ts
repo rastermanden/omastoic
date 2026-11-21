@@ -1200,3 +1200,118 @@ test("remove rollback on read-only art/ and replace rollback when config.json sa
     s.cleanup();
   }
 }, 30000);
+
+test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and panel apply without overwriting existing portrait", async () => {
+  const s = sandbox();
+  const pngA = join(s.home, "a.png");
+  const truncatedJpeg = join(s.home, "truncated.jpg");
+  const jpgBytes = readFileSync(sampleJpeg);
+  writePortraitPng(pngA);
+  writeFileSync(truncatedJpeg, jpgBytes.subarray(0, Math.floor(jpgBytes.length / 2)));
+
+  try {
+    // 1. --add-author with truncated JPEG fails cleanly and writes nothing.
+    const failedAdd = await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", truncatedJpeg,
+      "--citation", "Lectures VI",
+      "--text", "Train both soul and body.",
+    ]);
+    expect(failedAdd.code).toBe(1);
+    expect(failedAdd.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
+    expect(failedAdd.stderr).not.toContain("omastoic-portrait-");
+    expect(failedAdd.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedAdd.stderr).not.toContain("@ warning/");
+    expect(existsSync(join(s.config, "omastoic/authors.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
+
+    // Seed a valid custom author portrait, row, and quote.
+    expectOk(await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", pngA,
+      "--citation", "Lectures VI",
+      "--text", "Original intact line.",
+    ]), "seed musonius");
+
+    const artPath = join(s.config, "omastoic/art/musonius.txt");
+    const authorsPath = join(s.config, "omastoic/authors.tsv");
+    const quotesPath = join(s.config, "omastoic/quotes.tsv");
+    const artBefore = readFileSync(artPath, "utf8");
+    const authorsBefore = readFileSync(authorsPath, "utf8");
+    const quotesBefore = readFileSync(quotesPath, "utf8");
+
+    // 2. --replace-author with truncated JPEG fails, rolls back, and keeps art/row/quotes intact.
+    const failedReplace = await s.cli([
+      "config",
+      "--replace-author", "musonius",
+      "--name", "Should Not Land",
+      "--image", truncatedJpeg,
+      "--citation", "Broken",
+      "--text", "Must not overwrite.",
+    ]);
+    expect(failedReplace.code).toBe(1);
+    expect(failedReplace.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
+    expect(failedReplace.stderr).not.toContain("omastoic-portrait-");
+    expect(failedReplace.stderr).not.toContain("JPEGWarningHandler");
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+
+    // 3. panel apply replaceAuthor with truncated JPEG fails and keeps previous portrait/metadata intact.
+    const failedPanelReplace = await s.cli(["panel", "apply", JSON.stringify({
+      replaceAuthor: {
+        slug: "musonius",
+        name: "Panel Should Not Land",
+        image: truncatedJpeg,
+      },
+    })]);
+    expect(failedPanelReplace.code).toBe(1);
+    expect(failedPanelReplace.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
+    expect(failedPanelReplace.stderr).not.toContain("omastoic-portrait-");
+    expect(failedPanelReplace.stderr).not.toContain("JPEGWarningHandler");
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+
+    // 4. omarchy-transcode-ascii emitting a JPEG warning while exiting 0 is also rejected.
+    const isolatedBin = join(s.home, "isolated-bin");
+    mkdirSync(isolatedBin, { recursive: true });
+    for (const [name, target] of [
+      ["flock", Bun.which("flock")],
+      ["sh", Bun.which("sh")],
+      ["bash", Bun.which("bash")],
+    ] as const) {
+      if (target) {
+        s.put(join(isolatedBin, name), `#!/bin/sh\nexec "${target}" "$@"\n`);
+        chmodSync(join(isolatedBin, name), 0o755);
+      }
+    }
+    s.put(
+      join(isolatedBin, "omarchy-transcode-ascii"),
+      "#!/bin/sh\nprintf '⣿\\n' > \"$2\"\necho \"magick: Premature end of JPEG file '$1' @ warning/jpeg.c/JPEGWarningHandler/670.\" >&2\nexit 0\n",
+    );
+    chmodSync(join(isolatedBin, "omarchy-transcode-ascii"), 0o755);
+
+    const failedOmarchy = await s.cli(
+      [
+        "config",
+        "--add-author", "posidonius",
+        "--name", "Posidonius",
+        "--image", truncatedJpeg,
+        "--citation", "Fragment 1",
+        "--text", "Reason guides.",
+      ],
+      { PATH: isolatedBin },
+    );
+    expect(failedOmarchy.code).toBe(1);
+    expect(failedOmarchy.stderr.toLowerCase()).toContain("not a readable jpeg or png image");
+    expect(existsSync(join(s.config, "omastoic/art/posidonius.txt"))).toBe(false);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+  } finally { s.cleanup(); }
+}, 30000);

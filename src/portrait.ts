@@ -383,6 +383,13 @@ function firstLine(text: string): string {
   return text.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
 }
 
+const DECODE_WARNING =
+  /Premature end|Corrupt (?:JPEG|PNG|image)|unexpected end[- ]of[- ]file|insufficient image data|Not a JPEG file|Invalid JPEG|incomplete image|Improper image header/i;
+
+function hasDecodeWarning(stderr: string): boolean {
+  return DECODE_WARNING.test(stderr);
+}
+
 function cleanTranscodeError(
   stderr: string,
   original: string,
@@ -514,7 +521,7 @@ export async function transcodePortrait(
         true,
         timeoutMs,
       );
-      if (result.code !== 0) {
+      if (result.code !== 0 || hasDecodeWarning(result.stderr) || !result.stdout.trim()) {
         throw new Error(cleanTranscodeError(result.stderr, trimmed));
       }
       return validatePortraitArt(pgmToBraille(result.stdout));
@@ -533,7 +540,7 @@ export async function transcodePortrait(
       false,
       timeoutMs,
     );
-    if (result.code !== 0) {
+    if (result.code !== 0 || hasDecodeWarning(result.stderr)) {
       throw new Error(cleanTranscodeError(result.stderr, trimmed, !magickBin));
     }
     let art: string;
