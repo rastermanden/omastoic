@@ -76,6 +76,11 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).not.toContain('text: "Reload"');
   expect(source).not.toContain("Search");
   expect(source).not.toContain("Author slug");
+  expect(source).not.toContain("Short id");
+  expect(source).not.toContain("Replace author");
+  expect(source).toContain('"Save changes"');
+  expect(source).toContain('"Edit "');
+  expect(source).toContain("component QuoteArea");
   expect(source).toContain("anchors.top: parent.top");
   expect(source).toContain("restoreCommitted");
   expect(source).toContain("previewTimer");
@@ -658,13 +663,13 @@ Item {
       compare(panel.opened, true)
       compare(panel.confirmRemoveAuthor, "")
 
+      var cancelAddBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelAddBtn !== null)
+      panel.reveal(cancelAddBtn)
+      wait(20)
+      mouseClick(cancelAddBtn)
       scroller.contentY = 0
-      waitForRendering(panel)
-      var closeAuthorBtn = findOne(panel, function(item) { return item.label === "Close" && item.visible })
-      verify(closeAuthorBtn !== null)
-      mouseClick(closeAuthorBtn)
-      scroller.contentY = 0
-      waitForRendering(panel)
+      wait(20)
 
       // 4. Clicking Edit cancels Remove?.
       mouseClick(musoniusRemove)
@@ -762,11 +767,13 @@ Item {
       verify(errTop >= scroller.contentY - 1)
       verify(errTop + authorErr.height <= scroller.contentY + scroller.height + 1)
 
-      // Close the form: no error remains; opening Edit on another author shows no error.
-      var closeBtn = findOne(panel, function(item) { return item.label === "Close" && item.visible })
-      verify(closeBtn !== null)
-      mouseClick(closeBtn)
-      waitForRendering(panel)
+      // Cancel the form: no error remains; opening Edit on another author shows no error.
+      var cancelAddBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelAddBtn !== null)
+      panel.reveal(cancelAddBtn)
+      wait(20)
+      mouseClick(cancelAddBtn)
+      wait(20)
       compare(panel.error, "")
       compare(panel.errorScope, "")
       compare(authorErr.visible, false)
@@ -895,6 +902,120 @@ Item {
       compare(scroller.contentY, 0)
       compare(musoniusRow.mapToItem(scroller, 0, 0).y, rowYBeforeEdit)
     }
+
+    function test_author_forms_wording_advanced_slug_plain_count_and_multiline_quote() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [
+          { id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Desk note", text: "One line." },
+          { id: "c02", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Two lines." },
+        ],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      // 1. Custom count reads as plain secondary text (not a bordered RingButton).
+      var countLabel = findOne(panel, function(item) {
+        return item.text === "▸ 2 custom quotes" && item.visible
+      })
+      verify(countLabel !== null)
+      compare(countLabel.parent.border.width, 0)
+      compare(findOne(panel, function(item) { return item.label === "2 of your own" }), null)
+
+      // 2. Edit form uses Edit <name> + Save changes + Cancel.
+      var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editBtn !== null)
+      mouseClick(editBtn)
+      wait(20)
+      verify(findOne(panel, function(item) { return item.text === "Edit Musonius Rufus" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "Save changes" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "Cancel" && item.visible }) !== null)
+      compare(findOne(panel, function(item) { return item.label === "Replace author" }), null)
+      compare(findOne(panel, function(item) { return item.label === "Close" && item.visible }), null)
+
+      var cancelEdit = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      panel.reveal(cancelEdit)
+      wait(20)
+      mouseClick(cancelEdit)
+      wait(20)
+      compare(panel.authorOpen, false)
+
+      // 3. Add an author keeps its own label, hides slug under Advanced, derives slug from Name, and shows Cancel.
+      var addAuthorTrigger = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorTrigger !== null)
+      mouseClick(addAuthorTrigger)
+      wait(20)
+      compare(addAuthorTrigger.label, "Add an author")
+      compare(findOne(panel, function(item) { return item.label === "Close" && item.visible }), null)
+      verify(findOne(panel, function(item) { return item.label === "Add author" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "Cancel" && item.visible }) !== null)
+
+      // Author id field is hidden until Advanced is opened.
+      var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" })
+      verify(slugField !== null)
+      compare(slugField.visible, false)
+
+      // Fill Name, Image, Citation, and a 300-character Quote without opening Advanced.
+      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var citationField = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var quoteArea = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
+      verify(nameField !== null && imageField !== null && citationField !== null && quoteArea !== null)
+
+      nameField.text = "John Locke"
+      compare(panel.newAuthorSlug, "john-locke")
+      imageField.text = "/tmp/locke.png"
+      citationField.text = "An Essay Concerning Human Understanding"
+      var quote300 = "Reading furnishes the mind only with materials of knowledge; it is thinking makes what we read ours. We are of the ruminating kind, and it is not enough to cram ourselves with a great load of collections; unless we chew them over again, they will not give us strength and nourishment for our daily work."
+      verify(quote300.length >= 300)
+      quoteArea.text = quote300
+      wait(20)
+
+      // 300-character quote fits completely inside the multiline QuoteArea without clipping.
+      verify(quoteArea.contentHeight <= quoteArea.viewportHeight + 1)
+      compare(panel.authorReady, true)
+
+      // Tab moves focus out of QuoteArea without inserting a tab character.
+      quoteArea.takeFocus()
+      wait(10)
+      compare(quoteArea.editFocused, true)
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(quoteArea.editFocused, false)
+      compare(quoteArea.text.indexOf("\t"), -1)
+
+      // Ctrl+Return submits the form with the derived slug without opening Advanced.
+      quoteArea.takeFocus()
+      wait(10)
+      keyClick(Qt.Key_Return, Qt.ControlModifier)
+      wait(10)
+      compare(panel.saving, true)
+      compare(panel.addingAuthor, true)
+      panel.saving = false
+      panel.addingAuthor = false
+      panel.notice = ""
+
+      // Opening Advanced reveals the editable Author id field with the derived slug.
+      var advToggle = findOne(panel, function(item) { return item.text === "▸ Advanced" && item.visible })
+      verify(advToggle !== null)
+      panel.reveal(advToggle)
+      wait(20)
+      mouseClick(advToggle)
+      wait(20)
+      compare(panel.authorAdvancedOpen, true)
+      compare(slugField.visible, true)
+      compare(slugField.text, "john-locke")
+    }
   }
 }
 `,
@@ -910,7 +1031,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("5 passed, 0 failed");
+    expect(combined, combined).toContain("6 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

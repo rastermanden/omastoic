@@ -69,6 +69,7 @@ Item {
   property string newAuthorName: ""
   property string newAuthorSlug: ""
   property bool authorSlugEdited: false
+  property bool authorAdvancedOpen: false
   property string newAuthorDates: ""
   property string newAuthorImage: ""
   property string newAuthorCitation: ""
@@ -115,6 +116,7 @@ Item {
     resizing = false
     quoteOpen = false
     authorOpen = false
+    authorAdvancedOpen = false
     listOpen = false
     hasFormReturnY = false
     formReturnContentY = 0
@@ -300,6 +302,7 @@ Item {
     }
     if (addingAuthor || replacingAuthor) {
       authorOpen = false
+      authorAdvancedOpen = false
       authorSlugEdited = false
       editingAuthorSlug = ""
       editingAuthorOrigName = ""
@@ -468,6 +471,7 @@ Item {
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     authorSlugEdited = false
+    authorAdvancedOpen = false
     authorNameField.text = ""
     authorSlugField.text = ""
     authorDatesField.text = ""
@@ -493,6 +497,7 @@ Item {
     editingAuthorOrigName = author.name
     editingAuthorOrigDates = author.dates
     authorSlugEdited = true
+    authorAdvancedOpen = false
     authorNameField.text = author.name
     authorSlugField.text = author.slug
     authorDatesField.text = author.dates
@@ -505,6 +510,7 @@ Item {
 
   function closeAuthorForm() {
     authorOpen = false
+    authorAdvancedOpen = false
     error = ""
     errorScope = ""
     editingAuthorSlug = ""
@@ -570,7 +576,9 @@ Item {
     }
     if (!authorReady) {
       notice = ""
-      error = "An author needs a name, id, image, citation and quote."
+      error = newAuthorName.trim() !== "" && newAuthorSlug.trim() === ""
+        ? "Use letters or numbers in the name, or set an Author id under Advanced."
+        : "An author needs a name, portrait image, citation, and quote."
       errorScope = "author"
       Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
       return
@@ -691,6 +699,121 @@ Item {
       enabled: !host.available
       hoverEnabled: true
       onClicked: if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""
+    }
+  }
+
+  component QuoteArea: Item {
+    id: area
+    property alias text: edit.text
+    property string placeholderText: ""
+    readonly property bool editFocused: edit.activeFocus
+    readonly property real contentHeight: edit.contentHeight
+    readonly property real viewportHeight: areaScroll.height
+    signal submitted()
+
+    readonly property real lineStep: Math.ceil(Style.font.body * 1.35)
+    readonly property real padY: Style.space(8)
+    readonly property real padX: Style.space(10)
+    readonly property real minAreaHeight: lineStep * 3 + padY * 2
+    readonly property real maxAreaHeight: lineStep * 7 + padY * 2
+    implicitHeight: Math.max(minAreaHeight, Math.min(maxAreaHeight, Math.ceil(edit.contentHeight) + padY * 2))
+    height: implicitHeight
+
+    function takeFocus() { edit.forceActiveFocus() }
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Style.cornerRadius
+      color: Qt.rgba(root.ink.r, root.ink.g, root.ink.b, edit.activeFocus ? 0.08 : 0.04)
+      border.width: Math.max(1, Style.space(1))
+      border.color: Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.28)
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.IBeamCursor
+      onClicked: {
+        root.confirmRemoveAuthor = ""
+        edit.forceActiveFocus()
+      }
+    }
+
+    Flickable {
+      id: areaScroll
+      anchors.fill: parent
+      anchors.leftMargin: area.padX
+      anchors.rightMargin: area.padX
+      anchors.topMargin: area.padY
+      anchors.bottomMargin: area.padY
+      clip: true
+      flickableDirection: Flickable.VerticalFlick
+      contentWidth: width
+      contentHeight: Math.max(height, edit.contentHeight)
+
+      TextEdit {
+        id: edit
+        width: areaScroll.width
+        height: Math.max(areaScroll.height, contentHeight)
+        color: root.ink
+        selectionColor: Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.35)
+        selectedTextColor: root.ink
+        font.family: Style.font.family
+        font.pixelSize: Style.font.body
+        wrapMode: TextEdit.Wrap
+        selectByMouse: true
+        activeFocusOnTab: true
+        onActiveFocusChanged: {
+          if (activeFocus) {
+            root.confirmRemoveAuthor = ""
+            root.reveal(area)
+          }
+        }
+        onCursorRectangleChanged: {
+          if (cursorRectangle.y < areaScroll.contentY) {
+            areaScroll.contentY = cursorRectangle.y
+          } else if (cursorRectangle.y + cursorRectangle.height > areaScroll.contentY + areaScroll.height) {
+            areaScroll.contentY = Math.max(0, cursorRectangle.y + cursorRectangle.height - areaScroll.height)
+          }
+        }
+        Keys.onTabPressed: function(event) {
+          var next = edit.nextItemInFocusChain(true)
+          if (next) next.forceActiveFocus(Qt.TabFocusReason)
+          event.accepted = true
+        }
+        Keys.onBacktabPressed: function(event) {
+          var prev = edit.nextItemInFocusChain(false)
+          if (prev) prev.forceActiveFocus(Qt.BacktabFocusReason)
+          event.accepted = true
+        }
+        Keys.onPressed: function(event) {
+          if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
+            area.submitted()
+            event.accepted = true
+          }
+        }
+      }
+
+      Text {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        visible: edit.text === ""
+        text: area.placeholderText
+        color: root.hint
+        font.family: Style.font.family
+        font.pixelSize: Style.font.body
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      anchors.margins: -2
+      enabled: false
+      color: "transparent"
+      radius: Style.cornerRadius
+      border.width: edit.activeFocus ? 2 : 0
+      border.color: Commons.Color.accent
     }
   }
 
@@ -1286,11 +1409,13 @@ Item {
               width: parent.width
               spacing: Style.space(8)
               RingButton {
-                label: root.quoteOpen ? "Close" : "Add your own quote"
+                label: "Add your own quote"
+                picked: root.quoteOpen
                 onActivated: root.toggleQuoteForm()
               }
               RingButton {
-                label: (root.authorOpen && root.editingAuthorSlug === "") ? "Close" : "Add an author"
+                label: "Add an author"
+                picked: root.authorOpen && root.editingAuthorSlug === ""
                 onActivated: root.openAddAuthor()
               }
             }
@@ -1377,28 +1502,12 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
               }
-              Item {
+              QuoteArea {
+                id: textField
                 width: parent.width
-                height: textField.implicitHeight
-                TextField {
-                  id: textField
-                  width: parent.width
-                  placeholderText: "The line itself"
-                  placeholderTextColor: root.hint
-                  foreground: root.ink
-                  onTextChanged: root.newText = text
-                  Keys.onReturnPressed: root.addQuote()
-                  onActiveFocusChanged: if (activeFocus) root.reveal(textField)
-                }
-                Rectangle {
-                  anchors.fill: parent
-                  anchors.margins: -2
-                  enabled: false
-                  color: "transparent"
-                  radius: Style.cornerRadius
-                  border.width: textField.activeFocus ? 2 : 0
-                  border.color: Commons.Color.accent
-                }
+                placeholderText: "The line itself"
+                onTextChanged: root.newText = text
+                onSubmitted: if (!root.busy) root.addQuote()
               }
               Text {
                 width: parent.width
@@ -1409,7 +1518,7 @@ Item {
                     if (root.samples[i].slug === root.newAuthor) who = root.samples[i].name
                   }
                   var cite = root.newCitation.trim()
-                  var line = root.newText.trim()
+                  var line = root.newText.replace(/[\r\n]+/g, " ").trim()
                   return who + (cite !== "" ? ", " + cite : "") + (line !== "" ? " — " + line : "")
                 }
                 color: root.ink
@@ -1427,11 +1536,18 @@ Item {
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
               }
-              RingButton {
-                id: quoteSubmitButton
-                label: "Add quote"
-                available: root.quoteReady && !root.busy
-                onActivated: root.addQuote()
+              Row {
+                spacing: Style.space(8)
+                RingButton {
+                  id: quoteSubmitButton
+                  label: "Add quote"
+                  available: root.quoteReady && !root.busy
+                  onActivated: root.addQuote()
+                }
+                RingButton {
+                  label: "Cancel"
+                  onActivated: root.closeQuoteForm()
+                }
               }
             }
 
@@ -1443,7 +1559,7 @@ Item {
 
               Text {
                 visible: root.editingAuthorSlug !== ""
-                text: "Update " + root.editingAuthorOrigName
+                text: "Edit " + root.editingAuthorOrigName
                 color: root.ink
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
@@ -1468,6 +1584,7 @@ Item {
                     root.newAuthorName = text
                     if (!root.authorSlugEdited) {
                       let suggested = root.slugFromName(text)
+                      root.newAuthorSlug = suggested
                       if (authorSlugField.text !== suggested) authorSlugField.text = suggested
                     }
                   }
@@ -1480,39 +1597,6 @@ Item {
                   color: "transparent"
                   radius: Style.cornerRadius
                   border.width: authorNameField.activeFocus ? 2 : 0
-                  border.color: Commons.Color.accent
-                }
-              }
-              Text {
-                visible: root.editingAuthorSlug === ""
-                text: "Short id"
-                color: root.quiet
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-              }
-              Item {
-                visible: root.editingAuthorSlug === ""
-                width: parent.width
-                height: authorSlugField.implicitHeight
-                TextField {
-                  id: authorSlugField
-                  width: parent.width
-                  placeholderText: "musonius"
-                  placeholderTextColor: root.hint
-                  foreground: root.ink
-                  onTextChanged: {
-                    root.newAuthorSlug = text
-                    if (activeFocus) root.authorSlugEdited = text.trim() !== ""
-                  }
-                  onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField)
-                }
-                Rectangle {
-                  anchors.fill: parent
-                  anchors.margins: -2
-                  enabled: false
-                  color: "transparent"
-                  radius: Style.cornerRadius
-                  border.width: authorSlugField.activeFocus ? 2 : 0
                   border.color: Commons.Color.accent
                 }
               }
@@ -1606,27 +1690,85 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
               }
-              Item {
+              QuoteArea {
+                id: authorTextField
                 width: parent.width
-                height: authorTextField.implicitHeight
-                TextField {
-                  id: authorTextField
-                  width: parent.width
-                  placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "The line itself"
-                  placeholderTextColor: root.hint
-                  foreground: root.ink
-                  onTextChanged: root.newAuthorText = text
-                  Keys.onReturnPressed: if (!root.busy) root.submitAuthor()
-                  onActiveFocusChanged: if (activeFocus) root.reveal(authorTextField)
+                placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "The line itself"
+                onTextChanged: root.newAuthorText = text
+                onSubmitted: if (!root.busy) root.submitAuthor()
+              }
+              Rectangle {
+                id: advancedToggle
+                visible: root.editingAuthorSlug === ""
+                implicitWidth: advancedLabel.implicitWidth + Style.space(8)
+                implicitHeight: advancedLabel.implicitHeight + Style.space(6)
+                radius: Style.cornerRadius
+                color: advancedHover.containsMouse ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08) : "transparent"
+                border.width: activeFocus ? 2 : 0
+                border.color: Commons.Color.accent
+                activeFocusOnTab: true
+                Text {
+                  id: advancedLabel
+                  anchors.centerIn: parent
+                  text: (root.authorAdvancedOpen ? "▾ " : "▸ ") + "Advanced"
+                  color: root.quiet
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
                 }
-                Rectangle {
+                MouseArea {
+                  id: advancedHover
                   anchors.fill: parent
-                  anchors.margins: -2
-                  enabled: false
-                  color: "transparent"
-                  radius: Style.cornerRadius
-                  border.width: authorTextField.activeFocus ? 2 : 0
-                  border.color: Commons.Color.accent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.confirmRemoveAuthor = ""
+                    root.authorAdvancedOpen = !root.authorAdvancedOpen
+                    if (root.authorAdvancedOpen) Qt.callLater(function() { root.reveal(authorSlugField) })
+                  }
+                }
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    root.authorAdvancedOpen = !root.authorAdvancedOpen
+                    if (root.authorAdvancedOpen) Qt.callLater(function() { root.reveal(authorSlugField) })
+                    event.accepted = true
+                  }
+                }
+              }
+              Column {
+                id: advancedFields
+                width: parent.width
+                visible: root.editingAuthorSlug === "" && root.authorAdvancedOpen
+                spacing: Style.space(6)
+                Text {
+                  text: "Author id"
+                  color: root.quiet
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Item {
+                  width: parent.width
+                  height: authorSlugField.implicitHeight
+                  TextField {
+                    id: authorSlugField
+                    width: parent.width
+                    placeholderText: "musonius"
+                    placeholderTextColor: root.hint
+                    foreground: root.ink
+                    onTextChanged: {
+                      root.newAuthorSlug = text
+                      if (activeFocus) root.authorSlugEdited = text.trim() !== ""
+                    }
+                    onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField)
+                  }
+                  Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: -2
+                    enabled: false
+                    color: "transparent"
+                    radius: Style.cornerRadius
+                    border.width: authorSlugField.activeFocus ? 2 : 0
+                    border.color: Commons.Color.accent
+                  }
                 }
               }
               Text {
@@ -1643,22 +1785,51 @@ Item {
                 id: authorSubmitRow
                 spacing: Style.space(8)
                 RingButton {
-                  label: root.editingAuthorSlug !== "" ? "Replace author" : "Add author"
+                  label: root.editingAuthorSlug !== "" ? "Save changes" : "Add author"
                   available: root.authorReady && !root.busy
                   onActivated: root.submitAuthor()
                 }
                 RingButton {
-                  visible: root.editingAuthorSlug !== ""
                   label: "Cancel"
                   onActivated: root.closeAuthorForm()
                 }
               }
             }
 
-            RingButton {
+            Rectangle {
+              id: customCountToggle
               visible: root.custom.length > 0
-              label: root.custom.length === 1 ? "1 of your own" : (root.custom.length + " of your own")
-              onActivated: root.listOpen = !root.listOpen
+              implicitWidth: customCountLabel.implicitWidth + Style.space(6)
+              implicitHeight: customCountLabel.implicitHeight + Style.space(6)
+              radius: Style.cornerRadius
+              color: customCountHover.containsMouse ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.06) : "transparent"
+              border.width: activeFocus ? 2 : 0
+              border.color: Commons.Color.accent
+              activeFocusOnTab: true
+              Text {
+                id: customCountLabel
+                anchors.centerIn: parent
+                text: (root.listOpen ? "▾ " : "▸ ") + (root.custom.length === 1 ? "1 custom quote" : (root.custom.length + " custom quotes"))
+                color: root.quiet
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+              MouseArea {
+                id: customCountHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.confirmRemoveAuthor = ""
+                  root.listOpen = !root.listOpen
+                }
+              }
+              Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                  root.listOpen = !root.listOpen
+                  event.accepted = true
+                }
+              }
             }
 
             Column {
