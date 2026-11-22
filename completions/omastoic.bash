@@ -44,6 +44,9 @@ _omastoic() {
   show)
     mapfile -t COMPREPLY < <(compgen -W "--cols --rows" -- "$cur")
     ;;
+  status)
+    mapfile -t COMPREPLY < <(compgen -W "--verbose -v" -- "$cur")
+    ;;
   esac
 }
 
