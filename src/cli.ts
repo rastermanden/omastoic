@@ -2993,7 +2993,8 @@ async function status(opts: { verbose?: boolean } = {}): Promise<number> {
     metaLines.push(field("canvas file:", BRANDING));
   }
 
-  const bookLines = [styleDim(`${quotes.length} quotes:`, styled)];
+  const quoteLabel = quotes.length === 1 ? "1 quote:" : `${quotes.length} quotes:`;
+  const bookLines = [styleDim(quoteLabel, styled)];
   for (const [slug, count] of [...byAuthor].sort((a, b) => b[1] - a[1])) {
     const art = (await loadPortrait(slug)) ? "portrait" : "no portrait";
     bookLines.push(`  ${(names.get(slug)?.name ?? slug).padEnd(18)} ${String(count).padStart(3)}  ${styleDim(art, styled)}`);

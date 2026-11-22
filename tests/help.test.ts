@@ -120,5 +120,12 @@ test("status leads with a summary line, moves internals to --verbose, and styles
     expect(ttyNoColor.code).toBe(0);
     expect(ttyNoColor.stdout).toContain("Stoics: on · Marcus Aurelius, Seneca · every 90s");
     expect(ttyNoColor.stdout).not.toMatch(ANSI_ESCAPE);
+
+    // Singular "1 quote:" when a single quote is in rotation.
+    expect((await s.cli(["config", "--authors", "marcus", "--quotes", "marcus=q01"])).code).toBe(0);
+    const single = await s.cli(["status"]);
+    expect(single.code).toBe(0);
+    expect(single.stdout).toContain("1 quote:");
+    expect(single.stdout).not.toContain("1 quotes:");
   } finally { s.cleanup(); }
 });

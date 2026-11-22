@@ -1086,15 +1086,15 @@ Item {
         streamsLeft: 0,
       }, "Could not save that.")
       wait(20)
-      compare(panel.error, "portrait image could not be read")
+      compare(panel.error, "Portrait image could not be read")
       compare(panel.errorScope, "")
-      compare(panel.statusText, "portrait image could not be read")
+      compare(panel.statusText, "Portrait image could not be read")
       var visibleErr = findOne(panel, function(item) {
-        return item.text === "portrait image could not be read" && item.visible
+        return item.text === "Portrait image could not be read" && item.visible
       })
       verify(visibleErr !== null)
 
-      // #115: Bundled author id collision automatically expands Advanced and shows the editable Author id field.
+      // #115 & #122: Bundled author id collision capitalizes the panel error and automatically expands Advanced.
       panel.openAddAuthor()
       wait(20)
       compare(panel.authorAdvancedOpen, false)
@@ -1112,6 +1112,7 @@ Item {
         streamsLeft: 0,
       }, "Could not save that.")
       wait(20)
+      compare(panel.error, 'Author "seneca" is already a bundled author')
       compare(panel.authorAdvancedOpen, true)
       var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" && item.visible })
       verify(slugField !== null)

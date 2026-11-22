@@ -233,7 +233,9 @@ Item {
 
   function plainError(text, fallback) {
     var line = String(text || "").trim().split("\n")[0].replace(/^omastoic:\s*/, "")
-    return line !== "" ? line : fallback
+    if (line === "") return fallback
+    if (/^[a-z]/.test(line)) line = line.charAt(0).toUpperCase() + line.slice(1)
+    return line
   }
 
   function restoreCommitted() {

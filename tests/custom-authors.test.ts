@@ -217,7 +217,8 @@ test("config --add-author adds a JPEG author under ~/.config/omastoic/ without t
 
     const status = await s.cli(["status"]);
     expectOk(status, "status");
-    expect(status.stdout).toContain("1 quotes:");
+    expect(status.stdout).toContain("1 quote:");
+    expect(status.stdout).not.toContain("1 quotes:");
     expect(status.stdout).toMatch(/Musonius Rufus\s+1\s+portrait/);
 
     // Screensaver canvas shows the braille portrait, display name, dates, citation, and quote.
