@@ -208,7 +208,7 @@ Item {
     let reqId = pickRequestId
     let proc = pickImageProcessComponent.createObject(root, {
       requestId: reqId,
-      command: [command, "panel", "pick-image"],
+      command: [command, "panel", "pick-image", "--watch-stdin"],
     })
     if (!proc) {
       error = ""
@@ -975,6 +975,7 @@ Item {
     id: pickImageProcessComponent
     Process {
       id: proc
+      stdinEnabled: true
       property int requestId: 0
       property bool cancelled: false
       property bool processExited: false

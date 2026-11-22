@@ -1,5 +1,5 @@
 /** OS file picker boundary for custom-author portraits via xdg-desktop-portal. */
-import { statSync } from "node:fs";
+import { fstatSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const PORTRAIT_PICKER_TITLE = "Choose portrait image";
@@ -88,26 +88,75 @@ export function parsePortalPickerOutput(code: number, stdout: string, stderr: st
   };
 }
 
+const PARENT_POLL_MS = 150;
+
+function stdinIsParentPipe(): boolean {
+  if (process.stdin.isTTY) return false;
+  try {
+    const stat = fstatSync(0);
+    return stat.isFIFO() || stat.isSocket();
+  } catch {
+    return false;
+  }
+}
+
 async function runPortalCommand(
   command: string[],
   env: Record<string, string | undefined>,
+  options: { watchStdin?: boolean } = {},
 ): Promise<PortalRunnerResult> {
   let child: ReturnType<typeof Bun.spawn> | null = null;
   let stdinPipe: ReturnType<typeof Bun.spawn>["stdin"] | null = null;
   let interrupted = false;
-  const forwardSignal = () => {
-    interrupted = true;
-    if (child) {
+  let cancelSent = false;
+  const initialPpid = process.ppid;
+  const closeChildStdin = () => {
+    if (stdinPipe && typeof stdinPipe !== "number") {
       try {
-        child.kill("SIGTERM");
+        stdinPipe.end();
       } catch {
-        // Child may already have exited.
+        // Pipe may already be closed.
       }
     }
   };
-  process.on("SIGTERM", forwardSignal);
-  process.on("SIGINT", forwardSignal);
+  const cancelChild = () => {
+    interrupted = true;
+    if (!child || cancelSent) return;
+    cancelSent = true;
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Child may already have exited.
+    }
+    closeChildStdin();
+  };
+
+  process.on("SIGTERM", cancelChild);
+  process.on("SIGINT", cancelChild);
+
+  const watchingStdin = options.watchStdin === true && stdinIsParentPipe();
+  const onStdinEnd = () => {
+    cancelChild();
+  };
+  if (watchingStdin) {
+    process.stdin.on("end", onStdinEnd);
+    process.stdin.on("close", onStdinEnd);
+    process.stdin.resume();
+  }
+
+  // Detect parent process death (e.g. Quickshell crash/restart reparenting bun
+  // to init or systemd --user) even when stdin is not a parent pipe.
+  const parentPoll = initialPpid > 1
+    ? setInterval(() => {
+        if (process.ppid !== initialPpid) cancelChild();
+      }, PARENT_POLL_MS)
+    : null;
+  parentPoll?.unref();
+
   try {
+    if (interrupted || (initialPpid > 1 && process.ppid !== initialPpid)) {
+      return { code: PORTRAIT_PICKER_EXIT.CANCELLED, stdout: "", stderr: "" };
+    }
     // Keep a pipe open on stdin so the kernel delivers HUP to the portal helper
     // even if this process is SIGKILLed (e.g. when the shell unloads the panel).
     child = Bun.spawn(command, {
@@ -117,6 +166,9 @@ async function runPortalCommand(
       stderr: "pipe",
     });
     stdinPipe = child.stdin;
+    if (interrupted || (initialPpid > 1 && process.ppid !== initialPpid)) {
+      cancelChild();
+    }
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
@@ -133,15 +185,15 @@ async function runPortalCommand(
       stderr: (error as Error).message,
     };
   } finally {
-    process.off("SIGTERM", forwardSignal);
-    process.off("SIGINT", forwardSignal);
-    if (stdinPipe && typeof stdinPipe !== "number") {
-      try {
-        stdinPipe.end();
-      } catch {
-        // Pipe may already be closed.
-      }
+    if (parentPoll) clearInterval(parentPoll);
+    process.off("SIGTERM", cancelChild);
+    process.off("SIGINT", cancelChild);
+    if (watchingStdin) {
+      process.stdin.off("end", onStdinEnd);
+      process.stdin.off("close", onStdinEnd);
+      process.stdin.pause();
     }
+    closeChildStdin();
   }
 }
 
@@ -151,6 +203,7 @@ export async function pickPortraitImage(options: {
   python?: string;
   scriptPath?: string;
   env?: Record<string, string | undefined>;
+  watchStdin?: boolean;
   run?: PortalRunner;
 } = {}): Promise<PortraitPickerResult> {
   const env = options.env ?? process.env;
@@ -161,7 +214,9 @@ export async function pickPortraitImage(options: {
     folder,
     scriptPath: options.scriptPath,
   });
-  const runner = options.run ?? runPortalCommand;
-  const result = await runner([options.python ?? "python3", ...args], env);
+  const command = [options.python ?? "python3", ...args];
+  const result = options.run
+    ? await options.run(command, env)
+    : await runPortalCommand(command, env, { watchStdin: options.watchStdin });
   return parsePortalPickerOutput(result.code, result.stdout, result.stderr);
 }

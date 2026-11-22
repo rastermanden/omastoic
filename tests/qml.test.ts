@@ -30,7 +30,8 @@ test("the panel changes settings only through the CLI bridge", () => {
   expect(source).not.toContain("quotes.tsv");
   expect(source).toContain('"panel", "state"');
   expect(source).toContain('"panel", "apply"');
-  expect(source).toContain('"panel", "pick-image"');
+  expect(source).toContain('"panel", "pick-image", "--watch-stdin"');
+  expect(source).toContain("stdinEnabled: true");
 });
 
 test("the settings panel applies changes itself and shows the quote", () => {
@@ -417,6 +418,7 @@ test("clicking blank space inside scroller, controls, or another row cancels Rem
 Item {
   property var command: []
   property bool running: false
+  property bool stdinEnabled: false
   property QtObject stdout: null
   property QtObject stderr: null
   signal exited(int exitCode)
@@ -1408,8 +1410,10 @@ Item {
       var pickProc = panel.activePickProcess
       verify(pickProc !== null)
       compare(pickProc.running, true)
-      compare(pickProc.command[pickProc.command.length - 2], "panel")
-      compare(pickProc.command[pickProc.command.length - 1], "pick-image")
+      compare(pickProc.stdinEnabled, true)
+      compare(pickProc.command[pickProc.command.length - 3], "panel")
+      compare(pickProc.command[pickProc.command.length - 2], "pick-image")
+      compare(pickProc.command[pickProc.command.length - 1], "--watch-stdin")
 
       // Clicking again while already picking is ignored and does not replace activePickProcess.
       panel.chooseAuthorImage()
@@ -1701,6 +1705,7 @@ Item {
   id: proc
   property var command: []
   property bool running: false
+  property bool stdinEnabled: false
   property bool manualExit: false
   property var history: []
   property QtObject stdout: null

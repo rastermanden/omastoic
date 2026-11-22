@@ -3409,7 +3409,10 @@ async function main(): Promise<number> {
         return 0;
       }
       if (action === "pick-image") {
-        const picked = await pickPortraitImage({ home: HOME });
+        const picked = await pickPortraitImage({
+          home: HOME,
+          watchStdin: rest.includes("--watch-stdin"),
+        });
         if (picked.status === "picked") {
           process.stdout.write(`${picked.path}\n`);
           return PORTRAIT_PICKER_EXIT.PICKED;

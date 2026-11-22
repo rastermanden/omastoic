@@ -197,10 +197,12 @@ const hasDbusAndGi = Boolean(
 
 const MOCK_PORTAL_DRIVER = `#!/usr/bin/env python3
 import json
+import os
 import signal
 import subprocess
 import sys
 import threading
+import time
 
 import gi
 
@@ -228,6 +230,32 @@ REQUEST_XML = """
 </node>
 """
 
+FAKE_SHELL_SCRIPT = """
+import os, subprocess, sys, time
+pid_file = sys.argv[1]
+use_pipe = sys.argv[2] == "pipe"
+child_cmd = sys.argv[3:]
+stdin_arg = subprocess.PIPE if use_pipe else subprocess.DEVNULL
+proc = subprocess.Popen(child_cmd, stdin=stdin_arg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+with open(pid_file, "w", encoding="utf-8") as fh:
+    fh.write(str(proc.pid))
+    fh.flush()
+while True:
+    time.sleep(60)
+"""
+
+def wait_for_pid_exit(pid, timeout_sec=5.0):
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        time.sleep(0.05)
+    return False
+
 def main():
     spec_path = sys.argv[1]
     out_path = sys.argv[2]
@@ -239,7 +267,7 @@ def main():
     node = Gio.DBusNodeInfo.new_for_xml(INTROSPECTION_XML)
     req_node = Gio.DBusNodeInfo.new_for_xml(REQUEST_XML)
     loop = GLib.MainLoop()
-    recorded = {"calls": [], "closedHandles": []}
+    recorded = {"calls": [], "closedHandles": [], "grandchildExited": None}
     result_holder = {}
     child_holder = {"proc": None}
 
@@ -248,7 +276,19 @@ def main():
             recorded["closedHandles"].append(object_path)
             invocation.return_value(None)
             if spec.get("waitForClose"):
-                GLib.idle_add(loop.quit)
+                if spec.get("parentShellKill"):
+                    def finish_after_exit():
+                        pid_file = spec["grandchildPidFile"]
+                        try:
+                            with open(pid_file, "r", encoding="utf-8") as fh:
+                                grandchild_pid = int(fh.read().strip())
+                            recorded["grandchildExited"] = wait_for_pid_exit(grandchild_pid)
+                        except Exception:
+                            recorded["grandchildExited"] = False
+                        GLib.idle_add(loop.quit)
+                    threading.Thread(target=finish_after_exit, daemon=True).start()
+                else:
+                    GLib.idle_add(loop.quit)
 
     def on_method_call(connection, sender, object_path, interface_name, method_name, parameters, invocation):
         parent_window, title, options = parameters.unpack()
@@ -302,6 +342,23 @@ def main():
         GLib.timeout_add(50, send_response)
 
     def run_child_thread():
+        if spec.get("parentShellKill"):
+            pid_file = spec["grandchildPidFile"]
+            pipe_mode = "pipe" if spec.get("parentShellPipe") else "devnull"
+            proc = subprocess.Popen(
+                [sys.executable, "-c", FAKE_SHELL_SCRIPT, pid_file, pipe_mode, *cmd],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            child_holder["proc"] = proc
+            stdout, stderr = proc.communicate()
+            result_holder["code"] = proc.returncode
+            result_holder["stdout"] = stdout
+            result_holder["stderr"] = stderr
+            return
+
         stdin_mode = subprocess.DEVNULL if spec.get("devnullStdin") else subprocess.PIPE
         proc = subprocess.Popen(cmd, stdin=stdin_mode, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         child_holder["proc"] = proc
@@ -376,6 +433,10 @@ async function runWithMockPortal(
     waitForClose?: boolean;
     devnullStdin?: boolean;
     directPythonHelper?: boolean;
+    watchStdin?: boolean;
+    parentShellKill?: boolean;
+    parentShellPipe?: boolean;
+    grandchildPidFile?: string;
   },
 ) {
   const driver = join(s.home, "mock-portal-driver.py");
@@ -389,7 +450,13 @@ async function runWithMockPortal(
 
   const targetCmd = spec.directPythonHelper
     ? ["python3", join(root, "scripts/portal-pick-image.py"), "--title", PORTRAIT_PICKER_TITLE]
-    : [process.execPath, join(root, "src/cli.ts"), "panel", "pick-image"];
+    : [
+        process.execPath,
+        join(root, "src/cli.ts"),
+        "panel",
+        "pick-image",
+        ...(spec.watchStdin ? ["--watch-stdin"] : []),
+      ];
 
   const run = await s.exec([
     "dbus-run-session",
@@ -415,6 +482,7 @@ async function runWithMockPortal(
         handle: string;
       }>;
       closedHandles: string[];
+      grandchildExited: boolean | null;
     };
     child: { code: number; stdout: string; stderr: string };
   };
@@ -535,6 +603,33 @@ test("panel pick-image speaks xdg-desktop-portal FileChooser over D-Bus, filters
     const killed = await runWithMockPortal(s, { killSignal: "SIGKILL", waitForClose: true });
     expect(killed.recorded.calls).toHaveLength(1);
     expect(killed.recorded.closedHandles).toEqual([killed.recorded.calls[0]!.handle]);
+
+    // 9b. Parent shell dying (SIGKILL reparenting bun to init/subreaper, without --watch-stdin):
+    //     bun detects process.ppid change, cancels portal-pick-image.py, Request.Close runs, and bun exits.
+    const parentDiedReparent = await runWithMockPortal(s, {
+      killSignal: "SIGKILL",
+      waitForClose: true,
+      parentShellKill: true,
+      parentShellPipe: false,
+      grandchildPidFile: join(s.home, "bun-reparent.pid"),
+    });
+    expect(parentDiedReparent.recorded.calls).toHaveLength(1);
+    expect(parentDiedReparent.recorded.closedHandles).toEqual([parentDiedReparent.recorded.calls[0]!.handle]);
+    expect(parentDiedReparent.recorded.grandchildExited).toBe(true);
+
+    // 9c. Parent shell dying with Quickshell's stdinEnabled pipe + --watch-stdin:
+    //     bun detects stdin pipe EOF immediately, cancels portal-pick-image.py, Request.Close runs, and bun exits.
+    const parentDiedStdin = await runWithMockPortal(s, {
+      killSignal: "SIGKILL",
+      waitForClose: true,
+      watchStdin: true,
+      parentShellKill: true,
+      parentShellPipe: true,
+      grandchildPidFile: join(s.home, "bun-stdin.pid"),
+    });
+    expect(parentDiedStdin.recorded.calls).toHaveLength(1);
+    expect(parentDiedStdin.recorded.closedHandles).toEqual([parentDiedStdin.recorded.calls[0]!.handle]);
+    expect(parentDiedStdin.recorded.grandchildExited).toBe(true);
 
     // 10. Running portal-pick-image.py directly with /dev/null on stdin does not falsely cancel.
     const devnull = await runWithMockPortal(s, {
