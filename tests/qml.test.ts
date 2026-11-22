@@ -1272,6 +1272,46 @@ Item {
         compare(panel.quoteOpen, false)
       }
     }
+
+    function test_preview_button_right_aligned_with_and_without_portrait() {
+      panel.opened = true
+      panel.saving = false
+      panel.notice = ""
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "noportrait", name: "No Portrait", dates: "", custom: true, portrait: "", citation: "Note 1", text: "Plain words." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      var previewBtn = findOne(panel, function(item) { return item.label === "Preview" && item.visible })
+      verify(scroller !== null && previewBtn !== null)
+
+      // With portrait: Preview button aligns with the right edge of the header content.
+      compare(panel.hasPortrait, true)
+      var rightWithPortrait = previewBtn.mapToItem(scroller, 0, 0).x + previewBtn.width
+      verify(Math.abs(rightWithPortrait - scroller.width) <= 1)
+
+      // Without portrait: select only the portraitless author; Preview stays right-aligned at the exact same right edge.
+      panel.selectedAuthors = ["noportrait"]
+      wait(20)
+      compare(panel.hasPortrait, false)
+      var rightWithoutPortrait = previewBtn.mapToItem(scroller, 0, 0).x + previewBtn.width
+      verify(Math.abs(rightWithoutPortrait - scroller.width) <= 1)
+      verify(Math.abs(rightWithoutPortrait - rightWithPortrait) <= 1)
+    }
   }
 }
 `,
@@ -1287,7 +1327,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("8 passed, 0 failed");
+    expect(combined, combined).toContain("9 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

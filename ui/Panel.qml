@@ -102,6 +102,7 @@ Item {
     }
     return null
   }
+  readonly property bool hasPortrait: preview !== null && /[^\s\u2800]/.test(String(preview.portrait || ""))
   readonly property color ink: Commons.Color.popups.text
   // 0.88 clears 4.5:1 for small text on Tokyo Night and Catppuccin Latte.
   // Placeholders stay lower so they read as hints, not as typed text.
@@ -1152,13 +1153,15 @@ Item {
             spacing: Style.space(12)
 
             Row {
+              id: headerRow
               width: parent.width
               spacing: Style.space(14)
 
               Item {
                 id: portraitSlot
-                width: portraitText.implicitWidth
-                height: portraitText.implicitHeight
+                visible: root.hasPortrait
+                width: visible ? portraitText.implicitWidth : 0
+                height: visible ? portraitText.implicitHeight : 0
                 opacity: root.portraitFullyVisible(portraitSlot.mapToItem(scroller.contentItem, 0, 0).y, portraitSlot.height, scroller.contentY, scroller.height) ? 1 : 0
                 Text {
                   id: portraitText
@@ -1173,7 +1176,8 @@ Item {
               }
 
               Column {
-                width: Math.max(0, parent.width - (portraitSlot.width > 0 ? portraitSlot.width + Style.space(14) : 0))
+                id: headerTextColumn
+                width: Math.max(0, parent.width - (portraitSlot.visible && portraitSlot.width > 0 ? portraitSlot.width + Style.space(14) : 0))
                 spacing: Style.space(6)
 
                 Row {
