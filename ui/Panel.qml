@@ -50,12 +50,13 @@ Item {
   property string errorScope: ""
   property string authorListHint: ""
   property bool quoteOpen: false
-  onQuoteOpenChanged: if (quoteOpen) Qt.callLater(function() { root.reveal(quoteForm) })
+  onQuoteOpenChanged: if (quoteOpen) root.revealAfterLayout(quoteForm, quoteForm, citationField)
   property bool authorOpen: false
-  onAuthorOpenChanged: if (authorOpen) Qt.callLater(function() { root.reveal(authorForm) })
+  onAuthorOpenChanged: if (authorOpen) root.revealAfterLayout(authorForm, authorForm, authorNameField)
   property bool listOpen: false
   property real formReturnContentY: 0
   property bool hasFormReturnY: false
+  property int formScrollSeq: 0
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
   readonly property bool errorShownInStatus: error !== "" && (errorScope === "" || (errorScope === "author" && !authorOpen) || (errorScope === "quote" && !quoteOpen))
   readonly property string statusText: errorShownInStatus ? error : notice
@@ -164,7 +165,11 @@ Item {
     if (!hasFormReturnY) return
     var target = formReturnContentY
     hasFormReturnY = false
+    formScrollSeq++
+    var seq = formScrollSeq
     var clampAndSet = function() {
+      if (seq !== root.formScrollSeq || root.authorOpen || root.quoteOpen) return
+      content.forceLayout()
       var maxY = Math.max(0, scroller.contentHeight - scroller.height)
       scroller.contentY = Math.max(0, Math.min(target, maxY))
     }
@@ -182,7 +187,11 @@ Item {
   }
 
   function revealAfterLayout(form, first, second) {
+    formScrollSeq++
+    var seq = formScrollSeq
     var syncAndReveal = function() {
+      if (seq !== root.formScrollSeq) return
+      if (form === quoteForm) authorGrid.forceLayout()
       if (form && typeof form.forceLayout === "function") form.forceLayout()
       content.forceLayout()
       if (first) root.reveal(first)
@@ -450,7 +459,7 @@ Item {
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     quoteOpen = true
-    Qt.callLater(function() { root.reveal(quoteForm) })
+    root.revealAfterLayout(quoteForm, quoteForm, citationField)
   }
 
   function closeQuoteForm() {
@@ -496,7 +505,7 @@ Item {
     authorCitationField.text = ""
     authorTextField.text = ""
     authorOpen = true
-    Qt.callLater(function() { root.reveal(authorForm) })
+    root.revealAfterLayout(authorForm, authorForm, authorNameField)
   }
 
   function startEditAuthor(author) {
@@ -522,7 +531,7 @@ Item {
     authorCitationField.text = ""
     authorTextField.text = ""
     authorOpen = true
-    Qt.callLater(function() { root.reveal(authorForm) })
+    root.revealAfterLayout(authorForm, authorForm, authorNameField)
   }
 
   function closeAuthorForm() {
@@ -1127,6 +1136,7 @@ Item {
           flickableDirection: Flickable.VerticalFlick
           onHeightChanged: root.clampScroll()
           onContentHeightChanged: root.clampScroll()
+          onMovementStarted: root.formScrollSeq++
 
           MouseArea {
             id: contentBackdrop

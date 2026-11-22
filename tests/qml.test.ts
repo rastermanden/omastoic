@@ -573,6 +573,10 @@ Item {
 
     function seedPanel() {
       panel.opened = true
+      panel.saving = false
+      panel.notice = ""
+      panel.error = ""
+      panel.errorScope = ""
       panel.closeAuthorForm()
       panel.closeQuoteForm()
       var scroller = findOne(panel, function(item) {
@@ -1194,6 +1198,80 @@ Item {
       compare(panel.errorScope, "author")
       verify(panel.error.indexOf("Author id") !== -1)
     }
+
+    function test_opening_add_forms_scrolls_first_field_into_view_including_after_cancel() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus", "locke", "hume", "kant", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "epictetus", name: "Epictetus", dates: "c. AD 50 – 135", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Enchiridion 1", text: "Some things are in our control." },
+          { slug: "zeno", name: "Zeno of Citium", dates: "c. 334 – 262 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Well-being is realized by small steps." },
+          { slug: "cleanthes", name: "Cleanthes", dates: "c. 330 – 230 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Hymn", text: "Lead me, Zeus." },
+          { slug: "chrysippus", name: "Chrysippus", dates: "c. 279 – 206 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Live in agreement." },
+          { slug: "locke", name: "John Locke", dates: "1632 – 1704", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Essay I", text: "Reading furnishes the mind." },
+          { slug: "hume", name: "David Hume", dates: "1711 – 1776", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Treatise", text: "Custom is the great guide." },
+          { slug: "kant", name: "Immanuel Kant", dates: "1724 – 1804", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Critique", text: "Dare to know." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Lectures VI", text: "Train." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      verify(addAuthorBtn !== null && addQuoteBtn !== null)
+
+      // Scroll so Add an author / Add your own quote sit right at the bottom edge of the 1280x800 viewport.
+      panel.reveal(addAuthorBtn)
+      wait(20)
+
+      // 1. Single click on Add an author brings Name field into view; Cancel then click again repeats reliably.
+      for (var round = 0; round < 2; round++) {
+        mouseClick(addAuthorBtn)
+        wait(30)
+        compare(panel.authorOpen, true)
+        var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+        verify(nameField !== null)
+        var namePos = nameField.mapToItem(scroller, 0, 0)
+        verify(namePos.y >= -1 && namePos.y + nameField.height <= scroller.height + 1)
+
+        var cancelAuthor = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+        verify(cancelAuthor !== null)
+        mouseClick(cancelAuthor)
+        wait(30)
+        compare(panel.authorOpen, false)
+      }
+
+      // 2. Single click on Add your own quote (right after Cancel) brings Citation field into view; repeat after Cancel.
+      for (var qround = 0; qround < 2; qround++) {
+        mouseClick(addQuoteBtn)
+        wait(30)
+        compare(panel.quoteOpen, true)
+        var citeField = findOne(panel, function(item) { return item.placeholderText === "Meditations IV.17" && item.visible })
+        verify(citeField !== null)
+        var citePos = citeField.mapToItem(scroller, 0, 0)
+        verify(citePos.y >= -1 && citePos.y + citeField.height <= scroller.height + 1)
+
+        var cancelQuote = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+        verify(cancelQuote !== null)
+        mouseClick(cancelQuote)
+        wait(30)
+        compare(panel.quoteOpen, false)
+      }
+    }
   }
 }
 `,
@@ -1209,7 +1287,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("7 passed, 0 failed");
+    expect(combined, combined).toContain("8 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
