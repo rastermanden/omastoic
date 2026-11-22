@@ -1481,6 +1481,7 @@ Item {
   property bool focusable: true
   property bool bordered: true
   property color foreground: "white"
+  property color accent: "#7aa2f7"
   signal clicked()
   signal rightClicked()
   implicitWidth: 80
@@ -1801,7 +1802,7 @@ Item {
       verify(scroller.contentY <= Math.max(0, scroller.contentHeight - scroller.height) + 1)
 
       // Close author form so next checks start clean.
-      var closeAuthorBtn = findOne(panel, function(item) { return item.label === "Close" && item.visible })
+      var closeAuthorBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
       verify(closeAuthorBtn !== null)
       mouseClick(closeAuthorBtn)
       wait(0)

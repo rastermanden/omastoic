@@ -3197,10 +3197,10 @@ function commandUsage(rawCommand: string, styled = false): string | null {
       ].join("\n");
     case "panel":
       return [
-        heading("omastoic panel state | omastoic panel apply '<json>'"),
+        heading("omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>'"),
         "",
-        "Read or update settings as JSON for the Quickshell settings panel.",
-        "Reads JSON from the argument or stdin on apply.",
+        "Read or update settings and saved panel size as JSON for the Quickshell",
+        "settings panel. Reads JSON from the argument or stdin on apply or size.",
       ].join("\n");
     case "render-png":
       return [
