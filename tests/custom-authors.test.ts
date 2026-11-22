@@ -1698,5 +1698,23 @@ test("custom author date ranges normalize on add, replace, panel, and read witho
     const nameOnly = await s.cli(["config", "--replace-author", "longrange", "--name", "Renamed Range"]);
     expectOk(nameOnly, "name-only replace on 128-char range");
     expect(readFileSync(authorsFile, "utf8")).toContain(`longrange\tRenamed Range\t${raw128}\n`);
+
+    // Write-time add and replace accept 127- and 128-char tight ranges and reject 129-char dates.
+    const raw127 = `${"1".repeat(125)}-2`;
+    const add127 = await s.cli([
+      "config", "--add-author", "edge127", "--name", "Edge 127", "--dates", raw127,
+      "--image", sampleJpeg, "--citation", "Note", "--text", "Boundary line.",
+    ]);
+    expectOk(add127, "add 127-char tight date range");
+    expect(readFileSync(authorsFile, "utf8")).toContain(`edge127\tEdge 127\t${raw127}\n`);
+
+    const replace128 = await s.cli(["config", "--replace-author", "edge127", "--dates", raw128]);
+    expectOk(replace128, "replace 128-char tight date range");
+    expect(readFileSync(authorsFile, "utf8")).toContain(`edge127\tEdge 127\t${raw128}\n`);
+
+    const raw129 = `${"1".repeat(127)}-2`;
+    const reject129 = await s.cli(["config", "--replace-author", "edge127", "--dates", raw129]);
+    expect(reject129.code).toBe(1);
+    expect(reject129.stderr).toContain("at most 128 characters");
   } finally { s.cleanup(); }
 });
