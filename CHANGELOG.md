@@ -8,24 +8,59 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 2.5.0 - 2026-11-22
+
 ### Added
 
+- `omastoic config --add-author <slug>` adds a custom author with a JPEG or PNG
+  portrait and at least one quote using `--name`, optional `--dates`, `--image`,
+  and either `--citation` and `--text` or `--add`. In a terminal, running
+  `omastoic config --add-author` with no arguments prompts for the author.
+  `omastoic ui` adds an **Add an author** form through `addAuthor` in
+  `omastoic panel apply` (#88, `d05ef41`).
+- Custom author data lives under `~/.config/omastoic/` in `authors.tsv`,
+  `art/<slug>.txt`, and `quotes.tsv`. Nothing is written inside the plugin
+  checkout, so plugin updates keep custom authors and portraits (#88,
+  `d05ef41`).
+- Portrait conversion turns JPEG and PNG images into 34×20 braille with
+  ImageMagick (`magick` or `convert`) and `pgmToBraille`, and falls back to
+  `omarchy-transcode-ascii` when ImageMagick is not installed. The command
+  rejects bundled slugs, and a missing or unusable image fails with no partial
+  files written (#88, `d05ef41`).
 - `omastoic config --replace-author <slug>` replaces a custom author's portrait
-  (`--image`), display name (`--name`), dates (`--dates`), or quotes
-  (`--citation`/`--text` or `--add`), leaving omitted fields unchanged and
-  rolling back on transcode or write failure.
-- `omastoic config --remove-author <slug>` removes a custom author row, their
-  quotes, their `art/<slug>.txt` portrait, and their slug in `config.json`,
-  leaving bundled files and other custom authors untouched.
+  (`--image`), display name (`--name`), dates (`--dates`, or `--dates ""` to
+  clear dates), or quotes (`--citation` and `--text`, or `--add`). Omitted
+  fields stay unchanged, and a transcode or write failure rolls back to the
+  previous files (#96, `20a9b15`).
+- `omastoic config --remove-author <slug>` removes a custom author row from
+  `authors.tsv`, that author's quotes from `quotes.tsv`, `art/<slug>.txt`, and
+  the author's slug from `config.json`. Bundled files and other custom authors
+  stay untouched (#96, `20a9b15`).
 - `omastoic ui` adds **Edit** and **Remove** buttons for custom authors, not
   bundled Stoics, using `replaceAuthor` and `removeAuthor` in
-  `omastoic panel apply`.
+  `omastoic panel apply`. Removal requires a second click on **Remove?** (#96,
+  `20a9b15`).
+- `tests/branding-helpers.test.ts` and `tests/branding.test.ts` test
+  `preserveDisplaced`, `ownsBranding`, `restoreSlot`, and `standAside` directly
+  in temp directories after extracting the branding slot helpers into
+  `src/branding.ts` (#97, `6c0dd30`).
+- `tests/preflight-scan.test.ts` covers `.cursor/skills`, `.agents/skills`, and
+  `.claude/skills` alongside shipped files, and runs `scripts/preflight_scan.py`
+  on the checkout itself across tracked and non-ignored files so release
+  preflight does not flag uninstalled export-ignored skills (#94, `0f42bee`).
 
 ### Changed
 
-- Bundled slugs are rejected for `--replace-author` and `--remove-author`,
-  same-slug `--add-author` errors point to `--replace-author`, and repeated
-  `--image` flags fail with a clear error instead of using the first path.
+- Bundled slugs are rejected for `--replace-author` and `--remove-author`.
+  Passing an existing custom slug to `--add-author` points to
+  `--replace-author`, and repeated single-value flags such as `--image` fail
+  with a clear error instead of using the first value (#96, `20a9b15`).
+- `scripts/check-qml.ts` no longer ignores every `[unqualified]` warning. It
+  filters `[unqualified]` warnings only when they point at the host kit's
+  `Style` or `Commons.Color` singleton, and it reads `qmllint --json -` so
+  Qt 6.12 does not drop warnings from early lines of `ui/Panel.qml`.
+  `ui/Panel.qml` adds `pragma ComponentBehavior: Bound` and qualifies its
+  delegate and root lookups (#98, `02eeed0`).
 - The builder workflow and its skills now live in `.agents/skills/`, which
   every coding agent reads except Claude Code. Claude Code reads
   `.claude/skills/`, a real mirror checked by `bun run verify`. `AGENTS.md` is
@@ -33,7 +68,35 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.github/copilot-instructions.md`, `.gemini/settings.json`,
   `.agents/rules/omastoic.md`, and `.cursor/rules/vision.mdc` point to.
   `bun run verify` fails if the skills mirror drifts or a pointer file goes
-  missing.
+  missing (#86, `61860cd`).
+
+### Fixed
+
+- `pgmToBraille` and `pbmToBraille` strip Netpbm text comments (`#[^\r\n]*`)
+  across carriage returns, so a JPEG with ImageMagick comment metadata no
+  longer fails with `invalid PGM header` (#95, `ca4a017`).
+- Portrait conversion rejects damaged or truncated JPEG and PNG files when
+  ImageMagick reports decode errors only as stderr warnings, while still
+  allowing harmless extraneous-bytes JPEG warnings (#96, `20a9b15`).
+- `pgmToBraille` falls back to min and max pixel contrast with a span of at
+  least 16 when the 2nd to 98th percentile span is under 8, so sparse line
+  drawings render while blank and near-blank images stay rejected (#99,
+  `1e71e5c`).
+- `cleanTranscodeError` returns `"not a readable JPEG or PNG image"` only for
+  JPEG or PNG decode failures. Other converter errors keep a sanitized reason
+  without temporary staging paths or ImageMagick internals. The
+  `transcodePortrait` JSDoc now matches the ImageMagick PGM and
+  `omarchy-transcode-ascii` pipeline (#99, `1e71e5c`).
+- Extreme aspect-ratio portraits such as 1:9 tall or 10:1 wide images and
+  standard custom portraits are framed to fit the 34×20 cell limit, while thin
+  2 to 3 px strokes and hairline rules stay thin lines instead of upscaling
+  into solid bars (#100, `bc7416e`).
+- Portrait canvas layout keeps a 20-cell minimum width for the portrait and
+  caption column. It trims trailing spaces and blank braille (`\u2800`) before
+  measuring art width, and it wraps long author names, dates, and citations
+  with a horizontal margin. Short art is framed vertically so the author name
+  and dates stay readable and sit below the quote. Grids that are too small
+  still fall back to quote-only layout (#88, `d05ef41`, and #100, `bc7416e`).
 
 ## 2.4.1 - 2026-11-20
 
