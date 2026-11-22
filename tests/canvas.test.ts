@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { cellWidth, compose, parseAuthors, parseQuotes, pick, wrap, type Quote } from "../src/canvas.ts";
+import { cellWidth, compose, normalizeAuthorDates, parseAuthors, parseQuotes, pick, wrap, type Quote } from "../src/canvas.ts";
 
 const root = join(import.meta.dir, "..");
 const quotes = parseQuotes(readFileSync(join(root, "data/quotes.tsv"), "utf8"));
@@ -246,4 +246,37 @@ test("pick remembers what it chose, newest first, without growing forever", () =
 test("pick still returns something when every quote is in the recent list", () => {
   const recent = quotes.map((_, i) => i);
   expect(quotes[pick(quotes, recent).index]).toBeDefined();
+});
+
+test("normalizeAuthorDates formats ranges to the bundled en-dash style and keeps free text", () => {
+  expect(normalizeAuthorDates("1632-1704")).toBe("1632 – 1704");
+  expect(normalizeAuthorDates("1632–1704")).toBe("1632 – 1704");
+  expect(normalizeAuthorDates("1632—1704")).toBe("1632 – 1704");
+  expect(normalizeAuthorDates("1632 - 1704")).toBe("1632 – 1704");
+  expect(normalizeAuthorDates("1632  –  1704")).toBe("1632 – 1704");
+  expect(normalizeAuthorDates("AD 121-180")).toBe("AD 121 – 180");
+  expect(normalizeAuthorDates("c. 4 BC-AD 65")).toBe("c. 4 BC – AD 65");
+  expect(normalizeAuthorDates("c. AD 30 – 100")).toBe("c. AD 30 – 100");
+  expect(normalizeAuthorDates("1950-present")).toBe("1950 – present");
+  expect(normalizeAuthorDates("1632-?")).toBe("1632 – ?");
+
+  // Non-range text and multi-hyphen dates stay as typed.
+  expect(normalizeAuthorDates("fl. 300 BC")).toBe("fl. 300 BC");
+  expect(normalizeAuthorDates("c. 260 BC")).toBe("c. 260 BC");
+  expect(normalizeAuthorDates("mid-4th c. BC")).toBe("mid-4th c. BC");
+  expect(normalizeAuthorDates("late 1st-century AD")).toBe("late 1st-century AD");
+  expect(normalizeAuthorDates("2024-01-15")).toBe("2024-01-15");
+  expect(normalizeAuthorDates("")).toBe("");
+  expect(normalizeAuthorDates("   ")).toBe("");
+
+  // All bundled authors are already normalized and idempotent.
+  for (const author of authors.values()) {
+    expect(normalizeAuthorDates(author.dates)).toBe(author.dates);
+  }
+
+  // parseAuthors normalizes existing rows on read.
+  const parsed = parseAuthors("locke\tJohn Locke\t1632–1704\nhume\tDavid Hume\t1711-1776\nz\tZeno\tfl. 300 BC\n");
+  expect(parsed.get("locke")?.dates).toBe("1632 – 1704");
+  expect(parsed.get("hume")?.dates).toBe("1711 – 1776");
+  expect(parsed.get("z")?.dates).toBe("fl. 300 BC");
 });

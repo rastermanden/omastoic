@@ -47,6 +47,21 @@ export function parseQuotes(tsv: string): Quote[] {
     });
 }
 
+/**
+ * Normalise a date range to the bundled style (`" – "` with spaces around an en dash).
+ * Free text that is not a range (such as `"fl. 300 BC"` or `"mid-4th c. BC"`) stays as typed.
+ */
+export function normalizeAuthorDates(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const match = /^([^-\u2013\u2014]+?)\s*[-\u2013\u2014]\s*([^-\u2013\u2014]+)$/.exec(trimmed);
+  if (!match) return trimmed;
+  const left = match[1]!.trim();
+  const right = match[2]!.trim();
+  if (!/\d/.test(left) || (!/\d/.test(right) && !/^(?:present|\?)$/i.test(right))) return trimmed;
+  return `${left} \u2013 ${right}`;
+}
+
 export function parseAuthors(tsv: string): Map<string, Author> {
   if (Buffer.byteLength(tsv) > 1024 * 1024) throw new Error("author file exceeds 1 MiB");
   tsv = tsv.replace(/\r\n/g, "\n");
@@ -58,11 +73,12 @@ export function parseAuthors(tsv: string): Map<string, Author> {
     if (fields.length < 2 || fields.length > 3) throw new Error("invalid author row");
     const slug = fields[0]!.trim();
     const name = fields[1]!.trim();
-    const dates = (fields[2] ?? "").trim();
+    const rawDates = (fields[2] ?? "").trim();
     if (!AUTHOR_SLUG.test(slug) || slug === "all") throw new Error("invalid author slug");
-    if (!name || name.length > MAX_AUTHOR_FIELD || dates.length > MAX_AUTHOR_FIELD) {
+    if (!name || name.length > MAX_AUTHOR_FIELD || rawDates.length > MAX_AUTHOR_FIELD) {
       throw new Error("author name or dates is empty or too long");
     }
+    const dates = normalizeAuthorDates(rawDates);
     authors.set(slug, { slug, name, dates });
   }
   return authors;

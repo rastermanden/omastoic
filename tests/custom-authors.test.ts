@@ -1632,3 +1632,64 @@ test.skipIf(!hasImageMagick)("extreme 1:9, 10:1, and standard portraits fill the
     expect(hline3Box.rows).toBeLessThanOrEqual(2);
   } finally { s.cleanup(); }
 }, 30000);
+
+test("custom author date ranges normalize on add, replace, panel, and read without rewriting existing files", async () => {
+  const s = sandbox();
+  try {
+    // CLI add with hyphen normalizes to spaced en dash.
+    const addedHyphen = await s.cli([
+      "config", "--add-author", "locke", "--name", "John Locke", "--dates", "1632-1704",
+      "--image", sampleJpeg, "--citation", "Essay I.1", "--text", "Reading furnishes the mind.",
+    ]);
+    expectOk(addedHyphen, "add hyphen dates");
+    const authorsFile = join(s.config, "omastoic/authors.tsv");
+    expect(readFileSync(authorsFile, "utf8")).toContain("locke\tJohn Locke\t1632 – 1704\n");
+
+    // CLI replace with tight en dash normalizes to spaced en dash.
+    const replacedEnDash = await s.cli([
+      "config", "--replace-author", "locke", "--dates", "1632–1704",
+    ]);
+    expectOk(replacedEnDash, "replace en-dash dates");
+    expect(readFileSync(authorsFile, "utf8")).toContain("locke\tJohn Locke\t1632 – 1704\n");
+
+    // Free text stays unchanged.
+    const addedFree = await s.cli([
+      "config", "--add-author", "diogenes", "--name", "Diogenes", "--dates", "fl. 300 BC",
+      "--image", sampleJpeg, "--citation", "Lives VI", "--text", "Stand out of my sunlight.",
+    ]);
+    expectOk(addedFree, "add free text dates");
+    expect(readFileSync(authorsFile, "utf8")).toContain("diogenes\tDiogenes\tfl. 300 BC\n");
+
+    // Panel add and replace produce the exact same normalization.
+    const panelAdd = await s.cli(["panel", "apply", JSON.stringify({
+      addAuthor: {
+        slug: "hume",
+        name: "David Hume",
+        dates: "1711-1776",
+        image: sampleJpeg,
+        citation: "Treatise I",
+        text: "Custom is the great guide of human life.",
+      },
+    })]);
+    expectOk(panelAdd, "panel add dates");
+    const panelAddState = JSON.parse(panelAdd.stdout);
+    expect(panelAddState.samples.find((a: { slug: string }) => a.slug === "hume")?.dates).toBe("1711 – 1776");
+    expect(readFileSync(authorsFile, "utf8")).toContain("hume\tDavid Hume\t1711 – 1776\n");
+
+    const panelReplace = await s.cli(["panel", "apply", JSON.stringify({
+      replaceAuthor: { slug: "hume", dates: "1711—1776" },
+    })]);
+    expectOk(panelReplace, "panel replace dates");
+    const panelReplaceState = JSON.parse(panelReplace.stdout);
+    expect(panelReplaceState.samples.find((a: { slug: string }) => a.slug === "hume")?.dates).toBe("1711 – 1776");
+
+    // An existing unnormalized row on disk is normalized on read without rewriting the file.
+    const rawTsv = `${readFileSync(authorsFile, "utf8")}kant\tImmanuel Kant\t1724–1804\n`;
+    s.put(authorsFile, rawTsv);
+    const state = await s.cli(["panel", "state"]);
+    expectOk(state, "panel state on existing unnormalized row");
+    const parsedState = JSON.parse(state.stdout);
+    expect(parsedState.samples.find((a: { slug: string }) => a.slug === "kant")?.dates).toBe("1724 – 1804");
+    expect(readFileSync(authorsFile, "utf8")).toBe(rawTsv);
+  } finally { s.cleanup(); }
+});

@@ -21,7 +21,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { createBrandingSlot, ownsBranding as slotOwnsBranding, preserveDisplaced as slotPreserveDisplaced, rememberWrite as slotRememberWrite, restoreSlot as slotRestoreSlot, standAside as slotStandAside, writeSlot } from "./branding.ts";
 import { dirname, join } from "node:path";
-import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
+import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { headerPortraitLayout, padPortrait, portraitDownscale, transcodePortrait } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
@@ -984,7 +984,7 @@ async function validateNewAuthorInput(
 ): Promise<{ ok: true; value: ValidatedNewAuthor } | { ok: false; error: string }> {
   const slug = flatField(input.slug);
   const name = flatField(input.name);
-  const dates = flatField(input.dates ?? "");
+  const dates = normalizeAuthorDates(flatField(input.dates ?? ""));
   const image = input.image.trim();
 
   if (!slug || !AUTHOR_SLUG.test(slug)) {
@@ -1346,7 +1346,7 @@ async function validateReplaceAuthorInput(
 
   let cleanDates: string | undefined;
   if (hasDates) {
-    cleanDates = flatField(input.dates!);
+    cleanDates = normalizeAuthorDates(flatField(input.dates!));
     if (cleanDates.length > 128) return { ok: false, error: "author dates must be at most 128 characters" };
     try {
       parseAuthors(`${slug}\tPlaceholder\t${cleanDates}\n`);
