@@ -37,7 +37,8 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain('text: "Omastoic"');
   expect(source).toContain('label: "Preview"');
   expect(source).toContain("id: quoteSlot");
-  expect(source).toContain("height: Math.max(Style.font.body * 1.35 * 3, quotePreviewText.implicitHeight)");
+  expect(source).toContain("height: Math.ceil(Style.font.body * 1.35) * 3");
+  expect(source).toContain("id: citationSlot");
   expect(source).toContain("anchors.verticalCenter: quoteSlot.verticalCenter");
   expect(source).toContain("elide: Text.ElideRight");
   expect(source).not.toContain("fontSizeMode");
@@ -105,7 +106,7 @@ test("hover stays distinct from focus and from the selected tint", () => {
   expect(source).toContain("Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16)");
   expect(source).toContain("Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08)");
   expect(source).toContain("border.color: activeFocus ? Commons.Color.accent : root.ink");
-  expect(source).toContain("border.color: inner.activeFocus ? Commons.Color.accent : root.ink");
+  expect(source).toContain("border.color: host.destructive ? Commons.Color.urgent : (inner.activeFocus ? Commons.Color.accent : root.ink)");
   expect(source).toContain("buttonHover.hovered && host.available");
   expect(source).toContain("enabled: !host.available");
   expect(source).toContain("selected: false");
@@ -470,6 +471,7 @@ Item {
   property bool focusable: true
   property bool bordered: true
   property color foreground: "white"
+  property color accent: "#7aa2f7"
   signal clicked()
   signal rightClicked()
   implicitWidth: 80
@@ -537,8 +539,8 @@ import QtTest
 
 Item {
   id: harness
-  width: 800
-  height: 900
+  width: 1280
+  height: 800
 
   PanelUnderTest {
     id: panel
@@ -565,6 +567,12 @@ Item {
 
     function seedPanel() {
       panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      if (scroller) scroller.contentY = 0
       var ok = panel.adoptState(JSON.stringify({
         settings: { authors: ["marcus", "musonius", "hierocles"], interval: 60 },
         portraitFont: 8,
@@ -712,9 +720,7 @@ Item {
 
     function test_form_error_placement_clears_on_close_and_empty_pick_hint_visible() {
       seedPanel()
-      harness.width = 1280
-      harness.height = 800
-      waitForRendering(panel)
+      wait(0)
 
       var scroller = findOne(panel, function(item) {
         return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
@@ -791,6 +797,104 @@ Item {
       verify(hintInViewport.y >= 0)
       verify(hintInViewport.y + hintItem.height <= scroller.height)
     }
+
+    function test_layout_stability_scroll_restore_and_urgent_remove_confirm() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius", "hierocles"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          {
+            slug: "musonius",
+            name: "Musonius Rufus",
+            dates: "c. AD 30 – 100",
+            custom: true,
+            portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿",
+            citation: "Lectures VI: A Very Long Citation That Used To Wrap Onto A Second Line And Shift Every Row Below It",
+            text: "A much longer four-line or five-line quotation that exceeds three lines in the narrow preview header column and used to push the list down whenever the preview switched to this author.",
+          },
+          { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Elements", text: "Draw the circles inward." },
+        ],
+      }))
+      compare(ok, true)
+      waitForRendering(panel)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      var marcusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Marcus Aurelius" })
+      var musoniusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Musonius Rufus" })
+      var hieroclesRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Hierocles" })
+      verify(marcusRow !== null && musoniusRow !== null && hieroclesRow !== null)
+
+      var marcusY0 = marcusRow.mapToItem(scroller, 0, 0).y
+      var musoniusY0 = musoniusRow.mapToItem(scroller, 0, 0).y
+      var hieroclesY0 = hieroclesRow.mapToItem(scroller, 0, 0).y
+
+      // 1. Toggling Marcus off switches the header preview to Musonius's long quote + long citation; rows do not shift.
+      mouseClick(marcusRow, 20, marcusRow.height / 2)
+      wait(0)
+      verify(Math.abs(marcusRow.mapToItem(scroller, 0, 0).y - marcusY0) <= 1)
+      verify(Math.abs(musoniusRow.mapToItem(scroller, 0, 0).y - musoniusY0) <= 1)
+      verify(Math.abs(hieroclesRow.mapToItem(scroller, 0, 0).y - hieroclesY0) <= 1)
+
+      // Toggling Musonius off switches to Hierocles (short quote); rows still do not shift.
+      mouseClick(musoniusRow, 20, musoniusRow.height / 2)
+      wait(0)
+      verify(Math.abs(marcusRow.mapToItem(scroller, 0, 0).y - marcusY0) <= 1)
+      verify(Math.abs(musoniusRow.mapToItem(scroller, 0, 0).y - musoniusY0) <= 1)
+      verify(Math.abs(hieroclesRow.mapToItem(scroller, 0, 0).y - hieroclesY0) <= 1)
+
+      // Unticking the last author shows the hint without moving any row.
+      mouseClick(hieroclesRow, 20, hieroclesRow.height / 2)
+      wait(0)
+      compare(panel.authorListHint, "Pick at least one author.")
+      verify(Math.abs(marcusRow.mapToItem(scroller, 0, 0).y - marcusY0) <= 1)
+      verify(Math.abs(musoniusRow.mapToItem(scroller, 0, 0).y - musoniusY0) <= 1)
+
+      // 2. Remove -> Remove? keeps the same width and leaves Edit at the exact same x position, with urgent styling.
+      var editBtn = findOne(musoniusRow, function(item) { return item.label === "Edit" && item.visible })
+      var removeBtn = findOne(musoniusRow, function(item) { return item.keepsRemoveConfirm === true && item.visible })
+      verify(editBtn !== null && removeBtn !== null)
+      var editXBefore = editBtn.mapToItem(musoniusRow, 0, 0).x
+      var removeWidthBefore = removeBtn.width
+      compare(removeBtn.destructive, false)
+
+      mouseClick(removeBtn)
+      wait(0)
+      compare(removeBtn.label, "Remove?")
+      compare(removeBtn.destructive, true)
+      compare(removeBtn.width, removeWidthBefore)
+      compare(editBtn.mapToItem(musoniusRow, 0, 0).x, editXBefore)
+
+      var chrome = findOne(removeBtn, function(item) { return item.border && item.border.width === 2 })
+      verify(chrome !== null)
+      compare(String(chrome.border.color), "#f7768e")
+
+      // 3. Opening Edit and pressing Cancel restores contentY so the row stays under the pointer.
+      scroller.contentY = 0
+      wait(0)
+      var rowYBeforeEdit = musoniusRow.mapToItem(scroller, 0, 0).y
+      mouseClick(editBtn)
+      wait(20)
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelBtn !== null)
+      panel.reveal(cancelBtn)
+      wait(20)
+      mouseClick(cancelBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+      compare(scroller.contentY, 0)
+      compare(musoniusRow.mapToItem(scroller, 0, 0).y, rowYBeforeEdit)
+    }
   }
 }
 `,
@@ -806,7 +910,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("4 passed, 0 failed");
+    expect(combined, combined).toContain("5 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

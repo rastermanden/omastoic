@@ -54,6 +54,8 @@ Item {
   property bool authorOpen: false
   onAuthorOpenChanged: if (authorOpen) Qt.callLater(function() { root.reveal(authorForm) })
   property bool listOpen: false
+  property real formReturnContentY: 0
+  property bool hasFormReturnY: false
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
   readonly property string statusText: (error !== "" && errorScope === "") ? error : notice
 
@@ -114,6 +116,9 @@ Item {
     quoteOpen = false
     authorOpen = false
     listOpen = false
+    hasFormReturnY = false
+    formReturnContentY = 0
+    scroller.contentY = 0
     error = ""
     errorScope = ""
     authorListHint = ""
@@ -138,10 +143,30 @@ Item {
   function close() {
     opened = false
     resizing = false
+    hasFormReturnY = false
     error = ""
     errorScope = ""
     authorListHint = ""
     confirmRemoveAuthor = ""
+  }
+
+  function captureFormReturnY() {
+    if (!hasFormReturnY) {
+      formReturnContentY = scroller.contentY
+      hasFormReturnY = true
+    }
+  }
+
+  function restoreFormReturnY() {
+    if (!hasFormReturnY) return
+    var target = formReturnContentY
+    hasFormReturnY = false
+    var clampAndSet = function() {
+      var maxY = Math.max(0, scroller.contentHeight - scroller.height)
+      scroller.contentY = Math.max(0, Math.min(target, maxY))
+    }
+    clampAndSet()
+    Qt.callLater(clampAndSet)
   }
 
   function reveal(item) {
@@ -267,9 +292,11 @@ Item {
     if (samples.length && !samples.some(function(author) { return author.slug === root.newAuthor }))
       newAuthor = samples[0].slug
     if (addingQuote || !quoteOpen) {
+      let closingQuote = addingQuote && quoteOpen
       quoteOpen = false
       citationField.text = ""
       textField.text = ""
+      if (closingQuote) restoreFormReturnY()
     }
     if (addingAuthor || replacingAuthor) {
       authorOpen = false
@@ -283,6 +310,7 @@ Item {
       authorImageField.text = ""
       authorCitationField.text = ""
       authorTextField.text = ""
+      restoreFormReturnY()
     } else if (editingAuthorSlug !== "" && !samples.some(function(author) { return author.slug === root.editingAuthorSlug })) {
       closeAuthorForm()
     }
@@ -393,9 +421,10 @@ Item {
     errorScope = ""
     authorListHint = ""
     if (quoteOpen) {
-      quoteOpen = false
+      closeQuoteForm()
       return
     }
+    captureFormReturnY()
     authorOpen = false
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
@@ -408,6 +437,8 @@ Item {
     quoteOpen = false
     error = ""
     errorScope = ""
+    keyCatcher.forceActiveFocus()
+    restoreFormReturnY()
   }
 
   function addQuote() {
@@ -428,9 +459,10 @@ Item {
     errorScope = ""
     authorListHint = ""
     if (authorOpen && editingAuthorSlug === "") {
-      authorOpen = false
+      closeAuthorForm()
       return
     }
+    captureFormReturnY()
     quoteOpen = false
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
@@ -455,6 +487,7 @@ Item {
       closeAuthorForm()
       return
     }
+    captureFormReturnY()
     quoteOpen = false
     editingAuthorSlug = author.slug
     editingAuthorOrigName = author.name
@@ -477,6 +510,8 @@ Item {
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
+    keyCatcher.forceActiveFocus()
+    restoreFormReturnY()
   }
 
   function addAuthor() {
@@ -580,17 +615,26 @@ Item {
   component RingButton: Item {
     id: host
     property string label: ""
+    property string sizeLabel: ""
     property bool picked: false
+    property bool destructive: false
     property bool available: true
     property bool keepsRemoveConfirm: false
     signal activated()
     signal focusLost()
-    implicitWidth: labelText.implicitWidth + Style.space(28)
+    implicitWidth: Math.max(labelText.implicitWidth, sizeProbe.implicitWidth) + Style.space(28)
     implicitHeight: labelText.implicitHeight + Style.space(16)
     opacity: available ? 1 : 0.45
     // Do not name this `focus`. Item already has a `focus` property, and a
     // method of the same name does not shadow it, so `.focus()` would throw.
     function takeFocus() { inner.forceActiveFocus() }
+    Text {
+      id: sizeProbe
+      visible: false
+      text: host.sizeLabel !== "" ? host.sizeLabel : host.label
+      font.family: Style.font.family
+      font.pixelSize: Style.font.body
+    }
     HoverHandler {
       id: buttonHover
       cursorShape: host.available ? Qt.PointingHandCursor : Qt.ArrowCursor
@@ -604,6 +648,7 @@ Item {
       focusable: true
       bordered: true
       foreground: root.ink
+      accent: host.destructive ? Commons.Color.urgent : Commons.Color.accent
       onClicked: {
         if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""
         host.activated()
@@ -614,16 +659,19 @@ Item {
       }
     }
     Rectangle {
+      id: ringChrome
       anchors.fill: inner
       anchors.margins: -2
       z: 1
       enabled: false
-      color: host.picked
-        ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.25)
-        : (buttonHover.hovered && host.available ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08) : "transparent")
+      color: host.destructive
+        ? Qt.rgba(Commons.Color.urgent.r, Commons.Color.urgent.g, Commons.Color.urgent.b, 0.20)
+        : (host.picked
+          ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.25)
+          : (buttonHover.hovered && host.available ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08) : "transparent"))
       radius: Style.cornerRadius
-      border.width: inner.activeFocus ? 2 : (buttonHover.hovered && host.available ? 1 : 0)
-      border.color: inner.activeFocus ? Commons.Color.accent : root.ink
+      border.width: host.destructive ? 2 : (inner.activeFocus ? 2 : (buttonHover.hovered && host.available ? 1 : 0))
+      border.color: host.destructive ? Commons.Color.urgent : (inner.activeFocus ? Commons.Color.accent : root.ink)
     }
     Text {
       id: labelText
@@ -1017,7 +1065,7 @@ Item {
                 Item {
                   id: quoteSlot
                   width: parent.width
-                  height: Math.max(Style.font.body * 1.35 * 3, quotePreviewText.implicitHeight)
+                  height: Math.ceil(Style.font.body * 1.35) * 3
                   clip: true
                   Text {
                     id: quotePreviewText
@@ -1027,20 +1075,29 @@ Item {
                     color: root.ink
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
-                    lineHeight: 1.35
+                    lineHeightMode: Text.FixedHeight
+                    lineHeight: Math.ceil(Style.font.body * 1.35)
                     wrapMode: Text.WordWrap
                     maximumLineCount: 3
                     elide: Text.ElideRight
                   }
                 }
-                Text {
+                Item {
+                  id: citationSlot
                   width: parent.width
-                  visible: root.preview !== null
-                  text: root.preview ? (root.preview.citation !== "" ? (root.preview.name + ", " + root.preview.citation) : root.preview.name) : ""
-                  color: root.quiet
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.bodySmall
-                  wrapMode: Text.WordWrap
+                  height: Math.ceil(Style.font.bodySmall * 1.35)
+                  clip: true
+                  Text {
+                    id: citationPreviewText
+                    width: parent.width
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.preview ? (root.preview.citation !== "" ? (root.preview.name + ", " + root.preview.citation) : root.preview.name) : ""
+                    color: root.quiet
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    maximumLineCount: 1
+                    elide: Text.ElideRight
+                  }
                 }
                 Text {
                   width: parent.width
@@ -1168,7 +1225,8 @@ Item {
                     }
                     RingButton {
                       label: root.confirmRemoveAuthor === authorRow.modelData.slug ? "Remove?" : "Remove"
-                      picked: root.confirmRemoveAuthor === authorRow.modelData.slug
+                      sizeLabel: "Remove?"
+                      destructive: root.confirmRemoveAuthor === authorRow.modelData.slug
                       available: !root.busy
                       keepsRemoveConfirm: true
                       onActivated: root.requestRemoveAuthor(authorRow.modelData.slug)
