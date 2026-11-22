@@ -89,7 +89,7 @@ Item {
         )
       )
     : (
-        newAuthorSlug.trim() !== "" &&
+        (newAuthorSlug.trim() !== "" || !authorAdvancedOpen) &&
         newAuthorName.trim() !== "" &&
         newAuthorImage.trim() !== "" &&
         newAuthorCitation.trim() !== "" &&
@@ -591,7 +591,7 @@ Item {
       applyNow()
       return
     }
-    if (!authorReady) {
+    if (!authorReady || newAuthorSlug.trim() === "") {
       notice = ""
       error = newAuthorName.trim() !== "" && newAuthorSlug.trim() === ""
         ? "Use letters or numbers in the name, or set an Author id under Advanced."
@@ -1605,6 +1605,9 @@ Item {
                       let suggested = root.slugFromName(text)
                       root.newAuthorSlug = suggested
                       if (authorSlugField.text !== suggested) authorSlugField.text = suggested
+                      if (root.editingAuthorSlug === "" && text.trim() !== "" && suggested === "") {
+                        root.authorAdvancedOpen = true
+                      }
                     }
                   }
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorNameField)

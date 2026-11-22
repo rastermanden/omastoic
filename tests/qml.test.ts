@@ -1122,6 +1122,36 @@ Item {
       verify(hintItem !== null)
       var hintInView = hintItem.mapToItem(scroller, 0, 0)
       verify(hintInView.y >= 0 && hintInView.y + hintItem.height <= scroller.height)
+
+      // #118: A non-ASCII author name opens Advanced immediately and clicking Add author never dead-ends if Advanced is re-collapsed.
+      panel.closeQuoteForm()
+      panel.openAddAuthor()
+      wait(20)
+      var nonAsciiName = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var nonAsciiImage = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var nonAsciiCitation = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var nonAsciiQuote = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
+      verify(nonAsciiName !== null && nonAsciiImage !== null && nonAsciiCitation !== null && nonAsciiQuote !== null)
+      nonAsciiName.text = "Ἐπίκτητος"
+      wait(20)
+      compare(panel.newAuthorSlug, "")
+      compare(panel.authorAdvancedOpen, true)
+      nonAsciiImage.text = "/tmp/epictetus.png"
+      nonAsciiCitation.text = "Enchiridion 1"
+      nonAsciiQuote.text = "Some things are in our control."
+      // Even if the user re-collapses Advanced, Add author remains clickable and re-opens Advanced with guidance.
+      panel.authorAdvancedOpen = false
+      wait(20)
+      var addBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(addBtn !== null)
+      compare(addBtn.available, true)
+      panel.reveal(addBtn)
+      wait(20)
+      mouseClick(addBtn)
+      wait(20)
+      compare(panel.authorAdvancedOpen, true)
+      compare(panel.errorScope, "author")
+      verify(panel.error.indexOf("Author id") !== -1)
     }
   }
 }
