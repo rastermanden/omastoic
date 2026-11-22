@@ -18,7 +18,8 @@
 // clobbering the new art.
 
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
-import { atomicWrite, digest, locked, OwnedFiles, replaceIfUnchanged } from "./files.ts";
+import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
+import { createBrandingSlot, ownsBranding as slotOwnsBranding, preserveDisplaced as slotPreserveDisplaced, rememberWrite as slotRememberWrite, restoreSlot as slotRestoreSlot, standAside as slotStandAside, writeSlot } from "./branding.ts";
 import { dirname, join } from "node:path";
 import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { headerPortraitLayout, padPortrait, portraitDownscale, transcodePortrait } from "./portrait.ts";
@@ -330,39 +331,29 @@ const notify = (message: string) =>
 
 // --- who owns the screensaver slot ------------------------------------------
 
-async function rememberWrite(canvas: string): Promise<void> {
-  mkdirSync(STATE, { recursive: true });
-  atomicWrite(WRITTEN, digest(canvas));
-}
+const brandingSlot = createBrandingSlot({
+  branding: BRANDING,
+  backup: BACKUP,
+  state: STATE,
+  written: WRITTEN,
+  displaced: DISPLACED,
+  logo: LOGO,
+  owned,
+  setEnabled,
+  notify,
+  beforeReplace: () => {
+    const hook = process.env.OMASTOIC_BEFORE_BRANDING_REPLACE;
+    if (!hook) return;
+    const ran = Bun.spawnSync(["bash", "-c", hook], { env: process.env });
+    if (ran.exitCode !== 0) throw new Error("could not finish the screensaver restore");
+  },
+});
 
-/** True when the branding file still holds exactly what omastoic last put there. */
-async function ownsBranding(): Promise<boolean> {
-  return brandingStillOurs();
-}
-
-/**
- * Ownership for a restore. A missing file is ours only when we recorded that
- * the slot was empty. A newer file, a deleted canvas, or an unreadable path
- * is not ours: leave it and keep the backup.
- */
-function brandingStillOurs(): boolean {
-  let expected: string;
-  try { expected = readFileSync(WRITTEN, "utf8").trim(); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-  if (!expected) return false;
-  try {
-    const stat = lstatSync(BRANDING);
-    if (!stat.isFile() && !stat.isSymbolicLink()) return false;
-    return digest(readFileSync(BRANDING, "utf8")) === expected;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
-    const kind = existsSync(DISPLACED) ? readFileSync(DISPLACED, "utf8").trim() : "";
-    return kind === "absent";
-  }
-}
+const rememberWrite = (canvas: string): void => slotRememberWrite(brandingSlot, canvas);
+const ownsBranding = (): boolean => slotOwnsBranding(brandingSlot);
+const preserveDisplaced = (): Promise<void> => slotPreserveDisplaced(brandingSlot);
+const restoreSlot = (): Promise<void> => slotRestoreSlot(brandingSlot);
+const standAside = (): void => slotStandAside(brandingSlot);
 
 async function renderQuote(size?: { cols: number; rows: number }, forced?: Quote): Promise<{ text: string; recent: number[] }> {
   const quotes = await quoteBook();
@@ -389,115 +380,18 @@ async function render(size?: { cols: number; rows: number }, remember = true, fo
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
 async function writeBranding(takeSlot = false, forced?: Quote): Promise<boolean> {
-  // Recheck after rendering too: a user's branding command may run while we
-  // measure terminals. All our writers hold the transaction lock.
-  const before = await Bun.file(BRANDING).text().catch(() => null);
-  if (!takeSlot && !(await ownsBranding())) { standAside(); return false; }
-  const drawn = await renderQuote(undefined, forced);
-  const canvas = `${drawn.text}\n`;
-  if ((await Bun.file(BRANDING).text().catch(() => null)) !== before) { standAside(); return false; }
-  atomicWrite(BRANDING, canvas);
-  await rememberWrite(canvas);
-  if (!forced) atomicWrite(join(STATE, "recent.json"), JSON.stringify(drawn.recent));
-  return true;
-}
-
-/**
- * Keep the art we are about to cover so `off` can put it back. Always the last
- * non-omastoic canvas — Omarchy's branding commands are the way you set art,
- * and toggling the Stoics off should return whatever they displaced.
- */
-async function preserveDisplaced(): Promise<void> {
-  const current = Bun.file(BRANDING);
-  if (await ownsBranding() && await Bun.file(DISPLACED).exists()) return;
-  if (!(await current.exists())) { atomicWrite(DISPLACED, "absent"); return; }
-  const text = await current.text();
-  owned.write("backup", BACKUP, text);
-  atomicWrite(DISPLACED, "file");
-}
-
-function leaveChangedBranding(): void {
-  console.error("omastoic: the screensaver file changed after we wrote it — leaving it in place and keeping the backup");
-}
-
-/** Read the bytes to restore, then let a test change the live file before the swap. */
-function restorationText(source: string): string {
-  const text = readFileSync(source, "utf8");
-  const hook = process.env.OMASTOIC_BEFORE_BRANDING_REPLACE;
-  if (hook) {
-    const ran = Bun.spawnSync(["bash", "-c", hook], { env: process.env });
-    if (ran.exitCode !== 0) throw new Error("could not finish the screensaver restore");
-  }
-  return text;
-}
-
-async function restoreSlot(): Promise<void> {
-  if (!(await Bun.file(DISPLACED).exists()) && !(await Bun.file(WRITTEN).exists())) return;
-  if (!brandingStillOurs()) {
-    leaveChangedBranding();
-    return;
-  }
-  const expected = readFileSync(WRITTEN, "utf8").trim();
-  const kind = await Bun.file(DISPLACED).text().catch(() => "legacy");
-  let restored = false;
-  if (kind === "absent") {
-    if (!discardBranding()) {
-      leaveChangedBranding();
-      return;
-    }
-    restored = true;
-  } else if (existsSync(BACKUP) && owned.owns("backup", BACKUP)) {
-    const text = restorationText(BACKUP);
-    restored = replaceIfUnchanged(BRANDING, expected, text);
-    if (!restored) {
-      leaveChangedBranding();
-      return;
-    }
-  } else if (kind === "file") {
-    throw new Error(`displaced branding backup changed or is missing: ${BACKUP}; restore the backup before retrying off/uninstall`);
-  } else if (kind === "legacy" && existsSync(LOGO)) {
-    const text = restorationText(LOGO);
-    restored = replaceIfUnchanged(BRANDING, expected, text);
-    if (!restored) {
-      leaveChangedBranding();
-      return;
-    }
-  }
-  if (!restored) return;
-  owned.remove("backup", BACKUP);
-  rmSync(DISPLACED, { force: true });
-  rmSync(WRITTEN, { force: true });
-}
-
-/**
- * Remove the canvas we wrote into an empty slot. A symlink is removed itself
- * when it still resolves to those exact bytes, so the link cannot dangle and
- * the file it names is left alone. Any other path is left untouched.
- */
-function discardBranding(): boolean {
-  const absent = (error: unknown): boolean => {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
-    throw error;
-  };
-  let stat;
-  try { stat = lstatSync(BRANDING); }
-  catch (error) { return absent(error); }
-  if (!brandingStillOurs()) return false;
-  if (stat.isSymbolicLink()) {
-    let again;
-    try { again = lstatSync(BRANDING); }
-    catch (error) { return absent(error); }
-    if (!again.isSymbolicLink() || !brandingStillOurs()) return false;
-    unlinkSync(BRANDING);
-    return true;
-  }
-  if (!stat.isFile()) return false;
-  let again;
-  try { again = lstatSync(BRANDING); }
-  catch (error) { return absent(error); }
-  if (!again.isFile() || !brandingStillOurs()) return false;
-  rmSync(BRANDING);
-  return true;
+  let recentIds: number[] | null = null;
+  const wrote = await writeSlot(
+    brandingSlot,
+    async () => {
+      const drawn = await renderQuote(undefined, forced);
+      recentIds = drawn.recent;
+      return `${drawn.text}\n`;
+    },
+    takeSlot,
+  );
+  if (wrote && !forced && recentIds) atomicWrite(join(STATE, "recent.json"), JSON.stringify(recentIds));
+  return wrote;
 }
 
 async function stopDaemon(): Promise<void> {
@@ -506,7 +400,7 @@ async function stopDaemon(): Promise<void> {
 
 async function on(): Promise<number> {
   const wasEnabled = enabled();
-  const previousCanvas = wasEnabled && await ownsBranding() ? await Bun.file(BRANDING).text().catch(() => null) : null;
+  const previousCanvas = wasEnabled && ownsBranding() ? await Bun.file(BRANDING).text().catch(() => null) : null;
   await preserveDisplaced();
 
   try {
@@ -516,10 +410,10 @@ async function on(): Promise<number> {
     else console.log("→ not installed as a service yet; run: omastoic setup");
   } catch (error) {
     setEnabled(wasEnabled);
-    if (await ownsBranding()) {
+    if (ownsBranding()) {
       if (previousCanvas !== null) {
         atomicWrite(BRANDING, previousCanvas);
-        await rememberWrite(previousCanvas);
+        rememberWrite(previousCanvas);
       } else await restoreSlot();
     }
     throw error;
@@ -537,17 +431,6 @@ async function off(): Promise<number> {
   console.log("→ the Stoics have stood down");
   notify("Screensaver: the Stoics off");
   return 0;
-}
-
-/**
- * Someone else has written the screensaver slot. Turn off rather than fight over
- * it — Omarchy's own branding commands should win, and silently reverting them
- * would look like a bug in Omarchy.
- */
-function standAside(): void {
-  setEnabled(false);
-  console.error("omastoic: the screensaver art changed underneath us — standing aside");
-  notify("Screensaver art changed — the Stoics stood aside");
 }
 
 // --- installation ------------------------------------------------------------
@@ -745,7 +628,7 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
     // Leave owned plumbing available for retry/uninstall, but fail closed.
     await run(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
     await run(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
-    if (existsSync(WRITTEN) && await ownsBranding()) await restoreSlot();
+    if (existsSync(WRITTEN) && ownsBranding()) await restoreSlot();
     setEnabled(false);
     throw error;
   }
@@ -839,7 +722,7 @@ async function rotate(onStop?: () => void): Promise<boolean> {
     onStop?.();
     return false;
   }
-  if (!(await ownsBranding())) {
+  if (!ownsBranding()) {
     standAside();
     onStop?.();
     return false;
@@ -866,7 +749,7 @@ async function daemonNative(): Promise<number> {
     await Bun.sleep(400);
     if (!enabled()) return 0;
     const now = screensaverIsRunning();
-    if (!now && !(await ownsBranding())) {
+    if (!now && !ownsBranding()) {
       standAside();
       return 0;
     }
@@ -3066,7 +2949,7 @@ async function status(): Promise<number> {
   const size = await screensaverSize();
   const unit = Bun.spawnSync(["systemctl", "--user", "is-active", "omastoic.service"]);
   const on = enabled();
-  const ours = on && (await ownsBranding());
+  const ours = on && ownsBranding();
   const backend = await installedBackend();
   const backendLine = backend === "native"
     ? "native — one quote when the screensaver starts; it reads the canvas once"

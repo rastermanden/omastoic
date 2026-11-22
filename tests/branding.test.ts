@@ -185,3 +185,43 @@ test("a conflicting pre-existing backup is never overwritten to enable Stoics", 
     expect(readFileSync(`${branding}.pre-omastoic`, "utf8")).toBe("unrelated backup");
   } finally { s.cleanup(); }
 });
+
+test("covering our own canvas again keeps the original foreign backup and off restores it", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const backup = `${branding}.pre-omastoic`;
+  s.put(branding, "original foreign art\n");
+  try {
+    expect((await s.cli(["on"])).code).toBe(0);
+    const firstCanvas = readFileSync(branding, "utf8");
+    expect(firstCanvas).not.toBe("original foreign art\n");
+    expect(readFileSync(backup, "utf8")).toBe("original foreign art\n");
+
+    expect((await s.cli(["on"])).code).toBe(0);
+    expect(readFileSync(backup, "utf8")).toBe("original foreign art\n");
+
+    expect((await s.cli(["off"])).code).toBe(0);
+    expect(readFileSync(branding, "utf8")).toBe("original foreign art\n");
+    expect(existsSync(backup)).toBe(false);
+  } finally { s.cleanup(); }
+});
+
+test("a foreign write makes next stand aside without clobbering the file or backup", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const backup = `${branding}.pre-omastoic`;
+  s.put(branding, "original foreign art\n");
+  try {
+    expect((await s.cli(["on"])).code).toBe(0);
+    expect(existsSync(join(s.home, "toggle"))).toBe(true);
+    expect(readFileSync(backup, "utf8")).toBe("original foreign art\n");
+
+    s.put(branding, "newer user art\n");
+    const result = await s.cli(["next"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("standing aside");
+    expect(existsSync(join(s.home, "toggle"))).toBe(false);
+    expect(readFileSync(branding, "utf8")).toBe("newer user art\n");
+    expect(readFileSync(backup, "utf8")).toBe("original foreign art\n");
+  } finally { s.cleanup(); }
+});
