@@ -541,6 +541,7 @@ Item {
       "tst_panel.qml",
       `import QtQuick
 import QtTest
+import MockCommons as Commons
 
 Item {
   id: harness
@@ -885,6 +886,28 @@ Item {
       var chrome = findOne(removeBtn, function(item) { return item.border && item.border.width === 2 })
       verify(chrome !== null)
       compare(String(chrome.border.color), "#f7768e")
+
+      // Catppuccin Latte (light theme) uses the light theme's urgent colour (#d20f39) on Remove? border, fill, and inner accent.
+      var savedAccent = Commons.Color.accent
+      var savedUrgent = Commons.Color.urgent
+      var savedPopups = Commons.Color.popups
+      Commons.Color.accent = "#1e66f5"
+      Commons.Color.urgent = "#d20f39"
+      Commons.Color.popups = { background: "#eff1f5", border: "#bcc0cc", text: "#4c4f69" }
+      wait(20)
+      compare(String(chrome.border.color), "#d20f39")
+      compare(chrome.border.width, 2)
+      verify(Math.abs(chrome.color.r - Commons.Color.urgent.r) < 0.01)
+      verify(Math.abs(chrome.color.g - Commons.Color.urgent.g) < 0.01)
+      verify(Math.abs(chrome.color.b - Commons.Color.urgent.b) < 0.01)
+      verify(Math.abs(chrome.color.a - 0.20) < 0.01)
+      var removeInner = findOne(removeBtn, function(item) { return item.hasOwnProperty("focusable") })
+      verify(removeInner !== null)
+      compare(String(removeInner.accent), "#d20f39")
+      Commons.Color.accent = savedAccent
+      Commons.Color.urgent = savedUrgent
+      Commons.Color.popups = savedPopups
+      wait(20)
 
       // 3. Opening Edit and pressing Cancel restores contentY so the row stays under the pointer.
       scroller.contentY = 0
