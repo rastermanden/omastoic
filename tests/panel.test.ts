@@ -284,3 +284,60 @@ test("omastoic ui toggles the panel through the running shell", async () => {
     expect(missing.stderr).not.toContain("Executable not found");
   } finally { s.cleanup(); }
 });
+
+test("panel size persists under XDG_STATE_HOME without touching config.json or the daemon", async () => {
+  const s = sandbox();
+  const branding = join(s.config, "omarchy/branding/screensaver.txt");
+  const sizePath = join(s.state, "panel-size.json");
+  s.put(branding, "my art\n");
+  try {
+    // Initially absent: panel state reports null and does not create STATE.
+    const initial = stateOf(await s.cli(["panel", "state"]));
+    expect(initial.panelSize).toBeNull();
+    expect(existsSync(s.state)).toBe(false);
+
+    // Save a custom size; config.json stays absent and panel state reads it back.
+    const savedSize = await s.cli(["panel", "size", JSON.stringify({ width: 740, height: 610 })]);
+    expect(savedSize.code).toBe(0);
+    expect(JSON.parse(savedSize.stdout)).toEqual({ width: 740, height: 610 });
+    expect(existsSync(sizePath)).toBe(true);
+    expect(existsSync(settingsPath(s))).toBe(false);
+    expect(stateOf(await s.cli(["panel", "state"])).panelSize).toEqual({ width: 740, height: 610 });
+
+    // Running `omastoic config` is unaffected and never writes panel size into config.json.
+    expect((await s.cli(["config", "--authors", "marcus", "--interval", "45"])).code).toBe(0);
+    expect(saved(s)).toEqual({ interval: 45, authors: ["marcus"] });
+
+    // Resizing never restarts an active daemon.
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect((await s.cli(["on"])).code).toBe(0);
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["panel", "size", JSON.stringify({ width: 820 })])).code).toBe(0);
+    expect(s.log()).not.toContain("restart");
+    expect(stateOf(await s.cli(["panel", "state"])).panelSize).toEqual({ width: 820 });
+    expect(saved(s)).toEqual({ interval: 45, authors: ["marcus"] });
+
+    // Invalid payloads fail cleanly and preserve the previous size file.
+    for (const invalid of [{ width: 50 }, { reset: false }, { width: null }, { reset: true, width: null }]) {
+      const bad = await s.cli(["panel", "size", JSON.stringify(invalid)]);
+      expect(bad.code).toBe(1);
+      expect(bad.stderr).toContain("omastoic:");
+      expect(stateOf(await s.cli(["panel", "state"])).panelSize).toEqual({ width: 820 });
+    }
+
+    // Corrupt state on disk falls back to null on panel state.
+    s.put(sizePath, "{broken");
+    expect(stateOf(await s.cli(["panel", "state"])).panelSize).toBeNull();
+
+    // Reset removes the state file cleanly.
+    expect((await s.cli(["panel", "size", JSON.stringify({ reset: true })])).code).toBe(0);
+    expect(existsSync(sizePath)).toBe(false);
+    expect(stateOf(await s.cli(["panel", "state"])).panelSize).toBeNull();
+
+    // Uninstall sweeps panel-size.json along with runtime state.
+    expect((await s.cli(["panel", "size", JSON.stringify({ width: 700, height: 550 })])).code).toBe(0);
+    expect(existsSync(sizePath)).toBe(true);
+    expect((await s.cli(["uninstall"])).code).toBe(0);
+    expect(existsSync(sizePath)).toBe(false);
+  } finally { s.cleanup(); }
+});
