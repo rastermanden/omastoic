@@ -274,9 +274,12 @@ test("normalizeAuthorDates formats ranges to the bundled en-dash style and keeps
     expect(normalizeAuthorDates(author.dates)).toBe(author.dates);
   }
 
-  // parseAuthors normalizes existing rows on read.
-  const parsed = parseAuthors("locke\tJohn Locke\t1632–1704\nhume\tDavid Hume\t1711-1776\nz\tZeno\tfl. 300 BC\n");
+  // parseAuthors normalizes existing rows on read and keeps 127-128 char ranges within MAX_AUTHOR_FIELD.
+  const raw128 = `${"1".repeat(126)}-2`;
+  const parsed = parseAuthors(`locke\tJohn Locke\t1632–1704\nhume\tDavid Hume\t1711-1776\nz\tZeno\tfl. 300 BC\nmax\tMax Range\t${raw128}\n`);
   expect(parsed.get("locke")?.dates).toBe("1632 – 1704");
   expect(parsed.get("hume")?.dates).toBe("1711 – 1776");
   expect(parsed.get("z")?.dates).toBe("fl. 300 BC");
+  expect(parsed.get("max")?.dates).toBe(raw128);
+  expect(parsed.get("max")!.dates.length).toBe(128);
 });

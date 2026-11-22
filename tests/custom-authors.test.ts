@@ -1684,12 +1684,19 @@ test("custom author date ranges normalize on add, replace, panel, and read witho
     expect(panelReplaceState.samples.find((a: { slug: string }) => a.slug === "hume")?.dates).toBe("1711 – 1776");
 
     // An existing unnormalized row on disk is normalized on read without rewriting the file.
-    const rawTsv = `${readFileSync(authorsFile, "utf8")}kant\tImmanuel Kant\t1724–1804\n`;
+    const raw128 = `${"1".repeat(126)}-2`;
+    const rawTsv = `${readFileSync(authorsFile, "utf8")}kant\tImmanuel Kant\t1724–1804\nlongrange\tLong Range\t${raw128}\n`;
     s.put(authorsFile, rawTsv);
     const state = await s.cli(["panel", "state"]);
     expectOk(state, "panel state on existing unnormalized row");
     const parsedState = JSON.parse(state.stdout);
     expect(parsedState.samples.find((a: { slug: string }) => a.slug === "kant")?.dates).toBe("1724 – 1804");
+    expect(parsedState.samples.find((a: { slug: string }) => a.slug === "longrange")?.dates).toBe(raw128);
     expect(readFileSync(authorsFile, "utf8")).toBe(rawTsv);
+
+    // Name-only replace on a 128-character tight range succeeds and preserves its dates.
+    const nameOnly = await s.cli(["config", "--replace-author", "longrange", "--name", "Renamed Range"]);
+    expectOk(nameOnly, "name-only replace on 128-char range");
+    expect(readFileSync(authorsFile, "utf8")).toContain(`longrange\tRenamed Range\t${raw128}\n`);
   } finally { s.cleanup(); }
 });

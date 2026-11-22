@@ -78,7 +78,8 @@ export function parseAuthors(tsv: string): Map<string, Author> {
     if (!name || name.length > MAX_AUTHOR_FIELD || rawDates.length > MAX_AUTHOR_FIELD) {
       throw new Error("author name or dates is empty or too long");
     }
-    const dates = normalizeAuthorDates(rawDates);
+    const normalized = normalizeAuthorDates(rawDates);
+    const dates = normalized.length <= MAX_AUTHOR_FIELD ? normalized : rawDates;
     authors.set(slug, { slug, name, dates });
   }
   return authors;
