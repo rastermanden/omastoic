@@ -1089,7 +1089,7 @@ Item {
       var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" && item.visible })
       verify(slugField !== null)
 
-      // #114: Triggering a form error with the submit button at the bottom edge keeps BOTH error and submit button inside the viewport.
+      // #114 (author form): Triggering an author form error with the submit button at the bottom edge keeps BOTH error and submit button inside the viewport.
       var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
       verify(submitBtn !== null)
       panel.error = ""
@@ -1110,9 +1110,27 @@ Item {
       panel.closeAuthorForm()
       wait(20)
 
-      // #113: Unticking the last selected author while a form is open scrolls the empty-pick hint into view.
+      // #114 (quote form): Triggering a quote form error with Add quote at the bottom edge keeps BOTH error and submit button inside the viewport.
       panel.toggleQuoteForm()
       wait(20)
+      var quoteSubmitBtn = findOne(panel, function(item) { return item.label === "Add quote" && item.visible })
+      verify(quoteSubmitBtn !== null)
+      panel.error = ""
+      panel.errorScope = ""
+      wait(20)
+      var quoteSubmitBottom = quoteSubmitBtn.mapToItem(scroller.contentItem, 0, 0).y + quoteSubmitBtn.height
+      scroller.contentY = Math.max(0, quoteSubmitBottom - scroller.height)
+      wait(20)
+      panel.addQuote()
+      wait(20)
+      var quoteErr = findOne(panel, function(item) { return item.text === panel.error && item.visible })
+      verify(quoteErr !== null)
+      var quoteErrInView = quoteErr.mapToItem(scroller, 0, 0)
+      var quoteSubmitInView = quoteSubmitBtn.mapToItem(scroller, 0, 0)
+      verify(quoteErrInView.y >= -1 && quoteErrInView.y + quoteErr.height <= scroller.height + 1)
+      verify(quoteSubmitInView.y >= -1 && quoteSubmitInView.y + quoteSubmitBtn.height <= scroller.height + 1)
+
+      // #113: Unticking the last selected author while a form is open scrolls the empty-pick hint into view.
       panel.toggleAuthor("chrysippus")
       wait(20)
       compare(panel.authorListHint, "Pick at least one author.")
