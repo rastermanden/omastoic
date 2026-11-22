@@ -30,6 +30,7 @@ test("the panel changes settings only through the CLI bridge", () => {
   expect(source).not.toContain("quotes.tsv");
   expect(source).toContain('"panel", "state"');
   expect(source).toContain('"panel", "apply"');
+  expect(source).toContain('"panel", "pick-image"');
 });
 
 test("the settings panel applies changes itself and shows the quote", () => {
@@ -59,6 +60,11 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("addAuthor");
   expect(source).toContain("replaceAuthor");
   expect(source).toContain("removeAuthor");
+  expect(source).toContain('label: "Choose image"');
+  expect(source).toContain("chooseAuthorImage()");
+  expect(source).toContain("visible: root.opened && !root.pickingImage");
+  expect(source).toContain("WlrLayershell.keyboardFocus: root.pickingImage ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive");
+  expect(source).toContain("Could not open the file picker. Type a path instead.");
   expect(source).toContain("confirmRemoveAuthor");
   expect(source).toContain("requestRemoveAuthor");
   expect(source).toContain('"Remove?"');
@@ -1313,6 +1319,279 @@ Item {
       verify(Math.abs(rightWithoutPortrait - scroller.width) <= 1)
       verify(Math.abs(rightWithoutPortrait - rightWithPortrait) <= 1)
     }
+
+    function findProcessFor(subcommand) {
+      return findOne(panel, function(item) {
+        return item.hasOwnProperty("command") && Array.isArray(item.command) && item.command.indexOf(subcommand) !== -1
+      })
+    }
+
+    function completeProcess(proc, exitCode, stdoutText, stderrText, exitFirst) {
+      proc.running = false
+      if (exitFirst) {
+        proc.exited(exitCode)
+        proc.stdout.text = stdoutText
+        proc.stdout.streamFinished()
+        proc.stderr.text = stderrText
+        proc.stderr.streamFinished()
+      } else {
+        proc.stdout.text = stdoutText
+        proc.stdout.streamFinished()
+        proc.stderr.text = stderrText
+        proc.stderr.streamFinished()
+        proc.exited(exitCode)
+      }
+    }
+
+    function resetPanelState() {
+      panel.close()
+      panel.closeAuthorForm()
+      panel.quoteOpen = false
+      panel.listOpen = false
+      panel.saving = false
+      panel.addingAuthor = false
+      panel.replacingAuthor = false
+      panel.addingQuote = false
+      panel.notice = ""
+      panel.error = ""
+      panel.errorScope = ""
+      panel.authorListHint = ""
+      panel.hasFormReturnY = false
+      panel.formReturnContentY = 0
+      panel.pendingAuthor = null
+      panel.pendingReplaceAuthor = null
+      panel.pendingRemoveAuthor = ""
+      panel.applyQueued = false
+      var applyProc = findProcessFor("apply")
+      if (applyProc) applyProc.running = false
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      if (scroller) scroller.contentY = 0
+      seedPanel()
+    }
+
+    function init() {
+      resetPanelState()
+    }
+
+    function test_choose_image_works_for_add_replace_cancel_and_no_portal_fallback() {
+      var panelWindow = findOne(panel, function(item) {
+        return item.hasOwnProperty("exclusionMode")
+      })
+      verify(panelWindow !== null)
+      compare(panelWindow.visible, true)
+
+      // 1. Add form: Choose image button exists, hides overlay while picking, writes path (even when exited fires before streams), and submits via addAuthor.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      var chooseBtn = findOne(panel, function(item) { return item.label === "Choose image" && item.visible })
+      verify(chooseBtn !== null)
+      compare(chooseBtn.available, true)
+
+      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      verify(imageField !== null)
+      verify(chooseBtn.x >= imageField.x + imageField.width)
+
+      panel.reveal(chooseBtn)
+      waitForRendering(panel)
+      mouseClick(chooseBtn)
+      compare(panel.pickingImage, true)
+      compare(panelWindow.visible, false)
+
+      var pickProc = panel.activePickProcess
+      verify(pickProc !== null)
+      compare(pickProc.running, true)
+      compare(pickProc.command[pickProc.command.length - 2], "panel")
+      compare(pickProc.command[pickProc.command.length - 1], "pick-image")
+
+      // Clicking again while already picking is ignored and does not replace activePickProcess.
+      panel.chooseAuthorImage()
+      compare(panel.activePickProcess, pickProc)
+
+      completeProcess(pickProc, 0, "/home/test/Pictures/Cleanthes Portrait.png\\n", "", true)
+      compare(panel.pickingImage, false)
+      compare(panelWindow.visible, true)
+      compare(imageField.text, "/home/test/Pictures/Cleanthes Portrait.png")
+      compare(panel.newAuthorImage, "/home/test/Pictures/Cleanthes Portrait.png")
+      compare(panel.error, "")
+      wait(0)
+      compare(imageField.activeFocus, true)
+
+      // Fill remaining Add author fields and verify the picked path flows into panel apply addAuthor.
+      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var citeField = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var quoteField = findOne(panel, function(item) { return item.placeholderText === "The line itself" && item.visible })
+      verify(nameField !== null && citeField !== null && quoteField !== null)
+      nameField.text = "Posidonius"
+      citeField.text = "Fragments 1"
+      quoteField.text = "Live in study of the truth."
+      compare(panel.authorReady, true)
+
+      var submitAddBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(submitAddBtn !== null)
+      panel.reveal(submitAddBtn)
+      waitForRendering(panel)
+      mouseClick(submitAddBtn)
+      var applyProc = findProcessFor("apply")
+      verify(applyProc !== null)
+      var addPayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(addPayload.addAuthor.slug, "posidonius")
+      compare(addPayload.addAuthor.image, "/home/test/Pictures/Cleanthes Portrait.png")
+
+      // 2. Cancelling the picker leaves field and pending state unchanged (empty, non-empty with existing notice, and edit form).
+      resetPanelState()
+      addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      chooseBtn = findOne(panel, function(item) { return item.label === "Choose image" && item.visible })
+
+      // 2a. Empty field cancel
+      panel.reveal(chooseBtn)
+      waitForRendering(panel)
+      mouseClick(chooseBtn)
+      pickProc = panel.activePickProcess
+      verify(pickProc !== null)
+      completeProcess(pickProc, 1, "", "", false)
+      compare(panel.pickingImage, false)
+      compare(panelWindow.visible, true)
+      compare(imageField.text, "")
+      compare(panel.newAuthorImage, "")
+      compare(panel.pendingAuthor, null)
+      compare(panel.error, "")
+      compare(panel.notice, "")
+
+      // 2b. Non-empty field + pre-existing notice cancel
+      imageField.text = "/existing/keep-me.jpg"
+      panel.notice = "Keep existing notice."
+      panel.reveal(chooseBtn)
+      waitForRendering(panel)
+      mouseClick(chooseBtn)
+      pickProc = panel.activePickProcess
+      completeProcess(pickProc, 1, "", "", false)
+      compare(panel.pickingImage, false)
+      compare(panelWindow.visible, true)
+      compare(imageField.text, "/existing/keep-me.jpg")
+      compare(panel.newAuthorImage, "/existing/keep-me.jpg")
+      compare(panel.pendingAuthor, null)
+      compare(panel.error, "")
+      compare(panel.notice, "Keep existing notice.")
+
+      // 3. No-portal fallback (exit 2): keeps typed path, shows short notice, reveals statusSlot, stays usable, clears when typing or closing form.
+      panel.reveal(chooseBtn)
+      waitForRendering(panel)
+      mouseClick(chooseBtn)
+      pickProc = panel.activePickProcess
+      completeProcess(pickProc, 2, "", "omastoic: portal file chooser failed\\n", false)
+      compare(panel.pickingImage, false)
+      compare(panelWindow.visible, true)
+      compare(imageField.text, "/existing/keep-me.jpg")
+      compare(panel.newAuthorImage, "/existing/keep-me.jpg")
+      compare(panel.error, "")
+      compare(panel.notice, "Could not open the file picker. Type a path instead.")
+      compare(chooseBtn.available, true)
+      wait(0)
+      compare(imageField.activeFocus, true)
+      imageField.text = "/typed/fallback.png"
+      compare(panel.notice, "")
+
+      // 3b. Process failing to start (running flips false without exited) recovers cleanly instead of staying hidden.
+      mouseClick(chooseBtn)
+      compare(panel.pickingImage, true)
+      compare(panelWindow.visible, false)
+      pickProc = panel.activePickProcess
+      verify(pickProc !== null)
+      pickProc.running = false
+      wait(0)
+      compare(panel.pickingImage, false)
+      compare(panelWindow.visible, true)
+      compare(panel.notice, "Could not open the file picker. Type a path instead.")
+
+      // Switching away to quote form clears pickerUnavailableNotice and closes authorForm cleanly.
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      verify(addQuoteBtn !== null)
+      panel.reveal(addQuoteBtn)
+      waitForRendering(panel)
+      mouseClick(addQuoteBtn)
+      compare(panel.authorOpen, false)
+      compare(panel.notice, "")
+
+      // 4. Replace/Edit form: cancel leaves state unchanged, accepted pick writes patch.image for replaceAuthor.
+      resetPanelState()
+      var editButtons = findAll(panel, function(item) { return item.label === "Edit" && item.visible })
+      compare(editButtons.length, 2)
+      mouseClick(editButtons[0])
+      waitForRendering(panel)
+      var replaceImageField = findOne(panel, function(item) { return item.placeholderText === "Leave empty to keep current portrait" && item.visible })
+      chooseBtn = findOne(panel, function(item) { return item.label === "Choose image" && item.visible })
+      verify(replaceImageField !== null && chooseBtn !== null)
+      compare(panel.authorReady, false)
+
+      panel.reveal(chooseBtn)
+      waitForRendering(panel)
+      mouseClick(chooseBtn)
+      pickProc = panel.activePickProcess
+      completeProcess(pickProc, 1, "", "", false)
+      compare(replaceImageField.text, "")
+      compare(panel.authorReady, false)
+      compare(panel.pendingReplaceAuthor, null)
+
+      mouseClick(chooseBtn)
+      compare(panel.pickingImage, true)
+      pickProc = panel.activePickProcess
+      completeProcess(pickProc, 0, "/home/test/Pictures/musonius-new.jpg\\n", "", false)
+      compare(panel.pickingImage, false)
+      compare(replaceImageField.text, "/home/test/Pictures/musonius-new.jpg")
+      compare(panel.authorReady, true)
+
+      var submitReplaceBtn = findOne(panel, function(item) { return item.label === "Save changes" && item.visible })
+      verify(submitReplaceBtn !== null)
+      panel.reveal(submitReplaceBtn)
+      waitForRendering(panel)
+      mouseClick(submitReplaceBtn)
+      applyProc = findProcessFor("apply")
+      verify(applyProc !== null)
+      var replacePayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(replacePayload.replaceAuthor.slug, "musonius")
+      compare(replacePayload.replaceAuthor.image, "/home/test/Pictures/musonius-new.jpg")
+
+      // 5. Closing while picking and starting a fresh pick isolates the two processes so stale signals cannot corrupt the new pick.
+      resetPanelState()
+      addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      chooseBtn = findOne(panel, function(item) { return item.label === "Choose image" && item.visible })
+      panel.reveal(chooseBtn)
+      waitForRendering(panel)
+      mouseClick(chooseBtn)
+      var firstProc = panel.activePickProcess
+      verify(firstProc !== null)
+      compare(panel.pickingImage, true)
+      panel.cancelImagePick()
+      compare(panel.pickingImage, false)
+      compare(firstProc.running, false)
+
+      // Start second pick BEFORE stale firstProc emits exited/streamFinished.
+      mouseClick(chooseBtn)
+      var secondProc = panel.activePickProcess
+      verify(secondProc !== null && secondProc !== firstProc)
+      compare(panel.pickingImage, true)
+      completeProcess(firstProc, 0, "/stale/first.png\\n", "", false)
+      compare(panel.pickingImage, true)
+      compare(panelWindow.visible, false)
+      compare(imageField.text, "")
+
+      // Now complete the second pick cleanly.
+      completeProcess(secondProc, 0, "/fresh/second.png\\n", "", false)
+      compare(panel.pickingImage, false)
+      compare(panelWindow.visible, true)
+      compare(imageField.text, "/fresh/second.png")
+    }
   }
 }
 `,
@@ -1328,7 +1607,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("9 passed, 0 failed");
+    expect(combined, combined).toContain("10 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

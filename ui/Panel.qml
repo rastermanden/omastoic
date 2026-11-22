@@ -39,6 +39,10 @@ Item {
   property bool addingAuthor: false
   property bool replacingAuthor: false
   property bool addingQuote: false
+  property bool pickingImage: false
+  property int pickRequestId: 0
+  property var activePickProcess: null
+  readonly property string pickerUnavailableNotice: "Could not open the file picker. Type a path instead."
   property string pendingRemove: ""
   property string pendingRemoveAuthor: ""
   property string confirmRemoveAuthor: ""
@@ -114,6 +118,7 @@ Item {
   readonly property color dates: Qt.rgba(ink.r, ink.g, ink.b, 0.92)
 
   function open(payloadJson) {
+    cancelImagePick()
     opened = true
     hasLocalSize = sizeProcess.running || pendingSizePayload !== ""
     resizing = false
@@ -146,6 +151,8 @@ Item {
   }
 
   function close() {
+    cancelImagePick()
+    clearPickerNotice()
     opened = false
     resizing = false
     hasFormReturnY = false
@@ -176,6 +183,102 @@ Item {
     }
     clampAndSet()
     Qt.callLater(clampAndSet)
+  }
+
+  function clearPickerNotice() {
+    if (notice === pickerUnavailableNotice) notice = ""
+  }
+
+  function cancelImagePick() {
+    pickRequestId++
+    pickingImage = false
+    let proc = activePickProcess
+    activePickProcess = null
+    if (proc) {
+      if (proc.running) proc.running = false
+      else proc.destroy()
+    }
+  }
+
+  function chooseAuthorImage() {
+    if (!root.opened || !root.authorOpen || root.busy || root.pickingImage) return
+    confirmRemoveAuthor = ""
+    pickRequestId++
+    let reqId = pickRequestId
+    let proc = pickImageProcessComponent.createObject(root, {
+      requestId: reqId,
+      command: [command, "panel", "pick-image"],
+    })
+    if (!proc) {
+      error = ""
+      errorScope = ""
+      notice = pickerUnavailableNotice
+      Qt.callLater(function() {
+        if (root.opened && root.authorOpen && !root.pickingImage) {
+          authorImageField.forceActiveFocus()
+          root.reveal(statusSlot)
+        }
+      })
+      return
+    }
+    activePickProcess = proc
+    pickingImage = true
+    proc.running = true
+  }
+
+  function settlePickProcess(proc) {
+    if (!proc || proc.settled) return
+    if (!proc.processExited || proc.streamsLeft > 0) return
+    proc.settled = true
+    if (activePickProcess === proc) activePickProcess = null
+    let isCurrent = proc.requestId === pickRequestId
+    let exitStatus = proc.exitStatus
+    let stdoutText = proc.stdoutText
+    proc.destroy()
+    if (!isCurrent) return
+    pickingImage = false
+    if (!root.opened || !root.authorOpen) return
+    if (exitStatus === 0) {
+      let chosen = String(stdoutText || "").replace(/\r?\n$/, "")
+      if (chosen !== "") {
+        authorImageField.text = chosen
+        error = ""
+        errorScope = ""
+        clearPickerNotice()
+        Qt.callLater(function() {
+          if (root.opened && root.authorOpen && !root.pickingImage) {
+            root.reveal(authorImageField)
+            authorImageField.forceActiveFocus()
+          }
+        })
+        return
+      }
+      Qt.callLater(function() {
+        if (root.opened && root.authorOpen && !root.pickingImage) {
+          root.reveal(chooseImageButton)
+          chooseImageButton.takeFocus()
+        }
+      })
+      return
+    }
+    if (exitStatus === 1) {
+      Qt.callLater(function() {
+        if (root.opened && root.authorOpen && !root.pickingImage) {
+          root.reveal(chooseImageButton)
+          chooseImageButton.takeFocus()
+        }
+      })
+      return
+    }
+    error = ""
+    errorScope = ""
+    notice = pickerUnavailableNotice
+    Qt.callLater(function() {
+      if (root.opened && root.authorOpen && !root.pickingImage) {
+        authorImageField.forceActiveFocus()
+        root.reveal(statusSlot)
+      }
+    })
   }
 
   function reveal(item) {
@@ -457,6 +560,8 @@ Item {
       return
     }
     captureFormReturnY()
+    cancelImagePick()
+    clearPickerNotice()
     authorOpen = false
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
@@ -486,6 +591,8 @@ Item {
   }
 
   function openAddAuthor() {
+    cancelImagePick()
+    clearPickerNotice()
     confirmRemoveAuthor = ""
     error = ""
     errorScope = ""
@@ -512,6 +619,8 @@ Item {
   }
 
   function startEditAuthor(author) {
+    cancelImagePick()
+    clearPickerNotice()
     confirmRemoveAuthor = ""
     error = ""
     errorScope = ""
@@ -538,6 +647,8 @@ Item {
   }
 
   function closeAuthorForm() {
+    cancelImagePick()
+    clearPickerNotice()
     authorOpen = false
     authorAdvancedOpen = false
     error = ""
@@ -554,7 +665,7 @@ Item {
   }
 
   function submitAuthor() {
-    if (root.busy) return
+    if (root.busy || root.pickingImage) return
     if (editingAuthorSlug !== "") {
       if (newAuthorName.trim() === "") {
         notice = ""
@@ -857,6 +968,53 @@ Item {
   QtObject { id: stateRun; property bool exited: false; property int exitCode: 0; property string stdout: ""; property string stderr: ""; property int streamsLeft: 0 }
   QtObject { id: applyRun; property bool exited: false; property int exitCode: 0; property string stdout: ""; property string stderr: ""; property int streamsLeft: 0 }
 
+  Component {
+    id: pickImageProcessComponent
+    Process {
+      id: proc
+      property int requestId: 0
+      property bool processExited: false
+      property bool settled: false
+      property int exitStatus: 0
+      property string stdoutText: ""
+      property string stderrText: ""
+      property int streamsLeft: 2
+      stdout: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          proc.stdoutText = String(text || "")
+          proc.streamsLeft--
+          root.settlePickProcess(proc)
+        }
+      }
+      stderr: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          proc.stderrText = String(text || "")
+          proc.streamsLeft--
+          root.settlePickProcess(proc)
+        }
+      }
+      onExited: function(code) {
+        proc.exitStatus = code
+        proc.processExited = true
+        root.settlePickProcess(proc)
+      }
+      onRunningChanged: {
+        if (!proc.running && !proc.processExited && !proc.settled) {
+          Qt.callLater(function() {
+            if (proc && !proc.processExited && !proc.settled) {
+              proc.processExited = true
+              proc.exitStatus = 2
+              proc.streamsLeft = 0
+              root.settlePickProcess(proc)
+            }
+          })
+        }
+      }
+    }
+  }
+
   Process {
     id: stateProcess
     command: [root.command, "panel", "state"]
@@ -1075,13 +1233,13 @@ Item {
 
   PanelWindow {
     id: window
-    visible: root.opened
+    visible: root.opened && !root.pickingImage
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.namespace: "omastoic-panel"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    WlrLayershell.keyboardFocus: root.pickingImage ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
 
     Rectangle {
       anchors.fill: parent
@@ -1672,26 +1830,45 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
               }
-              Item {
+              Row {
+                id: authorImageRow
                 width: parent.width
-                height: authorImageField.implicitHeight
-                TextField {
-                  id: authorImageField
-                  width: parent.width
-                  placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current portrait" : "/path/to/portrait.png"
-                  placeholderTextColor: root.hint
-                  foreground: root.ink
-                  onTextChanged: root.newAuthorImage = text
-                  onActiveFocusChanged: if (activeFocus) root.reveal(authorImageField)
+                spacing: Style.space(8)
+                Item {
+                  width: Math.max(0, parent.width - chooseImageButton.implicitWidth - Style.space(8))
+                  height: Math.max(authorImageField.implicitHeight, chooseImageButton.implicitHeight)
+                  TextField {
+                    id: authorImageField
+                    width: parent.width
+                    anchors.verticalCenter: parent.verticalCenter
+                    placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current portrait" : "/path/to/portrait.png"
+                    placeholderTextColor: root.hint
+                    foreground: root.ink
+                    onTextChanged: {
+                      root.newAuthorImage = text
+                      if (root.notice === root.pickerUnavailableNotice) {
+                        root.clearPickerNotice()
+                        if (activeFocus) root.reveal(authorImageField)
+                      }
+                    }
+                    onActiveFocusChanged: if (activeFocus) root.reveal(authorImageField)
+                  }
+                  Rectangle {
+                    anchors.fill: authorImageField
+                    anchors.margins: -2
+                    enabled: false
+                    color: "transparent"
+                    radius: Style.cornerRadius
+                    border.width: authorImageField.activeFocus ? 2 : 0
+                    border.color: Commons.Color.accent
+                  }
                 }
-                Rectangle {
-                  anchors.fill: parent
-                  anchors.margins: -2
-                  enabled: false
-                  color: "transparent"
-                  radius: Style.cornerRadius
-                  border.width: authorImageField.activeFocus ? 2 : 0
-                  border.color: Commons.Color.accent
+                RingButton {
+                  id: chooseImageButton
+                  anchors.verticalCenter: parent.verticalCenter
+                  label: "Choose image"
+                  available: !root.busy && !root.pickingImage
+                  onActivated: root.chooseAuthorImage()
                 }
               }
               Text {
