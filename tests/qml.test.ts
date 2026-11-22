@@ -93,7 +93,7 @@ test("a partial portrait is hidden and focused fields still scroll into view", (
   const source = panel();
   expect(source).toContain("function portraitFullyVisible(top, height, contentY, viewport)");
   expect(source).toContain("return top >= contentY - 0.5 && top + height <= contentY + viewport + 0.5");
-  expect(source).toContain("opacity: portraitFullyVisible(");
+  expect(source).toContain("opacity: root.portraitFullyVisible(");
   expect(source).toContain("scroller.contentY = Math.max(0, bottom - scroller.height + 8)");
 });
 
@@ -178,11 +178,133 @@ test("import rewriting only touches the qs prefix", () => {
   );
 });
 
-test("kit noise is reported but is not a failure", () => {
+test("kit noise is reported but only Style and Commons.Color unqualified lookups are filtered", () => {
   expect(failuresIn('Warning: f.qml:1:1: Member "popupPadding" not found on type "QObject" [missing-property]')).toEqual([]);
-  expect(failuresIn('Warning: f.qml:1:1: Unqualified access [unqualified]')).toEqual([]);
   expect(failuresIn("Warning: f.qml:1:1: Type Toggel is not a type [unresolved-type]")).toHaveLength(1);
   expect(failuresIn("Warning: f.qml:1:1: Expected token '{' [syntax]")).toHaveLength(1);
+
+  // Host kit singletons (`Style` and `Commons.Color`) are filtered.
+  expect(failuresIn([
+    "Warning: f.qml:4:17: Unqualified access [unqualified]",
+    "  border.color: Commons.Color.accent",
+    "                ^^^^^^^",
+    "Warning: f.qml:5:16: Unqualified access [unqualified]",
+    "  font.family: Style.font.family",
+    "               ^^^^^",
+  ].join("\n"))).toEqual([]);
+
+  // Any other unqualified access fails, including bare warnings without source context.
+  expect(failuresIn("Warning: f.qml:1:1: Unqualified access [unqualified]")).toHaveLength(1);
+  expect(failuresIn([
+    "Warning: f.qml:6:21: Unqualified access [unqualified]",
+    "  property int bad: mysteryValue",
+    "                    ^^^^^^^^^^^^",
+  ].join("\n"))).toHaveLength(1);
+  expect(failuresIn([
+    "Warning: f.qml:7:11: Unqualified access [unqualified]",
+    "  text: modelData.name",
+    "        ^^^^^^^^^",
+  ].join("\n"))).toHaveLength(1);
+
+  // Near-miss names are not treated as the host kit singletons.
+  for (const [source, caret] of [
+    ["  property var x: Commons.Other.accent", "                  ^^^^^^^"],
+    ["  property var x: Commons.ColorScheme.accent", "                  ^^^^^^^"],
+    ["  property var x: Commons", "                  ^^^^^^^"],
+    ["  property var x: CommonsHelper.Color.accent", "                  ^^^^^^^^^^^^^"],
+    ["  property var x: StyleHelper.font", "                  ^^^^^^^^^^^"],
+    ["  property var x: foo.Style.font", "                      ^^^^^"],
+  ]) {
+    expect(failuresIn(`Warning: f.qml:1:1: Unqualified access [unqualified]\n${source}\n${caret}`), source).toHaveLength(1);
+  }
+
+  // On a mixed line (including tabs in either qmllint or formatted placement, and UTF-8), only Commons.Color is filtered.
+  const mixed = [
+    "Warning: f.qml:4:21: Unqualified access [unqualified]",
+    "\tproperty color c1: badFlag ? Commons.Color.accent : otherBad",
+    "\t                   ^^^^^^^",
+    "Warning: f.qml:4:31: Unqualified access [unqualified]",
+    "\tproperty color c1: badFlag ? Commons.Color.accent : otherBad",
+    "                             \t^^^^^^^",
+    "Warning: f.qml:4:54: Unqualified access [unqualified]",
+    "\tproperty color c1: badFlag ? Commons.Color.accent : otherBad",
+    "\t                                                    ^^^^^^^^",
+    "Warning: f.qml:5:32: Unqualified access [unqualified]",
+    '  property string a: "✓ — …" + Commons.Color.accent',
+    "                               ^^^^^^^",
+    "Warning: f.qml:6:32: Unqualified access [unqualified]",
+    '  property string b: "✓ — …" + badVar',
+    "                               ^^^^^^",
+  ].join("\n");
+  expect(failuresIn(mixed)).toEqual([
+    "Warning: f.qml:4:21: Unqualified access [unqualified]",
+    "Warning: f.qml:4:54: Unqualified access [unqualified]",
+    "Warning: f.qml:6:32: Unqualified access [unqualified]",
+  ]);
+
+  // Dotted Qt plugin warning IDs and bracketless Error lines still fail.
+  expect(failuresIn("Warning: f.qml:8:1: Bad reuse [Quick.attached-property-reuse]")).toHaveLength(1);
+  expect(failuresIn("Error: f.qml:8:1: Fatal parse error")).toHaveLength(1);
+
+  // Echoed source lines ending in brackets are not mistaken for warning headers.
+  expect(failuresIn([
+    "Warning: f.qml:9:10: Member \"foo\" not found on type \"QObject\" [missing-property]",
+    "  text: items[idx]",
+    "        ^^^^^",
+  ].join("\n"))).toEqual([]);
+});
+
+test("real qmllint allows Style and Commons.Color but fails unqualified access in our QML", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "omastoic-qml-test-"));
+  try {
+    const kitOnly = join(scratch, "KitOnly.qml");
+    writeFileSync(kitOnly, [
+      "import QtQuick",
+      "import qs.Commons",
+      "import qs.Commons as Commons",
+      "Item {",
+      "  property color accent: Commons.Color.accent",
+      "  property int radius: Style.cornerRadius",
+      "}",
+      "",
+    ].join("\n"));
+
+    const kitResult = check([kitOnly]);
+    if (kitResult.skipped) {
+      console.log(`skipping real qmllint unqualified check: ${kitResult.skipped}`);
+      return;
+    }
+    expect(kitResult.failures).toEqual([]);
+    expect(kitResult.code).toBe(0);
+
+    const broken = join(scratch, "Broken.qml");
+    writeFileSync(broken, [
+      "import QtQuick",
+      "import qs.Commons",
+      "import qs.Commons as Commons",
+      "Item {",
+      "  property color c1: badFlag ? Commons.Color.accent : otherBad",
+      "  property int bad: mysteryValue",
+      "}",
+      "",
+    ].join("\n"));
+
+    const brokenResult = check([broken]);
+    expect(brokenResult.failures).toHaveLength(3);
+    expect(brokenResult.failures.every((line) => line.endsWith("[unqualified]"))).toBe(true);
+    expect(brokenResult.failures.some((line) => line.includes(":5:22:"))).toBe(true);
+    expect(brokenResult.failures.some((line) => line.includes(":5:55:"))).toBe(true);
+    expect(brokenResult.failures.some((line) => line.includes(":6:21:"))).toBe(true);
+
+    // An unqualified access early in our real panel also fails the check.
+    const brokenPanel = join(scratch, "Panel.qml");
+    writeFileSync(brokenPanel, panel().replace("property int interval: 60", "property int interval: mysteryValue"));
+    const panelResult = check([brokenPanel]);
+    expect(panelResult.failures).toHaveLength(1);
+    expect(panelResult.failures[0]).toContain("[unqualified]");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("the plugin's QML entry points compile against the host kit", () => {
@@ -237,11 +359,11 @@ test("cancel handler for Remove? sits inside the scrolling content and clears on
 
   const customActionsBody = blockContaining(source, /Row\s*\{/, "id: customActions");
   expect(customActionsBody).not.toBeNull();
-  expect(customActionsBody!).toContain("visible: modelData.custom === true");
+  expect(customActionsBody!).toContain("visible: authorRow.modelData.custom === true");
   const removeButtonBody = blockContaining(customActionsBody!, /RingButton\s*\{/, "requestRemoveAuthor");
   expect(removeButtonBody).not.toBeNull();
   expect(removeButtonBody!).toContain("keepsRemoveConfirm: true");
-  expect(removeButtonBody!).toContain('onFocusLost: if (root.confirmRemoveAuthor === modelData.slug) root.confirmRemoveAuthor = ""');
+  expect(removeButtonBody!).toContain('onFocusLost: if (root.confirmRemoveAuthor === authorRow.modelData.slug) root.confirmRemoveAuthor = ""');
 
   const escapeBody = blockContaining(source, /Keys\.onEscapePressed\s*:\s*\{/, "root.dismiss()");
   expect(escapeBody).not.toBeNull();

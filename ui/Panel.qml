@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -88,7 +89,7 @@ Item {
         newAuthorText.trim() !== ""
       )
   readonly property var preview: {
-    for (var i = 0; i < samples.length; i++) {
+    for (let i = 0; i < samples.length; i++) {
       if (selectedAuthors.indexOf(samples[i].slug) !== -1) return samples[i]
     }
     return null
@@ -227,7 +228,7 @@ Item {
     interval = Number(settings.interval) || 60
     var slugs = []
     var pool = saved.length ? saved : samples.map(function(author) { return author.slug })
-    for (var i = 0; i < samples.length; i++) {
+    for (let i = 0; i < samples.length; i++) {
       if (pool.indexOf(samples[i].slug) !== -1) slugs.push(samples[i].slug)
     }
     selectedAuthors = slugs
@@ -261,9 +262,9 @@ Item {
     confirmRemoveAuthor = ""
     var next = []
     var found = false
-    for (var i = 0; i < samples.length; i++) {
-      var id = samples[i].slug
-      var on = selectedAuthors.indexOf(id) !== -1
+    for (let i = 0; i < samples.length; i++) {
+      let id = samples[i].slug
+      let on = selectedAuthors.indexOf(id) !== -1
       if (id === slug) on = !on
       if (on) next.push(id)
       if (id === slug) found = true
@@ -315,10 +316,10 @@ Item {
       replacingAuthor = true
       if (pendingRemoveAuthor !== "" || pendingRemove !== "" || pendingQuote) applyQueued = true
     } else if (pendingRemoveAuthor !== "") {
-      var removeSlug = pendingRemoveAuthor
+      let removeSlug = pendingRemoveAuthor
       payload.removeAuthor = removeSlug
-      var nextWithoutRemoved = selectedAuthors.filter(function(slug) { return slug !== removeSlug })
-      var committedWithoutRemoved = committedAuthors.filter(function(slug) { return slug !== removeSlug })
+      let nextWithoutRemoved = selectedAuthors.filter(function(slug) { return slug !== removeSlug })
+      let committedWithoutRemoved = committedAuthors.filter(function(slug) { return slug !== removeSlug })
       if (nextWithoutRemoved.length > 0 && nextWithoutRemoved.join(",") !== committedWithoutRemoved.join(",")) {
         payload.authors = nextWithoutRemoved
       }
@@ -419,16 +420,16 @@ Item {
         Qt.callLater(function() { root.reveal(statusSlot) })
         return
       }
-      var hasCite = newAuthorCitation.trim() !== ""
-      var hasWords = newAuthorText.trim() !== ""
+      let hasCite = newAuthorCitation.trim() !== ""
+      let hasWords = newAuthorText.trim() !== ""
       if (hasCite !== hasWords) {
         error = ""
         notice = "A quote needs a citation and the words."
         Qt.callLater(function() { root.reveal(statusSlot) })
         return
       }
-      var patch = { slug: editingAuthorSlug }
-      var changed = false
+      let patch = { slug: editingAuthorSlug }
+      let changed = false
       if (newAuthorName.trim() !== editingAuthorOrigName) {
         patch.name = newAuthorName.trim()
         changed = true
@@ -692,7 +693,7 @@ Item {
                 id: portraitSlot
                 width: portraitText.implicitWidth
                 height: portraitText.implicitHeight
-                opacity: portraitFullyVisible(portraitSlot.mapToItem(scroller.contentItem, 0, 0).y, portraitSlot.height, scroller.contentY, scroller.height) ? 1 : 0
+                opacity: root.portraitFullyVisible(portraitSlot.mapToItem(scroller.contentItem, 0, 0).y, portraitSlot.height, scroller.contentY, scroller.height) ? 1 : 0
                 Text {
                   id: portraitText
                   text: root.preview ? root.preview.portrait : ""
@@ -812,7 +813,7 @@ Item {
                   anchors.fill: parent
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: root.toggleAuthor(modelData.slug)
+                  onClicked: root.toggleAuthor(authorRow.modelData.slug)
                 }
 
                 Row {
@@ -827,12 +828,12 @@ Item {
                     height: Style.space(16)
                     radius: Style.space(3)
                     anchors.verticalCenter: parent.verticalCenter
-                    color: root.selectedAuthors.indexOf(modelData.slug) !== -1 ? Commons.Color.accent : "transparent"
+                    color: root.selectedAuthors.indexOf(authorRow.modelData.slug) !== -1 ? Commons.Color.accent : "transparent"
                     border.width: Math.max(1, Style.space(1))
-                    border.color: root.selectedAuthors.indexOf(modelData.slug) !== -1 ? Commons.Color.accent : root.ink
+                    border.color: root.selectedAuthors.indexOf(authorRow.modelData.slug) !== -1 ? Commons.Color.accent : root.ink
                     Text {
                       anchors.centerIn: parent
-                      visible: root.selectedAuthors.indexOf(modelData.slug) !== -1
+                      visible: root.selectedAuthors.indexOf(authorRow.modelData.slug) !== -1
                       text: "✓"
                       color: Commons.Color.popups.background
                       font.family: Style.font.family
@@ -846,7 +847,7 @@ Item {
                     Text {
                       width: parent.width
                       elide: Text.ElideRight
-                      text: modelData.name
+                      text: authorRow.modelData.name
                       color: root.ink
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
@@ -854,8 +855,8 @@ Item {
                     Text {
                       width: parent.width
                       elide: Text.ElideRight
-                      visible: modelData.dates !== ""
-                      text: modelData.dates
+                      visible: authorRow.modelData.dates !== ""
+                      text: authorRow.modelData.dates
                       color: root.dates
                       font.family: Style.font.family
                       font.pixelSize: Style.font.bodySmall
@@ -863,22 +864,22 @@ Item {
                   }
                   Row {
                     id: customActions
-                    visible: modelData.custom === true
+                    visible: authorRow.modelData.custom === true
                     spacing: Style.space(6)
                     anchors.verticalCenter: parent.verticalCenter
                     RingButton {
                       label: "Edit"
-                      picked: root.authorOpen && root.editingAuthorSlug === modelData.slug
+                      picked: root.authorOpen && root.editingAuthorSlug === authorRow.modelData.slug
                       available: !root.busy
-                      onActivated: root.startEditAuthor(modelData)
+                      onActivated: root.startEditAuthor(authorRow.modelData)
                     }
                     RingButton {
-                      label: root.confirmRemoveAuthor === modelData.slug ? "Remove?" : "Remove"
-                      picked: root.confirmRemoveAuthor === modelData.slug
+                      label: root.confirmRemoveAuthor === authorRow.modelData.slug ? "Remove?" : "Remove"
+                      picked: root.confirmRemoveAuthor === authorRow.modelData.slug
                       available: !root.busy
                       keepsRemoveConfirm: true
-                      onActivated: root.requestRemoveAuthor(modelData.slug)
-                      onFocusLost: if (root.confirmRemoveAuthor === modelData.slug) root.confirmRemoveAuthor = ""
+                      onActivated: root.requestRemoveAuthor(authorRow.modelData.slug)
+                      onFocusLost: if (root.confirmRemoveAuthor === authorRow.modelData.slug) root.confirmRemoveAuthor = ""
                     }
                   }
                 }
@@ -987,7 +988,7 @@ Item {
                       else if (key === Qt.Key_Up) target = chipIndex - columns
                       else if (key === Qt.Key_Down) target = chipIndex + columns
                       if (target >= 0 && target < root.samples.length) {
-                        var chip = authorChips.itemAt(target)
+                        let chip = authorChips.itemAt(target)
                         if (chip) chip.takeFocus()
                       }
                     }
@@ -1057,7 +1058,7 @@ Item {
                 visible: root.newCitation.trim() !== "" || root.newText.trim() !== ""
                 text: {
                   var who = ""
-                  for (var i = 0; i < root.samples.length; i++) {
+                  for (let i = 0; i < root.samples.length; i++) {
                     if (root.samples[i].slug === root.newAuthor) who = root.samples[i].name
                   }
                   var cite = root.newCitation.trim()
@@ -1108,7 +1109,7 @@ Item {
                   onTextChanged: {
                     root.newAuthorName = text
                     if (!root.authorSlugEdited) {
-                      var suggested = root.slugFromName(text)
+                      let suggested = root.slugFromName(text)
                       if (authorSlugField.text !== suggested) authorSlugField.text = suggested
                     }
                   }
@@ -1298,12 +1299,13 @@ Item {
               Repeater {
                 model: root.custom
                 delegate: Row {
+                  id: customRow
                   required property var modelData
                   width: parent.width
                   spacing: Style.space(8)
                   Text {
                     width: parent.width - Style.space(96)
-                    text: modelData.name + ", " + modelData.citation
+                    text: customRow.modelData.name + ", " + customRow.modelData.citation
                     color: root.ink
                     font.family: Style.font.family
                     font.pixelSize: Style.font.bodySmall
@@ -1311,7 +1313,7 @@ Item {
                   }
                   RingButton {
                     label: "Remove"
-                    onActivated: root.removeQuote(modelData.id)
+                    onActivated: root.removeQuote(customRow.modelData.id)
                   }
                 }
               }
