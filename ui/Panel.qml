@@ -38,6 +38,7 @@ Item {
   property var pendingReplaceAuthor: null
   property bool addingAuthor: false
   property bool replacingAuthor: false
+  property bool addingQuote: false
   property string pendingRemove: ""
   property string pendingRemoveAuthor: ""
   property string confirmRemoveAuthor: ""
@@ -46,13 +47,15 @@ Item {
   property string editingAuthorOrigDates: ""
   property string notice: ""
   property string error: ""
+  property string errorScope: ""
+  property string authorListHint: ""
   property bool quoteOpen: false
   onQuoteOpenChanged: if (quoteOpen) Qt.callLater(function() { root.reveal(quoteForm) })
   property bool authorOpen: false
   onAuthorOpenChanged: if (authorOpen) Qt.callLater(function() { root.reveal(authorForm) })
   property bool listOpen: false
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
-  readonly property string statusText: error !== "" ? error : notice
+  readonly property string statusText: (error !== "" && errorScope === "") ? error : notice
 
   property var selectedAuthors: []
   property var committedAuthors: []
@@ -111,6 +114,9 @@ Item {
     quoteOpen = false
     authorOpen = false
     listOpen = false
+    error = ""
+    errorScope = ""
+    authorListHint = ""
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
@@ -132,6 +138,9 @@ Item {
   function close() {
     opened = false
     resizing = false
+    error = ""
+    errorScope = ""
+    authorListHint = ""
     confirmRemoveAuthor = ""
   }
 
@@ -158,6 +167,8 @@ Item {
     if (notice === "Saving…") return
     saving = false
     error = ""
+    errorScope = ""
+    authorListHint = ""
     notice = "Loading…"
     resetRun(stateRun)
     stateProcess.running = true
@@ -192,6 +203,13 @@ Item {
       if (saving) restoreCommitted()
       notice = ""
       error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
+      if (addingAuthor || replacingAuthor) {
+        errorScope = "author"
+      } else if (addingQuote) {
+        errorScope = "quote"
+      } else {
+        errorScope = ""
+      }
       applyQueued = false
       pendingAuthor = null
       pendingReplaceAuthor = null
@@ -199,15 +217,23 @@ Item {
       pendingRemove = ""
       pendingRemoveAuthor = ""
       confirmRemoveAuthor = ""
-      Qt.callLater(function() { root.reveal(statusSlot) })
+      if (errorScope === "author") {
+        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
+      } else if (errorScope === "quote") {
+        Qt.callLater(function() { root.reveal(quoteErrorText); root.reveal(quoteSubmitButton) })
+      } else {
+        Qt.callLater(function() { root.reveal(statusSlot) })
+      }
     } else {
       error = ""
+      errorScope = ""
       notice = saving ? "Saved" : ""
       if (saving) savedTimer.restart()
     }
     saving = false
     addingAuthor = false
     replacingAuthor = false
+    addingQuote = false
     if (applyQueued) {
       applyQueued = false
       applyNow()
@@ -221,6 +247,7 @@ Item {
     if (!parsed || typeof parsed !== "object") return false
     adopting = true
     confirmRemoveAuthor = ""
+    authorListHint = ""
     var saved = parsed.settings && parsed.settings.authors instanceof Array ? parsed.settings.authors : []
     settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
     samples = parsed.samples instanceof Array ? parsed.samples : []
@@ -239,8 +266,11 @@ Item {
     committedInterval = interval
     if (samples.length && !samples.some(function(author) { return author.slug === root.newAuthor }))
       newAuthor = samples[0].slug
-    citationField.text = ""
-    textField.text = ""
+    if (addingQuote || !quoteOpen) {
+      quoteOpen = false
+      citationField.text = ""
+      textField.text = ""
+    }
     if (addingAuthor || replacingAuthor) {
       authorOpen = false
       authorSlugEdited = false
@@ -276,9 +306,11 @@ Item {
     if (!found) return
     if (!next.length) {
       error = ""
-      notice = "Pick at least one author."
+      errorScope = ""
+      authorListHint = "Pick at least one author."
       return
     }
+    authorListHint = ""
     selectedAuthors = next
     scheduleApply()
   }
@@ -292,6 +324,7 @@ Item {
   function scheduleApply() {
     if (adopting || !opened) return
     error = ""
+    errorScope = ""
     applyTimer.restart()
   }
 
@@ -300,9 +333,11 @@ Item {
     commitInterval()
     if (!selectedAuthors.length) {
       error = ""
-      notice = "Pick at least one author."
+      errorScope = ""
+      authorListHint = "Pick at least one author."
       return
     }
+    authorListHint = ""
     if (busy) { applyQueued = true; return }
     var payload = {}
     if (pendingAuthor) {
@@ -340,30 +375,58 @@ Item {
       } else if (pendingQuote) {
         payload.addQuote = pendingQuote
         pendingQuote = null
+        addingQuote = true
       }
     }
     saving = true
     error = ""
+    errorScope = ""
     notice = "Saving…"
     resetRun(applyRun)
     applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
     applyProcess.running = true
   }
 
+  function toggleQuoteForm() {
+    confirmRemoveAuthor = ""
+    error = ""
+    errorScope = ""
+    authorListHint = ""
+    if (quoteOpen) {
+      quoteOpen = false
+      return
+    }
+    authorOpen = false
+    editingAuthorSlug = ""
+    editingAuthorOrigName = ""
+    editingAuthorOrigDates = ""
+    quoteOpen = true
+    Qt.callLater(function() { root.reveal(quoteForm) })
+  }
+
+  function closeQuoteForm() {
+    quoteOpen = false
+    error = ""
+    errorScope = ""
+  }
+
   function addQuote() {
     if (!quoteReady) {
-      error = ""
-      notice = "A quote needs a citation and the words."
-      Qt.callLater(function() { root.reveal(statusSlot) })
+      notice = ""
+      error = "A quote needs a citation and the words."
+      errorScope = "quote"
+      Qt.callLater(function() { root.reveal(quoteErrorText); root.reveal(quoteSubmitButton) })
       return
     }
     pendingQuote = { author: newAuthor, citation: newCitation.trim(), text: newText.trim() }
-    quoteOpen = false
     applyNow()
   }
 
   function openAddAuthor() {
     confirmRemoveAuthor = ""
+    error = ""
+    errorScope = ""
+    authorListHint = ""
     if (authorOpen && editingAuthorSlug === "") {
       authorOpen = false
       return
@@ -385,6 +448,9 @@ Item {
 
   function startEditAuthor(author) {
     confirmRemoveAuthor = ""
+    error = ""
+    errorScope = ""
+    authorListHint = ""
     if (authorOpen && editingAuthorSlug === author.slug) {
       closeAuthorForm()
       return
@@ -406,6 +472,8 @@ Item {
 
   function closeAuthorForm() {
     authorOpen = false
+    error = ""
+    errorScope = ""
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
@@ -419,17 +487,19 @@ Item {
     if (root.busy) return
     if (editingAuthorSlug !== "") {
       if (newAuthorName.trim() === "") {
-        error = ""
-        notice = "An author needs a name."
-        Qt.callLater(function() { root.reveal(statusSlot) })
+        notice = ""
+        error = "An author needs a name."
+        errorScope = "author"
+        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
         return
       }
       let hasCite = newAuthorCitation.trim() !== ""
       let hasWords = newAuthorText.trim() !== ""
       if (hasCite !== hasWords) {
-        error = ""
-        notice = "A quote needs a citation and the words."
-        Qt.callLater(function() { root.reveal(statusSlot) })
+        notice = ""
+        error = "A quote needs a citation and the words."
+        errorScope = "author"
+        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
         return
       }
       let patch = { slug: editingAuthorSlug }
@@ -452,9 +522,10 @@ Item {
         changed = true
       }
       if (!changed) {
-        error = ""
-        notice = "Change the portrait, name, dates, or quote first."
-        Qt.callLater(function() { root.reveal(statusSlot) })
+        notice = ""
+        error = "Change the portrait, name, dates, or quote first."
+        errorScope = "author"
+        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
         return
       }
       applyTimer.stop()
@@ -463,9 +534,10 @@ Item {
       return
     }
     if (!authorReady) {
-      error = ""
-      notice = "An author needs a name, id, image, citation and quote."
-      Qt.callLater(function() { root.reveal(statusSlot) })
+      notice = ""
+      error = "An author needs a name, id, image, citation and quote."
+      errorScope = "author"
+      Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
       return
     }
     applyTimer.stop()
@@ -603,11 +675,17 @@ Item {
     id: previewProcess
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: { if (String(text || "").trim() !== "") root.error = root.plainError(text, "Could not open the preview.") }
+      onStreamFinished: {
+        if (String(text || "").trim() !== "") {
+          root.error = root.plainError(text, "Could not open the preview.")
+          root.errorScope = ""
+        }
+      }
     }
     onExited: function(exitCode) {
       if (exitCode === 0) {
         root.error = ""
+        root.errorScope = ""
         root.notice = "Preview opened."
         previewTimer.restart()
       } else if (root.notice === "Opening preview…") {
@@ -817,6 +895,7 @@ Item {
       Keys.onEscapePressed: {
         if (root.confirmRemoveAuthor !== "") {
           root.confirmRemoveAuthor = ""
+          keyCatcher.forceActiveFocus()
           return
         }
         root.dismiss()
@@ -924,6 +1003,8 @@ Item {
                     onActivated: {
                       root.confirmRemoveAuthor = ""
                       root.error = ""
+                      root.errorScope = ""
+                      root.authorListHint = ""
                       root.notice = "Opening preview…"
                       previewProcess.command = root.preview && root.preview.id
                         ? [root.command, "preview", "--quote", root.preview.id]
@@ -974,7 +1055,31 @@ Item {
 
             PanelSeparator { foreground: root.ink }
 
-            PanelSectionHeader { text: "Who is in rotation"; foreground: root.ink }
+            Item {
+              id: rotationHeaderRow
+              width: parent.width
+              height: Math.max(rotationHeader.implicitHeight, Math.ceil(Style.font.bodySmall * 1.35))
+              PanelSectionHeader {
+                id: rotationHeader
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Who is in rotation"
+                foreground: root.ink
+              }
+              Text {
+                id: authorHintText
+                visible: root.authorListHint !== ""
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, Math.max(0, parent.width - rotationHeader.implicitWidth - Style.space(8)))
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                text: root.authorListHint
+                color: Commons.Color.urgent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
 
             Repeater {
               model: root.samples
@@ -1124,11 +1229,7 @@ Item {
               spacing: Style.space(8)
               RingButton {
                 label: root.quoteOpen ? "Close" : "Add your own quote"
-                onActivated: {
-                  root.confirmRemoveAuthor = ""
-                  root.quoteOpen = !root.quoteOpen
-                  if (root.quoteOpen) root.authorOpen = false
-                }
+                onActivated: root.toggleQuoteForm()
               }
               RingButton {
                 label: (root.authorOpen && root.editingAuthorSlug === "") ? "Close" : "Add an author"
@@ -1258,7 +1359,18 @@ Item {
                 font.pixelSize: Style.font.body
                 wrapMode: Text.WordWrap
               }
+              Text {
+                id: quoteErrorText
+                width: parent.width
+                visible: root.error !== "" && root.errorScope === "quote"
+                text: root.error
+                color: Commons.Color.urgent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
               RingButton {
+                id: quoteSubmitButton
                 label: "Add quote"
                 available: root.quoteReady && !root.busy
                 onActivated: root.addQuote()
@@ -1459,7 +1571,18 @@ Item {
                   border.color: Commons.Color.accent
                 }
               }
+              Text {
+                id: authorErrorText
+                width: parent.width
+                visible: root.error !== "" && root.errorScope === "author"
+                text: root.error
+                color: Commons.Color.urgent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
               Row {
+                id: authorSubmitRow
                 spacing: Style.space(8)
                 RingButton {
                   label: root.editingAuthorSlug !== "" ? "Replace author" : "Add author"
@@ -1514,7 +1637,7 @@ Item {
               Text {
                 width: parent.width
                 text: root.statusText
-                color: root.error !== "" ? Commons.Color.urgent : root.quiet
+                color: (root.error !== "" && root.errorScope === "") ? Commons.Color.urgent : root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap

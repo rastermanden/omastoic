@@ -692,10 +692,14 @@ Item {
       mouseClick(hieroclesRemove)
       compare(panel.confirmRemoveAuthor, "hierocles")
 
-      // 7. Escape cancels Remove? without closing the panel.
+      // 7. Escape cancels Remove? without closing the panel and clears focus from Remove.
+      var hieroclesInner = findOne(hieroclesRemove, function(item) { return item.hasOwnProperty("focusable") })
+      verify(hieroclesInner !== null)
+      compare(hieroclesInner.activeFocus, true)
       keyClick(Qt.Key_Escape)
       compare(panel.confirmRemoveAuthor, "")
       compare(panel.opened, true)
+      compare(hieroclesInner.activeFocus, false)
 
       // 8. Second click on the same armed Remove? button commits removal.
       mouseClick(musoniusRemove)
@@ -704,6 +708,88 @@ Item {
       mouseClick(musoniusRemove)
       compare(panel.confirmRemoveAuthor, "")
       compare(panel.saving, true)
+    }
+
+    function test_form_error_placement_clears_on_close_and_empty_pick_hint_visible() {
+      seedPanel()
+      harness.width = 1280
+      harness.height = 800
+      waitForRendering(panel)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      // Open Add author and simulate a failed submit ("already exists").
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      panel.addingAuthor = true
+      panel.saving = true
+      var applyRunObj = {
+        exited: true,
+        exitCode: 1,
+        stdout: "",
+        stderr: 'omastoic: "musonius" already exists. Use Edit on that author to update it.',
+        streamsLeft: 0,
+      }
+      panel.settleRun(applyRunObj, "Could not save that.")
+      waitForRendering(panel)
+
+      compare(panel.error, '"musonius" already exists. Use Edit on that author to update it.')
+      compare(panel.errorScope, "author")
+      compare(panel.statusText, "")
+
+      // Error renders inside the author form, directly above the submit button, and is visible.
+      var authorErr = findOne(panel, function(item) {
+        return item.text === panel.error && item.visible
+      })
+      var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(authorErr !== null)
+      verify(submitBtn !== null)
+      var errTop = authorErr.mapToItem(scroller.contentItem, 0, 0).y
+      var submitTop = submitBtn.mapToItem(scroller.contentItem, 0, 0).y
+      verify(errTop < submitTop)
+      verify(errTop >= scroller.contentY - 1)
+      verify(errTop + authorErr.height <= scroller.contentY + scroller.height + 1)
+
+      // Close the form: no error remains; opening Edit on another author shows no error.
+      var closeBtn = findOne(panel, function(item) { return item.label === "Close" && item.visible })
+      verify(closeBtn !== null)
+      mouseClick(closeBtn)
+      waitForRendering(panel)
+      compare(panel.error, "")
+      compare(panel.errorScope, "")
+      compare(authorErr.visible, false)
+
+      var editButtons = findAll(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editButtons.length >= 1)
+      mouseClick(editButtons[0])
+      waitForRendering(panel)
+      compare(panel.error, "")
+      compare(authorErr.visible, false)
+
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelBtn !== null)
+      mouseClick(cancelBtn)
+      waitForRendering(panel)
+
+      // Unticking the last selected author shows the empty-pick hint fully inside the 1280x800 viewport.
+      scroller.contentY = 0
+      panel.selectedAuthors = ["marcus"]
+      panel.toggleAuthor("marcus")
+      waitForRendering(panel)
+      compare(panel.authorListHint, "Pick at least one author.")
+      var hintItem = findOne(panel, function(item) {
+        return item.text === "Pick at least one author." && item.visible
+      })
+      verify(hintItem !== null)
+      var hintInViewport = hintItem.mapToItem(scroller, 0, 0)
+      verify(hintInViewport.y >= 0)
+      verify(hintInViewport.y + hintItem.height <= scroller.height)
     }
   }
 }
@@ -720,7 +806,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("3 passed, 0 failed");
+    expect(combined, combined).toContain("4 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
