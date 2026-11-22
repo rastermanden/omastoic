@@ -1363,8 +1363,14 @@ test.skipIf(!hasImageMagick)("JPEG with harmless extraneous bytes before marker 
   // Confirm the fixture triggers libjpeg's extraneous-bytes warning while exiting 0 in production decode flags.
   const magick = Bun.which("magick") ?? Bun.which("convert")!;
   const probe = Bun.spawnSync([
-    magick, "-background", "white", paddedJpeg, "-auto-orient", "-alpha", "remove", "-alpha", "off",
-    "-colorspace", "Gray", "-blur", "0x0.6", "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`, "-compress", "none", "pgm:-",
+    magick, "-background", "white",
+    "-define", `jpeg:size=${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}`,
+    paddedJpeg, "-auto-orient", "-alpha", "remove", "-alpha", "off",
+    "-colorspace", "Gray",
+    "-resize", `${PORTRAIT_COLS * 16}x${PORTRAIT_ROWS * 32}>`,
+    "-blur", "0x0.6",
+    "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`,
+    "-compress", "none", "pgm:-",
   ]);
   expect(probe.exitCode).toBe(0);
   expect(probe.stderr.toString()).toContain("extraneous bytes before marker 0xda");

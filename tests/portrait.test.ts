@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import {
@@ -172,9 +172,13 @@ test.skipIf(!hasImageMagick)("config --add-author accepts a JPEG with CRLF comme
 
     // Confirm ImageMagick really emits `#text\r#` comments in PGM output for this fixture.
     const rawPgm = Bun.spawnSync([
-      imBin, "-background", "white", commentedJpeg,
+      imBin, "-background", "white",
+      "-define", `jpeg:size=${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`,
+      commentedJpeg,
       "-auto-orient", "-alpha", "remove", "-alpha", "off",
-      "-colorspace", "Gray", "-blur", "0x0.6",
+      "-colorspace", "Gray",
+      "-resize", `${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}>`,
+      "-blur", "0x0.6",
       "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`,
       "-compress", "none", "pgm:-",
     ]);
@@ -460,6 +464,200 @@ test("non-decode converter failures report a faithful reason instead of blaming 
       expect(decodeErr.stderr).not.toContain("omastoic-portrait-");
       expect(decodeErr.stderr).not.toContain("@ error/");
     }
+  } finally {
+    s.cleanup();
+  }
+}, 20000);
+
+test("ImageMagick command hints jpeg:size before input for JPEGs only and resizes before blur", async () => {
+  const s = sandbox();
+  const sampleJpg = join(root, "assets/local/marcus.jpg");
+  const validPng = join(s.home, "valid.png");
+  writeFileSync(
+    validPng,
+    makePng(68, 80, (x, y) => ((x - 34) ** 2 + (y - 34) ** 2 < 20 ** 2 ? 20 : 250)),
+  );
+
+  const isolatedBin = join(s.home, "isolated-bin");
+  mkdirSync(isolatedBin, { recursive: true });
+  for (const [name, target] of [
+    ["flock", Bun.which("flock")],
+    ["sh", Bun.which("sh")],
+    ["bash", Bun.which("bash")],
+    ["cat", Bun.which("cat")],
+  ] as const) {
+    if (target) {
+      s.put(join(isolatedBin, name), `#!/bin/sh\nexec "${target}" "$@"\n`);
+      chmodSync(join(isolatedBin, name), 0o755);
+    }
+  }
+
+  const validPgm = makePgm(16, 16, (x, y) => (x >= 4 && x < 12 && y >= 4 && y < 12 ? 20 : 240));
+  const blankPgm = makePgm(16, 16, () => 255);
+  const validPgmPath = join(s.home, "valid.pgm");
+  const blankPgmPath = join(s.home, "blank.pgm");
+  writeFileSync(validPgmPath, `${validPgm}\n`);
+  writeFileSync(blankPgmPath, `${blankPgm}\n`);
+
+  const readRecordedInvocations = (logPath: string): string[][] =>
+    readFileSync(logPath, "utf8")
+      .split("---END---\n")
+      .map((chunk) => chunk.trim())
+      .filter(Boolean)
+      .map((chunk) => chunk.split("\n"));
+
+  try {
+    const argvLog = join(s.home, "argv.log");
+    const countFile = join(s.home, "count");
+    s.put(
+      join(isolatedBin, "magick"),
+      `#!/bin/sh
+for arg in "$@"; do
+  printf '%s\\n' "$arg" >> "${argvLog}"
+done
+printf '%s\\n' '---END---' >> "${argvLog}"
+if [ -f "${countFile}" ]; then
+  cat "${validPgmPath}"
+else
+  printf '1\\n' > "${countFile}"
+  if [ "$OMASTOIC_TEST_FALLBACK" = "1" ]; then
+    cat "${blankPgmPath}"
+  else
+    cat "${validPgmPath}"
+  fi
+fi
+`,
+    );
+    chmodSync(join(isolatedBin, "magick"), 0o755);
+
+    const primaryW = PORTRAIT_COLS * 4;
+    const primaryH = PORTRAIT_ROWS * 8;
+    const fallbackW = PORTRAIT_COLS * 2;
+    const fallbackH = PORTRAIT_ROWS * 4;
+
+    // 1. JPEG primary pass: -define jpeg:size before input, -resize before -blur.
+    const jpegPrimary = await s.cli(
+      [
+        "config", "--add-author", "rufus", "--name", "Musonius Rufus",
+        "--image", sampleJpg, "--citation", "Lectures VI", "--text", "Train both soul and body.",
+      ],
+      { PATH: isolatedBin },
+    );
+    expect(jpegPrimary.stderr).toBe("");
+    expect(jpegPrimary.code).toBe(0);
+    const jpegCalls = readRecordedInvocations(argvLog);
+    expect(jpegCalls.length).toBe(1);
+    {
+      const argv = jpegCalls[0]!;
+      const inputIdx = argv.findIndex((arg) => arg.endsWith("/source.jpg"));
+      const defineIdx = argv.indexOf("-define");
+      const firstResizeIdx = argv.indexOf("-resize");
+      const lastResizeIdx = argv.lastIndexOf("-resize");
+      const blurIdx = argv.indexOf("-blur");
+      expect(inputIdx).toBeGreaterThan(0);
+      expect(defineIdx).toBeGreaterThanOrEqual(0);
+      expect(defineIdx).toBeLessThan(inputIdx);
+      const hint = argv[defineIdx + 1] ?? "";
+      const match = hint.match(/^jpeg:size=(\d+)x(\d+)$/);
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBeGreaterThanOrEqual(primaryW);
+      expect(Number(match![2])).toBeGreaterThanOrEqual(primaryH);
+      expect(firstResizeIdx).toBeGreaterThan(inputIdx);
+      expect(blurIdx).toBeGreaterThan(firstResizeIdx);
+      expect(argv[lastResizeIdx + 1]).toBe(`${primaryW}x${primaryH}`);
+    }
+
+    // 2. JPEG fallback pass: second invocation also hints jpeg:size before input and resizes before blur.
+    writeFileSync(argvLog, "");
+    rmSync(countFile, { force: true });
+    const jpegFallback = await s.cli(
+      [
+        "config", "--add-author", "aristo", "--name", "Aristo of Chios",
+        "--image", sampleJpg, "--citation", "Fragment 1", "--text", "Virtue is the only good.",
+      ],
+      { PATH: isolatedBin, OMASTOIC_TEST_FALLBACK: "1" },
+    );
+    expect(jpegFallback.stderr).toBe("");
+    expect(jpegFallback.code).toBe(0);
+    const fallbackCalls = readRecordedInvocations(argvLog);
+    expect(fallbackCalls.length).toBe(2);
+    {
+      const argv = fallbackCalls[1]!;
+      const inputIdx = argv.findIndex((arg) => arg.endsWith("/source.jpg"));
+      const defineIdx = argv.indexOf("-define");
+      const firstResizeIdx = argv.indexOf("-resize");
+      const lastResizeIdx = argv.lastIndexOf("-resize");
+      const blurIdx = argv.indexOf("-blur");
+      expect(inputIdx).toBeGreaterThan(0);
+      expect(defineIdx).toBeGreaterThanOrEqual(0);
+      expect(defineIdx).toBeLessThan(inputIdx);
+      const hint = argv[defineIdx + 1] ?? "";
+      const match = hint.match(/^jpeg:size=(\d+)x(\d+)$/);
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBeGreaterThanOrEqual(fallbackW);
+      expect(Number(match![2])).toBeGreaterThanOrEqual(fallbackH);
+      expect(firstResizeIdx).toBeGreaterThan(inputIdx);
+      expect(blurIdx).toBeGreaterThan(firstResizeIdx);
+      expect(argv[lastResizeIdx + 1]).toBe(`${fallbackW}x${fallbackH}`);
+    }
+
+    // 3. PNG pass: omits jpeg:size define and still resizes before blur.
+    writeFileSync(argvLog, "");
+    rmSync(countFile, { force: true });
+    const pngPrimary = await s.cli(
+      [
+        "config", "--add-author", "hecaton", "--name", "Hecaton of Rhodes",
+        "--image", validPng, "--citation", "On Duties", "--text", "Cease to hope and you will cease to fear.",
+      ],
+      { PATH: isolatedBin },
+    );
+    expect(pngPrimary.stderr).toBe("");
+    expect(pngPrimary.code).toBe(0);
+    const pngCalls = readRecordedInvocations(argvLog);
+    expect(pngCalls.length).toBe(1);
+    {
+      const argv = pngCalls[0]!;
+      const inputIdx = argv.findIndex((arg) => arg.endsWith("/source.png"));
+      const firstResizeIdx = argv.indexOf("-resize");
+      const lastResizeIdx = argv.lastIndexOf("-resize");
+      const blurIdx = argv.indexOf("-blur");
+      expect(inputIdx).toBeGreaterThan(0);
+      expect(argv).not.toContain("-define");
+      expect(argv.some((arg) => arg.startsWith("jpeg:size="))).toBe(false);
+      expect(firstResizeIdx).toBeGreaterThan(inputIdx);
+      expect(blurIdx).toBeGreaterThan(firstResizeIdx);
+      expect(argv[lastResizeIdx + 1]).toBe(`${primaryW}x${primaryH}`);
+    }
+  } finally {
+    s.cleanup();
+  }
+}, 20000);
+
+test.skipIf(!hasImageMagick)("transcodePortrait converts a high-resolution JPEG quickly within the 34x20 budget", async () => {
+  const imBin = (Bun.which("magick") ?? Bun.which("convert"))!;
+  const s = sandbox();
+  const largeJpg = join(s.home, "large-portrait.jpg");
+  try {
+    const gen = Bun.spawnSync([
+      imBin,
+      join(root, "assets/local/marcus.jpg"),
+      "-resize", "2400x3000!",
+      "-quality", "90",
+      largeJpg,
+    ]);
+    expect(new TextDecoder().decode(gen.stderr)).toBe("");
+    expect(gen.exitCode).toBe(0);
+
+    const start = performance.now();
+    const art = await transcodePortrait(largeJpg);
+    const elapsedMs = performance.now() - start;
+
+    const lines = art.replace(/\n+$/, "").split("\n");
+    expect(art).toMatch(/[\u2801-\u28ff]/);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+    expect(Math.max(...lines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    expect(elapsedMs).toBeLessThan(5000);
   } finally {
     s.cleanup();
   }
