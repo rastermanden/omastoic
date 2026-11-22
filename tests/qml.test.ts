@@ -1010,13 +1010,18 @@ Item {
       return cmds
     }
 
+    function dragFrom(startX, startY, dx, dy, expectRender) {
+      mousePress(harness, startX, startY, Qt.LeftButton)
+      mouseMove(harness, startX + dx / 2, startY + dy / 2, -1, Qt.LeftButton)
+      mouseMove(harness, startX + dx, startY + dy, -1, Qt.LeftButton)
+      mouseRelease(harness, startX + dx, startY + dy, Qt.LeftButton)
+      if (expectRender !== false) waitForRendering(panel)
+      else wait(0)
+    }
+
     function dragHandle(handle, dx, dy) {
       var startPt = handle.mapToItem(harness, handle.width / 2, handle.height / 2)
-      mousePress(harness, startPt.x, startPt.y, Qt.LeftButton)
-      mouseMove(harness, startPt.x + dx / 2, startPt.y + dy / 2)
-      mouseMove(harness, startPt.x + dx, startPt.y + dy)
-      mouseRelease(harness, startPt.x + dx, startPt.y + dy, Qt.LeftButton)
-      waitForRendering(panel)
+      dragFrom(startPt.x, startPt.y, dx, dy, true)
     }
 
     function test_drag_resize_clamping_reflow_persistence_and_dismiss() {
@@ -1060,6 +1065,53 @@ Item {
       var initialHeight = card.height
       verify(initialHeight > 320 && initialHeight < harness.height - 64)
       verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+
+      // 0. Inactive-axis jitter on single-axis edges keeps auto-size and spawns no size write.
+      var cmdsBeforeJitter = sizeCommands().length
+      var bottomMid = edgeBottom.mapToItem(harness, edgeBottom.width / 2, edgeBottom.height / 2)
+      dragFrom(bottomMid.x, bottomMid.y, 25, 0, false)
+      compare(panel.userWidth, 0)
+      compare(panel.userHeight, 0)
+      compare(card.width, 520)
+      compare(card.height, initialHeight)
+      compare(panel.opened, true)
+      compare(sizeCommands().length, cmdsBeforeJitter)
+
+      var rightMid = edgeRight.mapToItem(harness, edgeRight.width / 2, edgeRight.height / 2)
+      dragFrom(rightMid.x, rightMid.y, 0, 25, false)
+      compare(panel.userWidth, 0)
+      compare(panel.userHeight, 0)
+      compare(card.width, 520)
+      compare(panel.opened, true)
+      compare(sizeCommands().length, cmdsBeforeJitter)
+
+      var leftMid = edgeLeft.mapToItem(harness, edgeLeft.width / 2, edgeLeft.height / 2)
+      dragFrom(leftMid.x, leftMid.y, 0, -25, false)
+      compare(panel.userWidth, 0)
+      compare(panel.userHeight, 0)
+      compare(card.width, 520)
+      compare(panel.opened, true)
+      compare(sizeCommands().length, cmdsBeforeJitter)
+
+      // 0b. Dragging from the 6 px resizeOuterLip outside card resizes without falling through to scrim.
+      var cardOrigin = card.mapToItem(harness, 0, 0)
+      dragFrom(cardOrigin.x + card.width + 3, cardOrigin.y + card.height / 2, 40, 0, true)
+      compare(panel.opened, true)
+      verify(Math.abs(card.width - 600) <= 2)
+      compare(panel.userHeight, 0)
+
+      cardOrigin = card.mapToItem(harness, 0, 0)
+      var heightBeforeOuterCorner = card.height
+      dragFrom(cardOrigin.x + card.width + 3, cardOrigin.y + card.height + 3, -40, 30, true)
+      compare(panel.opened, true)
+      verify(Math.abs(card.width - 520) <= 2)
+      verify(Math.abs(card.height - (heightBeforeOuterCorner + 30)) <= 2)
+
+      // Reset cleanly before center-handle sequence so step 1 starts from default size.
+      panel.resetPanelSize()
+      waitForRendering(panel)
+      compare(card.width, 520)
+      compare(card.height, initialHeight)
 
       // 1. Drag bottom-right corner to widen and heighten card 1:1 with pointer.
       dragHandle(cornerRight, 80, 100)
@@ -1201,7 +1253,7 @@ Item {
       compare(card.width, 520)
       compare(panel.userHeight, 0)
 
-      // 9. Pressing a resize handle cancels Remove? confirm without closing; scrim click and Esc still dismiss.
+      // 9. Pressing a resize handle (center or outer lip) cancels Remove? confirm without closing; scrim click and Esc still dismiss.
       var removeBtn = findOne(panel, function(item) {
         return item.hasOwnProperty("keepsRemoveConfirm") && item.keepsRemoveConfirm === true && item.visible
       })
@@ -1210,6 +1262,13 @@ Item {
       compare(panel.confirmRemoveAuthor, "musonius")
       var handlePt = cornerRight.mapToItem(harness, cornerRight.width / 2, cornerRight.height / 2)
       mouseClick(harness, handlePt.x, handlePt.y)
+      compare(panel.confirmRemoveAuthor, "")
+      compare(panel.opened, true)
+
+      mouseClick(removeBtn)
+      compare(panel.confirmRemoveAuthor, "musonius")
+      var outerCardPos = card.mapToItem(harness, 0, 0)
+      mouseClick(harness, outerCardPos.x + card.width + 3, outerCardPos.y + card.height + 3)
       compare(panel.confirmRemoveAuthor, "")
       compare(panel.opened, true)
 

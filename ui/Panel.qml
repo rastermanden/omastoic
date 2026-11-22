@@ -752,15 +752,22 @@ Item {
       var pt = handle.mapToItem(keyCatcher, mouse.x, mouse.y)
       var dx = pt.x - handle.startSceneX
       var dy = pt.y - handle.startSceneY
-      if (!handle.dragged && Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+      if (!handle.dragged && (handle.horizontalEdge === 0 || Math.abs(dx) < 1) && (handle.verticalEdge === 0 || Math.abs(dy) < 1)) return
+      var nextWidth = handle.horizontalEdge !== 0
+        ? root.clampedCardWidth(handle.startWidth + handle.horizontalEdge * 2 * dx, keyCatcher.width)
+        : card.width
+      var nextHeight = handle.verticalEdge !== 0
+        ? root.clampedCardHeight(handle.startHeight + handle.verticalEdge * dy, keyCatcher.height)
+        : card.height
+      if (!handle.dragged && Math.abs(nextWidth - handle.startWidth) < 0.5 && Math.abs(nextHeight - handle.startHeight) < 0.5) return
       handle.dragged = true
       root.hasLocalSize = true
       if (handle.horizontalEdge !== 0) {
         // Card stays horizontally centered, so 2*dx keeps the dragged edge 1:1 with the cursor.
-        root.userWidth = root.clampedCardWidth(handle.startWidth + handle.horizontalEdge * 2 * dx, keyCatcher.width)
+        root.userWidth = nextWidth
       }
       if (handle.verticalEdge !== 0) {
-        root.userHeight = root.clampedCardHeight(handle.startHeight + handle.verticalEdge * dy, keyCatcher.height)
+        root.userHeight = nextHeight
       }
     }
     onReleased: {
