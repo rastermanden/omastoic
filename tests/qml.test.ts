@@ -1016,6 +1016,113 @@ Item {
       compare(slugField.visible, true)
       compare(slugField.text, "john-locke")
     }
+
+    function test_review_fixes_cancel_mid_save_scrolled_hint_error_reveal_and_id_collision() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["chrysippus"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "epictetus", name: "Epictetus", dates: "c. AD 50 – 135", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Enchiridion 1", text: "Some things are in our control." },
+          { slug: "zeno", name: "Zeno of Citium", dates: "c. 334 – 262 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Well-being is realized by small steps." },
+          { slug: "cleanthes", name: "Cleanthes", dates: "c. 330 – 230 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Hymn", text: "Lead me, Zeus." },
+          { slug: "chrysippus", name: "Chrysippus", dates: "c. 279 – 206 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Live in agreement." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      // #112: Cancelling an author form mid-save still displays a subsequent CLI failure in the visible status line.
+      panel.openAddAuthor()
+      wait(20)
+      panel.addingAuthor = true
+      panel.saving = true
+      panel.closeAuthorForm()
+      wait(20)
+      panel.settleRun({
+        exited: true,
+        exitCode: 1,
+        stdout: "",
+        stderr: "omastoic: portrait image could not be read",
+        streamsLeft: 0,
+      }, "Could not save that.")
+      wait(20)
+      compare(panel.error, "portrait image could not be read")
+      compare(panel.errorScope, "")
+      compare(panel.statusText, "portrait image could not be read")
+      var visibleErr = findOne(panel, function(item) {
+        return item.text === "portrait image could not be read" && item.visible
+      })
+      verify(visibleErr !== null)
+
+      // #115: Bundled author id collision automatically expands Advanced and shows the editable Author id field.
+      panel.openAddAuthor()
+      wait(20)
+      compare(panel.authorAdvancedOpen, false)
+      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      verify(nameField !== null)
+      nameField.text = "Seneca"
+      compare(panel.newAuthorSlug, "seneca")
+      panel.addingAuthor = true
+      panel.saving = true
+      panel.settleRun({
+        exited: true,
+        exitCode: 1,
+        stdout: "",
+        stderr: 'omastoic: author "seneca" is already a bundled author',
+        streamsLeft: 0,
+      }, "Could not save that.")
+      wait(20)
+      compare(panel.authorAdvancedOpen, true)
+      var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" && item.visible })
+      verify(slugField !== null)
+
+      // #114: Triggering a form error with the submit button at the bottom edge keeps BOTH error and submit button inside the viewport.
+      var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(submitBtn !== null)
+      panel.error = ""
+      panel.errorScope = ""
+      wait(20)
+      var submitBottom = submitBtn.mapToItem(scroller.contentItem, 0, 0).y + submitBtn.height
+      scroller.contentY = Math.max(0, submitBottom - scroller.height)
+      wait(20)
+      panel.submitAuthor()
+      wait(20)
+      var authorErr = findOne(panel, function(item) { return item.text === panel.error && item.visible })
+      verify(authorErr !== null)
+      var errInView = authorErr.mapToItem(scroller, 0, 0)
+      var submitInView = submitBtn.mapToItem(scroller, 0, 0)
+      verify(errInView.y >= -1 && errInView.y + authorErr.height <= scroller.height + 1)
+      verify(submitInView.y >= -1 && submitInView.y + submitBtn.height <= scroller.height + 1)
+
+      panel.closeAuthorForm()
+      wait(20)
+
+      // #113: Unticking the last selected author while a form is open scrolls the empty-pick hint into view.
+      panel.toggleQuoteForm()
+      wait(20)
+      panel.toggleAuthor("chrysippus")
+      wait(20)
+      compare(panel.authorListHint, "Pick at least one author.")
+      var hintItem = findOne(panel, function(item) {
+        return item.text === "Pick at least one author." && item.visible
+      })
+      verify(hintItem !== null)
+      var hintInView = hintItem.mapToItem(scroller, 0, 0)
+      verify(hintInView.y >= 0 && hintInView.y + hintItem.height <= scroller.height)
+    }
   }
 }
 `,
@@ -1031,7 +1138,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("6 passed, 0 failed");
+    expect(combined, combined).toContain("7 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

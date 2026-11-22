@@ -57,7 +57,8 @@ Item {
   property real formReturnContentY: 0
   property bool hasFormReturnY: false
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
-  readonly property string statusText: (error !== "" && errorScope === "") ? error : notice
+  readonly property bool errorShownInStatus: error !== "" && (errorScope === "" || (errorScope === "author" && !authorOpen) || (errorScope === "quote" && !quoteOpen))
+  readonly property string statusText: errorShownInStatus ? error : notice
 
   property var selectedAuthors: []
   property var committedAuthors: []
@@ -180,6 +181,17 @@ Item {
     else if (bottom > scroller.contentY + scroller.height) scroller.contentY = Math.max(0, bottom - scroller.height + 8)
   }
 
+  function revealAfterLayout(form, first, second) {
+    var syncAndReveal = function() {
+      if (form && typeof form.forceLayout === "function") form.forceLayout()
+      content.forceLayout()
+      if (first) root.reveal(first)
+      if (second) root.reveal(second)
+    }
+    syncAndReveal()
+    Qt.callLater(syncAndReveal)
+  }
+
   function portraitFullyVisible(top, height, contentY, viewport) {
     return top >= contentY - 0.5 && top + height <= contentY + viewport + 0.5
   }
@@ -230,12 +242,15 @@ Item {
       if (saving) restoreCommitted()
       notice = ""
       error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
-      if (addingAuthor || replacingAuthor) {
+      if ((addingAuthor || replacingAuthor) && authorOpen) {
         errorScope = "author"
-      } else if (addingQuote) {
+      } else if (addingQuote && quoteOpen) {
         errorScope = "quote"
       } else {
         errorScope = ""
+      }
+      if (errorScope === "author" && editingAuthorSlug === "" && /\b(?:slug|bundled author|already exists|reserved)\b/i.test(error)) {
+        authorAdvancedOpen = true
       }
       applyQueued = false
       pendingAuthor = null
@@ -245,11 +260,11 @@ Item {
       pendingRemoveAuthor = ""
       confirmRemoveAuthor = ""
       if (errorScope === "author") {
-        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
+        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
       } else if (errorScope === "quote") {
-        Qt.callLater(function() { root.reveal(quoteErrorText); root.reveal(quoteSubmitButton) })
+        root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
       } else {
-        Qt.callLater(function() { root.reveal(statusSlot) })
+        root.revealAfterLayout(null, statusSlot, null)
       }
     } else {
       error = ""
@@ -339,6 +354,7 @@ Item {
       error = ""
       errorScope = ""
       authorListHint = "Pick at least one author."
+      root.reveal(rotationHeaderRow)
       return
     }
     authorListHint = ""
@@ -366,6 +382,7 @@ Item {
       error = ""
       errorScope = ""
       authorListHint = "Pick at least one author."
+      root.reveal(rotationHeaderRow)
       return
     }
     authorListHint = ""
@@ -449,7 +466,7 @@ Item {
       notice = ""
       error = "A quote needs a citation and the words."
       errorScope = "quote"
-      Qt.callLater(function() { root.reveal(quoteErrorText); root.reveal(quoteSubmitButton) })
+      root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
       return
     }
     pendingQuote = { author: newAuthor, citation: newCitation.trim(), text: newText.trim() }
@@ -531,7 +548,7 @@ Item {
         notice = ""
         error = "An author needs a name."
         errorScope = "author"
-        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
+        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
         return
       }
       let hasCite = newAuthorCitation.trim() !== ""
@@ -540,7 +557,7 @@ Item {
         notice = ""
         error = "A quote needs a citation and the words."
         errorScope = "author"
-        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
+        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
         return
       }
       let patch = { slug: editingAuthorSlug }
@@ -566,7 +583,7 @@ Item {
         notice = ""
         error = "Change the portrait, name, dates, or quote first."
         errorScope = "author"
-        Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
+        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
         return
       }
       applyTimer.stop()
@@ -580,7 +597,8 @@ Item {
         ? "Use letters or numbers in the name, or set an Author id under Advanced."
         : "An author needs a name, portrait image, citation, and quote."
       errorScope = "author"
-      Qt.callLater(function() { root.reveal(authorErrorText); root.reveal(authorSubmitRow) })
+      if (newAuthorName.trim() !== "" && newAuthorSlug.trim() === "") authorAdvancedOpen = true
+      root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
       return
     }
     applyTimer.stop()
@@ -1537,6 +1555,7 @@ Item {
                 wrapMode: Text.WordWrap
               }
               Row {
+                id: quoteSubmitRow
                 spacing: Style.space(8)
                 RingButton {
                   id: quoteSubmitButton
@@ -1866,7 +1885,7 @@ Item {
               Text {
                 width: parent.width
                 text: root.statusText
-                color: (root.error !== "" && root.errorScope === "") ? Commons.Color.urgent : root.quiet
+                color: root.errorShownInStatus ? Commons.Color.urgent : root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
