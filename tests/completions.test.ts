@@ -34,3 +34,10 @@ test("the bash and fish templates take the author list at setup", () => {
   expect(renderedBash).not.toContain(AUTHORS_PLACEHOLDER);
   expect(renderedFish).not.toContain(AUTHORS_PLACEHOLDER);
 });
+
+test("the bash and fish templates complete the version subcommand", () => {
+  const bash = readFileSync(join(root, "completions/omastoic.bash"), "utf8");
+  const fish = readFileSync(join(root, "completions/omastoic.fish"), "utf8");
+  expect(bash).toMatch(/local commands="[^"]*\bversion\b[^"]*"/);
+  expect(fish).toContain('-a version -d "Print the version from manifest.json"');
+});
