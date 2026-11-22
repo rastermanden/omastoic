@@ -520,26 +520,39 @@ export async function transcodePortrait(
     writeFileSync(staged, bytes, { mode: 0o600 });
 
     if (imBin) {
-      const result = await runWithTimeout(
-        [
-          imBin,
-          "-background", "white",
-          staged,
-          "-auto-orient",
-          "-alpha", "remove", "-alpha", "off",
-          "-colorspace", "Gray",
-          "-blur", "0x0.6",
-          "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`,
-          "-compress", "none",
-          "pgm:-",
-        ],
-        true,
-        timeoutMs,
-      );
+      const deadline = Date.now() + timeoutMs;
+      const runIm = (w: number, h: number) =>
+        runWithTimeout(
+          [
+            imBin,
+            "-background", "white",
+            staged,
+            "-auto-orient",
+            "-alpha", "remove", "-alpha", "off",
+            "-colorspace", "Gray",
+            "-blur", "0x0.6",
+            "-resize", `${w}x${h}`,
+            "-compress", "none",
+            "pgm:-",
+          ],
+          true,
+          Math.max(1, deadline - Date.now()),
+        );
+
+      const result = await runIm(PORTRAIT_COLS * 4, PORTRAIT_ROWS * 8);
       if (result.code !== 0 || hasDecodeWarning(result.stderr) || !result.stdout.trim()) {
         throw new Error(cleanTranscodeError(result.stderr, trimmed));
       }
-      return validatePortraitArt(pgmToBraille(result.stdout));
+      let art = pgmToBraille(result.stdout);
+      if (!art) {
+        if (deadline - Date.now() <= 0) throw new Error("portrait image conversion timed out");
+        const fallback = await runIm(PORTRAIT_COLS * 2, PORTRAIT_ROWS * 4);
+        if (fallback.code !== 0 || hasDecodeWarning(fallback.stderr) || !fallback.stdout.trim()) {
+          throw new Error(cleanTranscodeError(fallback.stderr, trimmed));
+        }
+        art = pgmToBraille(fallback.stdout);
+      }
+      return validatePortraitArt(fitPortraitToBudget(art));
     }
 
     const outTxt = join(scratch, "portrait.txt");
@@ -561,8 +574,178 @@ export async function transcodePortrait(
     let art: string;
     try { art = readFileSync(outTxt, "utf8"); }
     catch { throw new Error("could not convert portrait image: transcoder produced no output"); }
-    return validatePortraitArt(art);
+    return validatePortraitArt(fitPortraitToBudget(art));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+const MIN_PORTRAIT_ASPECT = 0.55;
+const MAX_PORTRAIT_ASPECT = 1.35;
+const MAX_HAIRLINE_DOTS = 6;
+
+function tightenBox(
+  source: Bitmap,
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+): { left: number; top: number; width: number; height: number } | null {
+  let left = x0 + w;
+  let right = -1;
+  let top = y0 + h;
+  let bottom = -1;
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) {
+      if (!source.dots[y * source.width + x]) continue;
+      if (x < left) left = x;
+      if (x > right) right = x;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+    }
+  }
+  return right < left || bottom < top
+    ? null
+    : { left, top, width: right - left + 1, height: bottom - top + 1 };
+}
+
+function fitPortraitToBudget(art: string): string {
+  if (!art) return "";
+  const source = toDots(art);
+  const initial = inkBounds(source);
+  if (!initial) return "";
+
+  let box = initial;
+  const hairline = Math.min(box.width, box.height) <= MAX_HAIRLINE_DOTS;
+
+  if (!hairline) {
+    for (let pass = 0; pass < 2; pass++) {
+      const aspect = box.width / box.height;
+      let nextLeft = box.left;
+      let nextTop = box.top;
+      let nextWidth = box.width;
+      let nextHeight = box.height;
+
+      if (aspect < MIN_PORTRAIT_ASPECT) {
+        nextHeight = Math.max(1, Math.min(box.height, Math.round(box.width / MIN_PORTRAIT_ASPECT)));
+        const rowScore = new Int32Array(box.height);
+        for (let y = 0; y < box.height; y++) {
+          const sy = box.top + y;
+          let ink = 0;
+          let transitions = 0;
+          let prev = false;
+          for (let x = box.left; x < box.left + box.width; x++) {
+            const on = Boolean(source.dots[sy * source.width + x]);
+            if (on) ink += 1;
+            if (on !== prev) transitions += 1;
+            prev = on;
+          }
+          if (prev) transitions += 1;
+          rowScore[y] = ink + Math.max(0, transitions - 2) * 64;
+        }
+        let current = 0;
+        for (let y = 0; y < nextHeight; y++) current += rowScore[y]!;
+        let best = current;
+        let bestY = 0;
+        for (let y = 1; y <= box.height - nextHeight; y++) {
+          current += rowScore[y + nextHeight - 1]! - rowScore[y - 1]!;
+          if (current > best) {
+            best = current;
+            bestY = y;
+          }
+        }
+        nextTop = box.top + bestY;
+      } else if (aspect > MAX_PORTRAIT_ASPECT) {
+        nextWidth = Math.max(1, Math.min(box.width, Math.round(box.height * MAX_PORTRAIT_ASPECT)));
+        const colScore = new Int32Array(box.width);
+        for (let x = 0; x < box.width; x++) {
+          const sx = box.left + x;
+          let ink = 0;
+          let transitions = 0;
+          let prev = false;
+          for (let y = box.top; y < box.top + box.height; y++) {
+            const on = Boolean(source.dots[y * source.width + sx]);
+            if (on) ink += 1;
+            if (on !== prev) transitions += 1;
+            prev = on;
+          }
+          if (prev) transitions += 1;
+          // Square column thickness so heads outscore long thin horizontal rules.
+          colScore[x] = ink * ink + Math.max(0, transitions - 2) * 64;
+        }
+        let current = 0;
+        for (let x = 0; x < nextWidth; x++) current += colScore[x]!;
+        let best = current;
+        let bestX = 0;
+        for (let x = 1; x <= box.width - nextWidth; x++) {
+          current += colScore[x + nextWidth - 1]! - colScore[x - 1]!;
+          if (current > best) {
+            best = current;
+            bestX = x;
+          }
+        }
+        nextLeft = box.left + bestX;
+      } else {
+        break;
+      }
+
+      const tightened = tightenBox(source, nextLeft, nextTop, nextWidth, nextHeight);
+      if (!tightened) break;
+      box = tightened;
+      if (Math.min(box.width, box.height) <= 2) break;
+    }
+  }
+
+  let cropInk = 0;
+  for (let y = box.top; y < box.top + box.height; y++) {
+    for (let x = box.left; x < box.left + box.width; x++) {
+      if (source.dots[y * source.width + x]) cropInk += 1;
+    }
+  }
+  const density = cropInk / Math.max(1, box.width * box.height);
+  const cutoff = density > 0.35 ? Math.min(0.5, 0.25 + (density - 0.35) * 0.8) : 0.25;
+
+  const maxDotW = PORTRAIT_COLS * 2;
+  const maxDotH = PORTRAIT_ROWS * 4;
+  const rawScale = Math.min(maxDotW / box.width, maxDotH / box.height);
+  const scale = hairline || Math.min(box.width, box.height) <= 3 ? Math.min(1, rawScale) : rawScale;
+  const dstW = Math.max(1, Math.min(maxDotW, Math.round(box.width * scale)));
+  const dstH = Math.max(1, Math.min(maxDotH, Math.round(box.height * scale)));
+  const cols = Math.ceil(dstW / 2);
+  const rows = Math.ceil(dstH / 4);
+
+  const lines: string[] = [];
+  for (let row = 0; row < rows; row++) {
+    let line = "";
+    for (let col = 0; col < cols; col++) {
+      let code = 0;
+      for (const [bit, dy, dx] of DOTS) {
+        const y = row * 4 + dy;
+        const x = col * 2 + dx;
+        if (x >= dstW || y >= dstH) continue;
+        const sx0 = box.left + (x / dstW) * box.width;
+        const sx1 = box.left + ((x + 1) / dstW) * box.width;
+        const sy0 = box.top + (y / dstH) * box.height;
+        const sy1 = box.top + ((y + 1) / dstH) * box.height;
+        const ix0 = Math.floor(sx0);
+        const ix1 = Math.max(ix0 + 1, Math.ceil(sx1));
+        const iy0 = Math.floor(sy0);
+        const iy1 = Math.max(iy0 + 1, Math.ceil(sy1));
+        let on = 0;
+        let seen = 0;
+        for (let sy = iy0; sy < iy1 && sy < source.height; sy++) {
+          for (let sx = ix0; sx < ix1 && sx < source.width; sx++) {
+            seen += 1;
+            if (source.dots[sy * source.width + sx]) on += 1;
+          }
+        }
+        if (seen > 0 && on / seen >= cutoff) code |= bit;
+      }
+      line += code === 0 ? " " : String.fromCodePoint(0x2800 + code);
+    }
+    lines.push(line.replace(/\s+$/, ""));
+  }
+  while (lines.length && lines[0]!.trim() === "") lines.shift();
+  while (lines.length && lines[lines.length - 1]!.trim() === "") lines.pop();
+  return lines.join("\n");
 }

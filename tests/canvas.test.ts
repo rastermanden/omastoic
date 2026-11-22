@@ -120,6 +120,99 @@ test("a grid too small for the portrait falls back to the quote alone", () => {
   expect(block).toContain("— MARCUS AURELIUS");
 });
 
+test("extreme 1:9 tall and 10:1 wide portraits keep readable name and dates lines", () => {
+  const marcus = authors.get("marcus");
+  const tall1to9 = Array.from({ length: 18 }, () => "⣿".repeat(4));
+  const tall1col = Array.from({ length: 20 }, () => "⣿");
+  const wide10to1 = Array.from({ length: 2 }, () => "⣿".repeat(34));
+  const smallWide10to1 = ["⣿".repeat(10)];
+
+  for (const [cols, rows] of [[92, 25], [100, 30]] as const) {
+    for (const portrait of [tall1to9, tall1col, wide10to1, smallWide10to1]) {
+      const block = compose(quote, marcus, { cols, rows, art: portrait });
+      const lines = block.split("\n");
+      expect(block).toMatch(/[\u2801-\u28ff]/);
+      expect(width(block)).toBeLessThanOrEqual(cols - 6);
+      expect(height(block)).toBeLessThanOrEqual(rows);
+      expect(block).toContain("MARCUS AURELIUS");
+      expect(block).toContain("AD 121 – 180");
+      expect(lines.find((line) => line.includes("MARCUS AURELIUS"))!.trim()).toBe("MARCUS AURELIUS");
+      expect(lines.find((line) => line.includes("AD 121 – 180"))!.trim()).toBe("AD 121 – 180");
+      for (const line of lines) {
+        expect(line).toBe(line.replace(/\s+$/, ""));
+      }
+    }
+  }
+
+  const unicodeBlock = compose(quote, { slug: "kongzi", name: "孔子", dates: "551 – 479 BC" }, { cols: 92, rows: 25, art: tall1col });
+  expect(unicodeBlock).toMatch(/[\u2801-\u28ff]/);
+  expect(unicodeBlock).toContain("孔子");
+  expect(unicodeBlock).toContain("551 – 479 BC");
+
+  const ciceroBlock = compose(quote, { slug: "cicero", name: "Marcus Tullius Cicero", dates: "106 – 43 BC" }, { cols: 92, rows: 25, art: tall1to9 });
+  expect(ciceroBlock).toMatch(/[\u2801-\u28ff]/);
+  expect(ciceroBlock).toContain("MARCUS TULLIUS");
+  expect(ciceroBlock).toContain("CICERO");
+  expect(ciceroBlock).toContain("106 – 43 BC");
+
+  const staggered = [" ⣿", "⣿⣿", "  ⣿"];
+  const staggeredBlock = compose(quote, marcus, { cols: 92, rows: 25, art: staggered });
+  const artRows = staggeredBlock.split("\n").filter((line) => line.includes("⣿"));
+  const indent = (line: string) => line.indexOf("⣿");
+  expect(artRows.length).toBe(3);
+  expect(indent(artRows[0]!) - indent(artRows[1]!)).toBe(1);
+  expect(indent(artRows[2]!) - indent(artRows[1]!)).toBe(2);
+
+  const trailingPadded = ["⣿⣿                  ", "⣿⣿\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800\u2800"];
+  const paddedBlock = compose(quote, marcus, { cols: 92, rows: 25, art: trailingPadded });
+  const paddedArtLine = paddedBlock.split("\n").find((line) => line.includes("⣿"))!;
+  expect(paddedArtLine.indexOf("⣿")).toBeGreaterThan(0);
+});
+
+test("typical portrait aspect ratios keep their unpadded left alignment", () => {
+  const marcus = authors.get("marcus");
+  const portrait3to4 = Array.from({ length: 16 }, () => "⣿".repeat(26));
+  const portrait4to3 = Array.from({ length: 10 }, () => "⣿".repeat(31));
+  const portrait1to1 = Array.from({ length: 15 }, () => "⣿".repeat(28));
+
+  for (const [portrait, expectedWidth] of [
+    [portrait3to4, 26],
+    [portrait4to3, 31],
+    [portrait1to1, 28],
+  ] as const) {
+    const block = compose(quote, marcus, { cols: 92, rows: 25, art: portrait });
+    const lines = block.split("\n");
+    expect(lines[0]!.startsWith("⣿".repeat(expectedWidth))).toBe(true);
+    const quoteRow = lines.find((line) => line.includes("“"))!;
+    expect(quoteRow.indexOf("“")).toBe(expectedWidth + 4);
+    expect(block).toContain("MARCUS AURELIUS");
+    expect(block).toContain("AD 121 – 180");
+  }
+});
+
+test("grids too small for an extreme portrait and readable label fall back to quote-only", () => {
+  const marcus = authors.get("marcus");
+  const tall1to9 = Array.from({ length: 18 }, () => "⣿".repeat(4));
+  const wide10to1 = Array.from({ length: 2 }, () => "⣿".repeat(34));
+
+  for (const [portrait, cols, rows] of [
+    [tall1to9, 55, 30],
+    [tall1to9, 50, 30],
+    [tall1to9, 92, 20],
+    [wide10to1, 68, 25],
+    [wide10to1, 92, 4],
+    [["", ""], 92, 25],
+    [[" ", "   "], 92, 20],
+    [["\u2800\u2800"], 92, 25],
+  ] as const) {
+    const block = compose(quote, marcus, { cols, rows, art: [...portrait] });
+    expect(block).not.toMatch(/[\u2801-\u28ff]/);
+    expect(width(block)).toBeLessThanOrEqual(cols);
+    expect(height(block)).toBeLessThanOrEqual(rows);
+    expect(block).toContain("— MARCUS AURELIUS");
+  }
+});
+
 test("an author with no portrait still renders", () => {
   const block = compose({ ...quote, author: "nobody" }, undefined, { cols: 92, rows: 25, art: null });
   expect(block).toContain("— NOBODY");

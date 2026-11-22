@@ -1406,3 +1406,229 @@ test.skipIf(!hasImageMagick)("JPEG with harmless extraneous bytes before marker 
     expect(readFileSync(musoniusArtPath, "utf8")).toBe(expectedArt);
   } finally { s.cleanup(); }
 }, 30000);
+
+test.skipIf(!hasImageMagick)("extreme 1:9, 10:1, and standard portraits fill the 34x20 budget and render readable captions end to end", async () => {
+  const s = sandbox();
+  const tallPng = join(s.home, "tall-1-9.png");
+  const offTallPng = join(s.home, "off-tall-1-9.png");
+  const widePng = join(s.home, "wide-10-1.png");
+  const offWidePng = join(s.home, "off-wide-10-1.png");
+  const landscapePng = join(s.home, "landscape-4-3.png");
+  const paddedPng = join(s.home, "padded-3-4.png");
+  const darkBust43Png = join(s.home, "dark-bust-4-3.png");
+  const darkBlockWidePng = join(s.home, "dark-block-10-1.png");
+  const headroomPng = join(s.home, "headroom-3-4.png");
+  const wideDeskLinePng = join(s.home, "wide-deskline-10-1.png");
+  const wideGradientPng = join(s.home, "wide-gradient-10-1.png");
+  const thinRingPng = join(s.home, "thin-ring.png");
+  const tallPedestalPng = join(s.home, "tall-pedestal-1-9.png");
+  const wideFooterPng = join(s.home, "wide-footer-10-1.png");
+  const standingPng = join(s.home, "standing-1-9.png");
+  const hlinePng = join(s.home, "hline-10-1.png");
+  const ruleSpeckPng = join(s.home, "rule-speck-10-1.png");
+  const vline3pxPng = join(s.home, "vline-3px-300.png");
+  const hline3pxPng = join(s.home, "hline-3px-100.png");
+
+  writeFileSync(tallPng, makePng(90, 810, (x, y) => {
+    const dx = x - 45;
+    const dy = y - 405;
+    return (dx * dx) / (30 * 30) + (dy * dy) / (45 * 45) <= 1 ? 20 : 248;
+  }));
+  writeFileSync(offTallPng, makePng(90, 810, (x, y) => {
+    const dx = x - 45;
+    const dy = y - 90;
+    return dx * dx + dy * dy < 28 * 28 ? 20 : 248;
+  }));
+  writeFileSync(widePng, makePng(900, 90, (x, y) => {
+    const dx = x - 450;
+    const dy = y - 45;
+    return (dx * dx) / (36 * 36) + (dy * dy) / (32 * 32) <= 1 ? 20 : 248;
+  }));
+  writeFileSync(offWidePng, makePng(900, 90, (x, y) => {
+    const dx = x - 90;
+    const dy = y - 45;
+    return dx * dx + dy * dy < 28 * 28 ? 20 : 248;
+  }));
+  writeFileSync(landscapePng, makePng(400, 300, (x, y) => {
+    const dx = x - 200;
+    const dy = y - 130;
+    const head = dx * dx + dy * dy < 70 * 70;
+    const shoulders = y >= 200 && y <= 290 && Math.abs(dx) < 110;
+    return head || shoulders ? 25 : 245;
+  }));
+  writeFileSync(paddedPng, makePng(300, 400, (x, y) => {
+    const dx = x - 150;
+    const dy = y - 180;
+    const head = dx * dx + dy * dy < 55 * 55;
+    const shoulders = y >= 240 && y <= 310 && Math.abs(dx) < 75;
+    return head || shoulders ? 25 : 245;
+  }));
+  writeFileSync(darkBust43Png, makePng(400, 300, (x, y) =>
+    x >= 60 && x <= 340 && y >= 30 && y <= 299 ? 20 : 248,
+  ));
+  writeFileSync(darkBlockWidePng, makePng(900, 90, (x, _y) =>
+    x >= 270 && x <= 630 ? 20 : 248,
+  ));
+  writeFileSync(headroomPng, makePng(300, 400, (x, y) => {
+    const head = (x - 150) ** 2 + (y - 190) ** 2 < 50 ** 2;
+    const shoulders = y >= 235 && y <= 295 && Math.abs(x - 150) < 106;
+    return head || shoulders ? 25 : 245;
+  }));
+  writeFileSync(wideDeskLinePng, makePng(900, 90, (x, y) =>
+    (x - 120) ** 2 + (y - 45) ** 2 < 35 ** 2 || (y >= 72 && y <= 78) ? 25 : 248,
+  ));
+  writeFileSync(wideGradientPng, makePng(900, 90, (x, y) =>
+    (x - 90) ** 2 + (y - 45) ** 2 < 34 ** 2 ? 20 : Math.round(150 + (x / 900) * 95),
+  ));
+  writeFileSync(thinRingPng, makePng(800, 600, (x, y) =>
+    Math.abs(Math.hypot(x - 400, y - 300) - 220) <= 1.2 ? 10 : 252,
+  ));
+  writeFileSync(tallPedestalPng, makePng(90, 810, (x, y) =>
+    (x - 45) ** 2 / 81 + (y - 95) ** 2 / 3600 <= 1 || (y >= 775 && y <= 792) ? 20 : 248,
+  ));
+  writeFileSync(wideFooterPng, makePng(900, 90, (x, y) =>
+    (x - 100) ** 2 / 1296 + (y - 12) ** 2 / 100 <= 1 || (x >= 400 && x <= 880 && y >= 83 && y <= 88) ? 20 : 248,
+  ));
+  writeFileSync(standingPng, makePng(90, 810, (x, y) => {
+    const dx = x - 45;
+    const dy = y - 95;
+    if (dx * dx / 784 + (dy + 10) ** 2 / 1024 <= 1 && dy < -12) return 20;
+    if (dx * dx / 676 + dy * dy / 2025 <= 1) {
+      if ((dx + 9) ** 2 + (dy + 6) ** 2 <= 10 || (dx - 9) ** 2 + (dy + 6) ** 2 <= 10) return 20;
+      if (Math.abs(dx) <= 1.5 && dy >= -4 && dy <= 10) return 30;
+      if (Math.abs(dy - 20) <= 2 && Math.abs(dx) <= 8) return 25;
+      if (dx * dx / 676 + dy * dy / 2025 > 0.82) return 25;
+      return 240;
+    }
+    if (y >= 350 && y <= 780 && x >= 12 && x <= 78) return 20;
+    return 248;
+  }));
+  writeFileSync(hlinePng, makePng(1000, 100, (_x, y) => (y === 50 ? 10 : 252)));
+  writeFileSync(ruleSpeckPng, makePng(1000, 100, (x, y) => ((x < 700 && y === 50) || (x >= 980 && x <= 986 && y >= 15 && y <= 21) ? 10 : 252)));
+  writeFileSync(vline3pxPng, makePng(300, 300, (x, _y) => (x >= 149 && x <= 151 ? 10 : 252)));
+  writeFileSync(hline3pxPng, makePng(100, 100, (x, y) => (y >= 49 && y <= 51 && x >= 10 && x <= 90 ? 10 : 252)));
+
+  const inkBox = (art: string) => {
+    const lines = art.replace(/\n+$/, "").split("\n");
+    let minCol = Infinity;
+    let maxCol = -1;
+    let inkRows = 0;
+    for (const line of lines) {
+      let hasInk = false;
+      const chars = [...line];
+      for (let col = 0; col < chars.length; col++) {
+        const cp = chars[col]!.codePointAt(0) ?? 0;
+        if (cp >= 0x2801 && cp <= 0x28ff) {
+          hasInk = true;
+          if (col < minCol) minCol = col;
+          if (col > maxCol) maxCol = col;
+        }
+      }
+      if (hasInk) inkRows += 1;
+    }
+    return {
+      rows: lines.length,
+      inkRows,
+      width: Math.max(...lines.map((line) => [...line].length)),
+      inkWidth: maxCol < minCol ? 0 : maxCol - minCol + 1,
+    };
+  };
+
+  try {
+    const cases = [
+      { slug: "tall", name: "Musonius Rufus", dates: "c. AD 30 – 100", image: tallPng, minCols: 20, minRows: 15 },
+      { slug: "offtall", name: "Aristo of Chios", dates: "c. 260 BC", image: offTallPng, minCols: 20, minRows: 14 },
+      { slug: "wide", name: "Hierocles Stoic", dates: "2nd c. AD", image: widePng, minCols: 20, minRows: 12 },
+      { slug: "offwide", name: "Panaetius Rhodes", dates: "185 – 110 BC", image: offWidePng, minCols: 20, minRows: 12 },
+      { slug: "standard", name: "Marcus Bust", dates: "AD 121 – 180", image: sampleJpeg, minCols: 26, minRows: 18 },
+      { slug: "landscape", name: "Posidonius", dates: "c. 135 – 51 BC", image: landscapePng, minCols: 24, minRows: 14 },
+      { slug: "padded", name: "Antipater Tarsus", dates: "d. 130 BC", image: paddedPng, minCols: 24, minRows: 15 },
+      { slug: "darkbust43", name: "Sphaerus Borysthenes", dates: "c. 285 – 210 BC", image: darkBust43Png, minCols: 30, minRows: 14 },
+      { slug: "darkwide", name: "Diogenes Babylon", dates: "c. 230 – 150 BC", image: darkBlockWidePng, minCols: 30, minRows: 12 },
+      { slug: "headroom", name: "Hecato Rhodes", dates: "c. 100 BC", image: headroomPng, minCols: 30, minRows: 12 },
+      { slug: "widedesk", name: "Cato Younger", dates: "95 – 46 BC", image: wideDeskLinePng, minCols: 30, minRows: 12 },
+      { slug: "widegrad", name: "Thrasea Paetus", dates: "d. AD 66", image: wideGradientPng, minCols: 30, minRows: 14 },
+      { slug: "thinring", name: "Rutilius Rufus", dates: "158 – 78 BC", image: thinRingPng, minCols: 28, minRows: 14 },
+      { slug: "tallped", name: "Persaeus Citium", dates: "306 – 243 BC", image: tallPedestalPng, minCols: 20, minRows: 16 },
+      { slug: "widefoot", name: "Herillus Carthage", dates: "3rd c. BC", image: wideFooterPng, minCols: 28, minRows: 12 },
+      { slug: "standing", name: "Dionysius Heraclea", dates: "330 – 250 BC", image: standingPng, minCols: 20, minRows: 16 },
+    ];
+
+    for (const c of cases) {
+      const added = await s.cli([
+        "config",
+        "--add-author", c.slug,
+        "--name", c.name,
+        "--dates", c.dates,
+        "--image", c.image,
+        "--citation", "Discourses I.1",
+        "--text", "Make the best use of what is in your power, and take the rest as it happens.",
+        "--authors", c.slug,
+      ]);
+      expectOk(added, `add ${c.slug}`);
+
+      const savedArt = readFileSync(join(s.config, `omastoic/art/${c.slug}.txt`), "utf8");
+      const box = inkBox(savedArt);
+      expect(box.width, `${c.slug} width <= 34`).toBeLessThanOrEqual(PORTRAIT_COLS);
+      expect(box.rows, `${c.slug} rows <= 20`).toBeLessThanOrEqual(PORTRAIT_ROWS);
+      expect(box.inkWidth, `${c.slug} inkWidth`).toBeGreaterThanOrEqual(c.minCols);
+      expect(box.inkRows, `${c.slug} inkRows`).toBeGreaterThanOrEqual(c.minRows);
+
+      const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
+      expectOk(shown, `show ${c.slug} 92x25`);
+      const outLines = shown.stdout.replace(/\n+$/, "").split("\n");
+      expect(outLines.length, `${c.slug} height`).toBeLessThanOrEqual(25);
+      expect(Math.max(...outLines.map((line) => [...line].length)), `${c.slug} width`).toBeLessThanOrEqual(92);
+      expect(shown.stdout, `${c.slug} has braille`).toMatch(/[\u2801-\u28ff]/);
+      const upperName = c.name.toUpperCase();
+      expect(shown.stdout, `${c.slug} full name`).toContain(upperName);
+      expect(shown.stdout, `${c.slug} full dates`).toContain(c.dates);
+      const nameLine = outLines.find((line) => line.includes(upperName))!;
+      expect(nameLine.trim(), `${c.slug} name does not sit beside quote`).toBe(upperName);
+      const datesLine = outLines.find((line) => line.includes(c.dates))!;
+      expect(datesLine.trim(), `${c.slug} dates do not sit beside quote`).toBe(c.dates);
+
+      const small = await s.cli(["show", "--cols", "60", "--rows", "12"]);
+      expectOk(small, `show ${c.slug} 60x12`);
+      expect(small.stdout, `${c.slug} small fallback has no braille`).not.toMatch(/[\u2801-\u28ff]/);
+      expect(small.stdout, `${c.slug} small fallback has attribution`).toContain(`— ${upperName}`);
+    }
+
+    const standingArt = readFileSync(join(s.config, "omastoic/art/standing.txt"), "utf8");
+    const standingCells = [...standingArt.replace(/\n/g, "")].filter((ch) => (ch.codePointAt(0) ?? 0) >= 0x2801);
+    expect(standingCells.filter((ch) => ch === "⣿").length).toBeLessThan(standingCells.length * 0.7);
+
+    const addedRule = await s.cli([
+      "config", "--add-author", "hairline", "--name", "Hairline Rule", "--dates", "200 BC",
+      "--image", hlinePng, "--citation", "Note 1", "--text", "A single rule stays thin.",
+    ]);
+    expectOk(addedRule, "add hairline");
+    const ruleArt = readFileSync(join(s.config, "omastoic/art/hairline.txt"), "utf8").trimEnd().split("\n");
+    expect(ruleArt.length).toBeLessThanOrEqual(2);
+
+    const addedRuleSpeck = await s.cli([
+      "config", "--add-author", "rulespeck", "--name", "Rule Speck", "--dates", "200 BC",
+      "--image", ruleSpeckPng, "--citation", "Note 2", "--text", "A cropped rule stays thin.",
+    ]);
+    expectOk(addedRuleSpeck, "add rulespeck");
+    const ruleSpeckArt = readFileSync(join(s.config, "omastoic/art/rulespeck.txt"), "utf8").trimEnd().split("\n");
+    expect(ruleSpeckArt.length).toBeLessThanOrEqual(2);
+
+    const addedVline3 = await s.cli([
+      "config", "--add-author", "vline3px", "--name", "Three Pixel Line", "--dates", "200 BC",
+      "--image", vline3pxPng, "--citation", "Note 3", "--text", "A 3px vertical stroke stays a line.",
+    ]);
+    expectOk(addedVline3, "add vline3px");
+    const vline3Box = inkBox(readFileSync(join(s.config, "omastoic/art/vline3px.txt"), "utf8"));
+    expect(vline3Box.inkWidth).toBeLessThanOrEqual(3);
+    expect(vline3Box.rows).toBeGreaterThanOrEqual(15);
+
+    const addedHline3 = await s.cli([
+      "config", "--add-author", "hline3px", "--name", "Three Pixel Rule", "--dates", "200 BC",
+      "--image", hline3pxPng, "--citation", "Note 4", "--text", "A 3px horizontal stroke stays thin.",
+    ]);
+    expectOk(addedHline3, "add hline3px");
+    const hline3Box = inkBox(readFileSync(join(s.config, "omastoic/art/hline3px.txt"), "utf8"));
+    expect(hline3Box.rows).toBeLessThanOrEqual(2);
+  } finally { s.cleanup(); }
+}, 30000);
