@@ -106,6 +106,8 @@ Item {
 
   function open(payloadJson) {
     opened = true
+    hasLocalSize = sizeProcess.running || pendingSizePayload !== ""
+    resizing = false
     quoteOpen = false
     authorOpen = false
     listOpen = false
@@ -129,6 +131,7 @@ Item {
 
   function close() {
     opened = false
+    resizing = false
     confirmRemoveAuthor = ""
   }
 
@@ -254,6 +257,7 @@ Item {
       closeAuthorForm()
     }
     if (secondsField.field) secondsField.field.value = interval
+    if (!hasLocalSize && !resizing && !sizeProcess.running && pendingSizePayload === "") adoptPanelSize(parsed.panelSize)
     adopting = false
     return true
   }
@@ -618,6 +622,171 @@ Item {
     onTriggered: { if (root.notice === "Preview opened.") root.notice = "" }
   }
 
+  property real userWidth: 0
+  property real userHeight: 0
+  property bool hasLocalSize: false
+  property bool resizing: false
+  property string pendingSizePayload: ""
+
+  function maxCardWidth(availableWidth) {
+    return Math.max(0, availableWidth - Style.space(48))
+  }
+
+  function maxCardHeight(availableHeight) {
+    return Math.max(0, availableHeight - Style.space(64))
+  }
+
+  function minCardWidth(availableWidth) {
+    return Math.min(Math.max(120, Style.space(400)), maxCardWidth(availableWidth))
+  }
+
+  function minCardHeight(availableHeight) {
+    return Math.min(Math.max(120, Style.space(320)), maxCardHeight(availableHeight))
+  }
+
+  function clampedCardWidth(wanted, availableWidth) {
+    var maxW = maxCardWidth(availableWidth)
+    if (maxW <= 0) return Style.space(520)
+    return Math.max(minCardWidth(availableWidth), Math.min(wanted, maxW))
+  }
+
+  function clampedCardHeight(wanted, availableHeight) {
+    var maxH = maxCardHeight(availableHeight)
+    if (maxH <= 0) return Style.space(320)
+    return Math.max(minCardHeight(availableHeight), Math.min(wanted, maxH))
+  }
+
+  function adoptPanelSize(raw) {
+    if (!raw || typeof raw !== "object") {
+      userWidth = 0
+      userHeight = 0
+      return
+    }
+    var w = Number(raw.width)
+    var h = Number(raw.height)
+    userWidth = (isFinite(w) && w > 0) ? w : 0
+    userHeight = (isFinite(h) && h > 0) ? h : 0
+  }
+
+  function sendPanelSize(payloadJson) {
+    if (sizeProcess.running) {
+      pendingSizePayload = payloadJson
+      return
+    }
+    pendingSizePayload = ""
+    sizeProcess.command = [command, "panel", "size", payloadJson]
+    sizeProcess.running = true
+  }
+
+  function persistPanelSize() {
+    var payload = {}
+    var w = Math.round(userWidth)
+    var h = Math.round(userHeight)
+    if (w >= 120) payload.width = w
+    if (h >= 120) payload.height = h
+    if (payload.width === undefined && payload.height === undefined) {
+      sendPanelSize('{"reset":true}')
+      return
+    }
+    sendPanelSize(JSON.stringify(payload))
+  }
+
+  function resetPanelSize() {
+    hasLocalSize = true
+    userWidth = 0
+    userHeight = 0
+    sendPanelSize('{"reset":true}')
+  }
+
+  function clampScroll() {
+    var maxY = Math.max(0, scroller.contentHeight - scroller.height)
+    if (scroller.contentY > maxY) scroller.contentY = maxY
+  }
+
+  Process {
+    id: sizeProcess
+    onExited: {
+      if (root.pendingSizePayload !== "") {
+        let nextPayload = root.pendingSizePayload
+        root.pendingSizePayload = ""
+        sizeProcess.command = [root.command, "panel", "size", nextPayload]
+        sizeProcess.running = true
+      }
+    }
+  }
+
+  component ResizeHandle: MouseArea {
+    id: handle
+    property int horizontalEdge: 0
+    property int verticalEdge: 0
+    property real startSceneX: 0
+    property real startSceneY: 0
+    property real startWidth: 0
+    property real startHeight: 0
+    property bool dragged: false
+    property bool suppressDrag: false
+    hoverEnabled: true
+    acceptedButtons: Qt.LeftButton
+    preventStealing: true
+    z: (horizontalEdge !== 0 && verticalEdge !== 0) ? 12 : 10
+    cursorShape: {
+      if (horizontalEdge > 0 && verticalEdge > 0) return Qt.SizeFDiagCursor
+      if (horizontalEdge < 0 && verticalEdge > 0) return Qt.SizeBDiagCursor
+      if (horizontalEdge !== 0) return Qt.SizeHorCursor
+      return Qt.SizeVerCursor
+    }
+    onPressed: function(mouse) {
+      root.confirmRemoveAuthor = ""
+      var pt = handle.mapToItem(keyCatcher, mouse.x, mouse.y)
+      handle.startSceneX = pt.x
+      handle.startSceneY = pt.y
+      handle.startWidth = card.width
+      handle.startHeight = card.height
+      handle.dragged = false
+      handle.suppressDrag = false
+      root.resizing = true
+      mouse.accepted = true
+    }
+    onPositionChanged: function(mouse) {
+      if (!handle.pressed || handle.suppressDrag) return
+      var pt = handle.mapToItem(keyCatcher, mouse.x, mouse.y)
+      var dx = pt.x - handle.startSceneX
+      var dy = pt.y - handle.startSceneY
+      if (!handle.dragged && Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+      handle.dragged = true
+      root.hasLocalSize = true
+      if (handle.horizontalEdge !== 0) {
+        // Card stays horizontally centered, so 2*dx keeps the dragged edge 1:1 with the cursor.
+        root.userWidth = root.clampedCardWidth(handle.startWidth + handle.horizontalEdge * 2 * dx, keyCatcher.width)
+      }
+      if (handle.verticalEdge !== 0) {
+        root.userHeight = root.clampedCardHeight(handle.startHeight + handle.verticalEdge * dy, keyCatcher.height)
+      }
+    }
+    onReleased: {
+      root.resizing = false
+      if (handle.dragged && !handle.suppressDrag) {
+        handle.dragged = false
+        root.persistPanelSize()
+      } else {
+        handle.dragged = false
+      }
+      handle.suppressDrag = false
+    }
+    onCanceled: {
+      root.resizing = false
+      handle.dragged = false
+      handle.suppressDrag = false
+    }
+    onDoubleClicked: {
+      handle.suppressDrag = true
+      handle.dragged = false
+      root.resizing = false
+      root.confirmRemoveAuthor = ""
+      root.resetPanelSize()
+    }
+  }
+
   PanelWindow {
     id: window
     visible: root.opened
@@ -654,11 +823,19 @@ Item {
 
       Rectangle {
         id: card
+        objectName: "panelCard"
+        readonly property real resizeOuterLip: Style.space(6)
+        readonly property real resizeCornerInner: Math.min(Style.space(14), Style.spacing.popupPadding)
+        readonly property real resizeCornerSize: resizeCornerInner + resizeOuterLip
+        readonly property real resizeEdgeInner: Math.min(Style.space(6), Style.spacing.popupPadding)
+        readonly property real resizeEdgeThickness: resizeEdgeInner + resizeOuterLip
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Style.space(32)
-        width: Math.min(Style.space(520), keyCatcher.width - Style.space(48))
-        height: Math.min(content.implicitHeight + Style.spacing.popupPadding * 2, keyCatcher.height - Style.space(64))
+        width: root.clampedCardWidth(root.userWidth > 0 ? root.userWidth : Style.space(520), keyCatcher.width)
+        height: root.userHeight > 0
+          ? root.clampedCardHeight(root.userHeight, keyCatcher.height)
+          : Math.min(content.implicitHeight + Style.spacing.popupPadding * 2, root.maxCardHeight(keyCatcher.height))
         radius: Style.cornerRadius
         color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
@@ -669,9 +846,12 @@ Item {
           id: scroller
           anchors.fill: parent
           anchors.margins: Style.spacing.popupPadding
+          contentWidth: width
           contentHeight: content.implicitHeight
           clip: true
           flickableDirection: Flickable.VerticalFlick
+          onHeightChanged: root.clampScroll()
+          onContentHeightChanged: root.clampScroll()
 
           MouseArea {
             id: contentBackdrop
@@ -682,7 +862,8 @@ Item {
 
           Column {
             id: content
-            width: parent.width
+            objectName: "panelContent"
+            width: scroller.width
             spacing: Style.space(12)
 
             Row {
@@ -707,7 +888,7 @@ Item {
               }
 
               Column {
-                width: parent.width - Style.space(110)
+                width: Math.max(0, parent.width - (portraitSlot.width > 0 ? portraitSlot.width + Style.space(14) : 0))
                 spacing: Style.space(6)
 
                 Row {
@@ -1334,6 +1515,141 @@ Item {
                 elide: Text.ElideRight
               }
             }
+          }
+        }
+
+        ResizeHandle {
+          id: resizeLeft
+          objectName: "resizeLeft"
+          horizontalEdge: -1
+          anchors.top: parent.top
+          anchors.bottom: resizeCornerLeft.top
+          anchors.left: parent.left
+          anchors.leftMargin: -card.resizeOuterLip
+          width: card.resizeEdgeThickness
+          Rectangle {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.leftMargin: card.resizeOuterLip
+            width: Math.max(2, Style.space(2))
+            radius: width / 2
+            color: Commons.Color.accent
+            opacity: (resizeLeft.containsMouse || resizeLeft.pressed) ? 0.85 : 0
+          }
+        }
+
+        ResizeHandle {
+          id: resizeRight
+          objectName: "resizeRight"
+          horizontalEdge: 1
+          anchors.top: parent.top
+          anchors.bottom: resizeCornerRight.top
+          anchors.right: parent.right
+          anchors.rightMargin: -card.resizeOuterLip
+          width: card.resizeEdgeThickness
+          Rectangle {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.rightMargin: card.resizeOuterLip
+            width: Math.max(2, Style.space(2))
+            radius: width / 2
+            color: Commons.Color.accent
+            opacity: (resizeRight.containsMouse || resizeRight.pressed) ? 0.85 : 0
+          }
+        }
+
+        ResizeHandle {
+          id: resizeBottom
+          objectName: "resizeBottom"
+          verticalEdge: 1
+          anchors.left: resizeCornerLeft.right
+          anchors.right: resizeCornerRight.left
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: -card.resizeOuterLip
+          height: card.resizeEdgeThickness
+          Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: card.resizeOuterLip
+            height: Math.max(2, Style.space(2))
+            radius: height / 2
+            color: Commons.Color.accent
+            opacity: (resizeBottom.containsMouse || resizeBottom.pressed) ? 0.85 : 0
+          }
+        }
+
+        ResizeHandle {
+          id: resizeCornerLeft
+          objectName: "resizeCornerLeft"
+          horizontalEdge: -1
+          verticalEdge: 1
+          anchors.left: parent.left
+          anchors.bottom: parent.bottom
+          anchors.leftMargin: -card.resizeOuterLip
+          anchors.bottomMargin: -card.resizeOuterLip
+          width: card.resizeCornerSize
+          height: card.resizeCornerSize
+          Rectangle {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: card.resizeOuterLip
+            anchors.bottomMargin: card.resizeOuterLip
+            width: Math.max(2, Style.space(2))
+            height: Math.min(Style.space(12), card.resizeCornerInner)
+            radius: width / 2
+            color: Commons.Color.accent
+            opacity: (resizeCornerLeft.containsMouse || resizeCornerLeft.pressed) ? 0.85 : 0
+          }
+          Rectangle {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: card.resizeOuterLip
+            anchors.bottomMargin: card.resizeOuterLip
+            width: Math.min(Style.space(12), card.resizeCornerInner)
+            height: Math.max(2, Style.space(2))
+            radius: height / 2
+            color: Commons.Color.accent
+            opacity: (resizeCornerLeft.containsMouse || resizeCornerLeft.pressed) ? 0.85 : 0
+          }
+        }
+
+        ResizeHandle {
+          id: resizeCornerRight
+          objectName: "resizeCornerRight"
+          horizontalEdge: 1
+          verticalEdge: 1
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.rightMargin: -card.resizeOuterLip
+          anchors.bottomMargin: -card.resizeOuterLip
+          width: card.resizeCornerSize
+          height: card.resizeCornerSize
+          Accessible.name: "Resize panel"
+
+          Item {
+            id: resizeGrip
+            objectName: "resizeGrip"
+            readonly property real dot: Math.max(2, Style.space(2))
+            readonly property real step: dot + Math.max(2, Style.space(2))
+            readonly property real inset: Math.max(2, Math.floor((card.resizeCornerInner - width) / 2))
+            readonly property color gripColor: (resizeCornerRight.containsMouse || resizeCornerRight.pressed)
+              ? Commons.Color.accent
+              : Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.45)
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: card.resizeOuterLip + inset
+            anchors.bottomMargin: card.resizeOuterLip + inset
+            width: step * 2 + dot
+            height: step * 2 + dot
+            Rectangle { x: resizeGrip.step * 2; y: 0; width: resizeGrip.dot; height: resizeGrip.dot; radius: width / 2; color: resizeGrip.gripColor }
+            Rectangle { x: resizeGrip.step; y: resizeGrip.step; width: resizeGrip.dot; height: resizeGrip.dot; radius: width / 2; color: resizeGrip.gripColor }
+            Rectangle { x: resizeGrip.step * 2; y: resizeGrip.step; width: resizeGrip.dot; height: resizeGrip.dot; radius: width / 2; color: resizeGrip.gripColor }
+            Rectangle { x: 0; y: resizeGrip.step * 2; width: resizeGrip.dot; height: resizeGrip.dot; radius: width / 2; color: resizeGrip.gripColor }
+            Rectangle { x: resizeGrip.step; y: resizeGrip.step * 2; width: resizeGrip.dot; height: resizeGrip.dot; radius: width / 2; color: resizeGrip.gripColor }
+            Rectangle { x: resizeGrip.step * 2; y: resizeGrip.step * 2; width: resizeGrip.dot; height: resizeGrip.dot; radius: width / 2; color: resizeGrip.gripColor }
           }
         }
       }

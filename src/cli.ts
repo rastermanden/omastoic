@@ -32,6 +32,7 @@ import { pickQuotes, type QuoteRow } from "./quote-picker.ts";
 import { askConfirm, askLine, askText } from "./line-prompt.ts";
 import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
+import { parsePanelSizeCommand, readPanelSize, writePanelSize } from "./panel-size.ts";
 import {
   applyQuoteFlags,
   compactSettings,
@@ -85,6 +86,7 @@ const USER_AUTHORS_FILE = join(USER_CONFIG, "authors.tsv");
 const USER_ART_DIR = join(USER_CONFIG, "art");
 const owned = new OwnedFiles(STATE);
 const DISPLACED = join(STATE, "displaced.kind");
+const PANEL_SIZE_FILE = join(STATE, "panel-size.json");
 
 async function bundledBook(): Promise<BundledQuote[]> {
   return indexBundled(parseQuotes(await Bun.file(join(ROOT, "data/quotes.tsv")).text()));
@@ -2487,6 +2489,7 @@ async function panelState(): Promise<string> {
         text: quote.text,
       })),
       customQuotesError: custom.error ?? "",
+      panelSize: readPanelSize(PANEL_SIZE_FILE),
       configPath: SETTINGS_FILE,
       quotesPath: join(USER_CONFIG, "quotes.tsv"),
       authorsPath: USER_AUTHORS_FILE,
@@ -3125,7 +3128,22 @@ async function main(): Promise<number> {
         }
         return panelApply(raw);
       }
-      console.error("usage: omastoic panel state | omastoic panel apply '<json>'");
+      if (action === "size") {
+        const raw = rest[1] ?? (process.stdin.isTTY ? "" : await Bun.stdin.text());
+        if (!raw.trim()) {
+          console.error("omastoic: panel size expects a JSON object as an argument or on stdin");
+          return 1;
+        }
+        const parsed = parsePanelSizeCommand(raw);
+        if (!parsed.ok) {
+          console.error(`omastoic: ${parsed.error}`);
+          return 1;
+        }
+        writePanelSize(PANEL_SIZE_FILE, parsed.size);
+        console.log(JSON.stringify(parsed.size));
+        return 0;
+      }
+      console.error("usage: omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>'");
       return 1;
     }
     case "ui": {
