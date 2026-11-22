@@ -185,15 +185,14 @@ const PBM_DOTS = [
   [0x08, 0x10, 0x20, 0x80],
 ] as const;
 
+/** Strip Netpbm comments (`#` up to CR or LF) and split into ASCII tokens. */
+function pnmTokens(text: string): string[] {
+  return text.replace(/#[^\r\n]*/g, "").trim().split(/\s+/).filter(Boolean);
+}
+
 /** Encode an ASCII PBM (P1) bitmap into Unicode braille art. */
 export function pbmToBraille(pbm: string): string {
-  const tokens = pbm
-    .split("\n")
-    .map((line) => line.replace(/#.*/, ""))
-    .join(" ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+  const tokens = pnmTokens(pbm);
 
   if (tokens[0] !== "P1") throw new Error("expected an ASCII PBM (P1)");
   const width = Number(tokens[1]);
@@ -262,13 +261,7 @@ export function otsuThreshold(values: readonly number[]): number {
  * suppression so both drawings and mid-grey/dark photos stay clean.
  */
 export function pgmToBraille(pgm: string): string {
-  const tokens = pgm
-    .split("\n")
-    .map((line) => line.replace(/#.*/, ""))
-    .join(" ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+  const tokens = pnmTokens(pgm);
 
   if (tokens[0] !== "P2") throw new Error("expected an ASCII PGM (P2)");
   const width = Number(tokens[1]);
