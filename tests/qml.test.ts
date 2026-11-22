@@ -65,6 +65,9 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("visible: root.opened && !root.pickingImage");
   expect(source).toContain("WlrLayershell.keyboardFocus: root.pickingImage ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive");
   expect(source).toContain("Could not open the file picker. Type a path instead.");
+  expect(source).toContain("Choose a JPEG or PNG saved on this computer.");
+  expect(source).toContain("Accessible.name: host.label");
+  expect(source).toContain('Accessible.name: root.editingAuthorSlug !== "" ? "New portrait image path" : "Portrait image path"');
   expect(source).toContain("confirmRemoveAuthor");
   expect(source).toContain("requestRemoveAuthor");
   expect(source).toContain('"Remove?"');
@@ -1499,7 +1502,19 @@ Item {
       imageField.text = "/typed/fallback.png"
       compare(panel.notice, "")
 
-      // 3b. Process failing to start (running flips false without exited) recovers cleanly instead of staying hidden.
+      // 3b. Unsupported remote/non-local selection (exit 3) shows a distinct local-file notice, not the portal-unavailable notice.
+      mouseClick(chooseBtn)
+      pickProc = panel.activePickProcess
+      completeProcess(pickProc, 3, "", "omastoic: selected file is not a local path\\n", false)
+      compare(panel.pickingImage, false)
+      compare(panelWindow.visible, true)
+      compare(imageField.text, "/typed/fallback.png")
+      compare(panel.error, "")
+      compare(panel.notice, "Choose a JPEG or PNG saved on this computer.")
+      imageField.text = "/typed/local.png"
+      compare(panel.notice, "")
+
+      // 3c. Process failing to start (running flips false without exited) recovers cleanly instead of staying hidden.
       mouseClick(chooseBtn)
       compare(panel.pickingImage, true)
       compare(panelWindow.visible, false)
@@ -1591,6 +1606,18 @@ Item {
       compare(panel.pickingImage, false)
       compare(panelWindow.visible, true)
       compare(imageField.text, "/fresh/second.png")
+
+      // 6. Async Quickshell startup: cancelImagePick() while proc.running is still false does not destroy proc prematurely,
+      //    and stops it immediately when proc.running transitions to true.
+      mouseClick(chooseBtn)
+      var asyncProc = panel.activePickProcess
+      verify(asyncProc !== null)
+      asyncProc.running = false
+      panel.cancelImagePick()
+      compare(panel.pickingImage, false)
+      compare(asyncProc.cancelled, true)
+      asyncProc.running = true
+      compare(asyncProc.running, false)
     }
   }
 }

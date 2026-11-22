@@ -4,17 +4,20 @@ import { dirname, join } from "node:path";
 
 export const PORTRAIT_PICKER_TITLE = "Choose portrait image";
 export const PORTRAIT_PICKER_UNAVAILABLE_NOTICE = "Could not open the file picker. Type a path instead.";
+export const PORTRAIT_PICKER_UNSUPPORTED_NOTICE = "Choose a JPEG or PNG saved on this computer.";
 
 export const PORTRAIT_PICKER_EXIT = {
   PICKED: 0,
   CANCELLED: 1,
   UNAVAILABLE: 2,
+  UNSUPPORTED: 3,
 } as const;
 
 export type PortraitPickerResult =
   | { status: "picked"; path: string }
   | { status: "cancelled" }
-  | { status: "unavailable"; reason: string };
+  | { status: "unavailable"; reason: string }
+  | { status: "unsupported"; reason: string };
 
 export type PortalRunnerResult = {
   code: number;
@@ -65,7 +68,7 @@ export function parsePortalPickerOutput(code: number, stdout: string, stderr: st
     const path = stdout.replace(/\r?\n$/, "");
     if (!path) return { status: "cancelled" };
     if (/[\r\n\0]/.test(path)) {
-      return { status: "unavailable", reason: "The selected file path is not supported." };
+      return { status: "unsupported", reason: PORTRAIT_PICKER_UNSUPPORTED_NOTICE };
     }
     return { status: "picked", path };
   }
@@ -73,6 +76,12 @@ export function parsePortalPickerOutput(code: number, stdout: string, stderr: st
     return { status: "cancelled" };
   }
   const detail = stderr.trim().split("\n")[0]?.trim() ?? "";
+  if (code === PORTRAIT_PICKER_EXIT.UNSUPPORTED) {
+    return {
+      status: "unsupported",
+      reason: detail || PORTRAIT_PICKER_UNSUPPORTED_NOTICE,
+    };
+  }
   return {
     status: "unavailable",
     reason: detail || PORTRAIT_PICKER_UNAVAILABLE_NOTICE,
@@ -84,6 +93,7 @@ async function runPortalCommand(
   env: Record<string, string | undefined>,
 ): Promise<PortalRunnerResult> {
   let child: ReturnType<typeof Bun.spawn> | null = null;
+  let stdinPipe: ReturnType<typeof Bun.spawn>["stdin"] | null = null;
   let interrupted = false;
   const forwardSignal = () => {
     interrupted = true;
@@ -98,12 +108,15 @@ async function runPortalCommand(
   process.on("SIGTERM", forwardSignal);
   process.on("SIGINT", forwardSignal);
   try {
+    // Keep a pipe open on stdin so the kernel delivers HUP to the portal helper
+    // even if this process is SIGKILLed (e.g. when the shell unloads the panel).
     child = Bun.spawn(command, {
       env,
-      stdin: "ignore",
+      stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
     });
+    stdinPipe = child.stdin;
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
@@ -122,6 +135,13 @@ async function runPortalCommand(
   } finally {
     process.off("SIGTERM", forwardSignal);
     process.off("SIGINT", forwardSignal);
+    if (stdinPipe && typeof stdinPipe !== "number") {
+      try {
+        stdinPipe.end();
+      } catch {
+        // Pipe may already be closed.
+      }
+    }
   }
 }
 

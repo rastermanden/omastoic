@@ -10,6 +10,7 @@ import {
   PORTRAIT_PICKER_EXIT,
   PORTRAIT_PICKER_TITLE,
   PORTRAIT_PICKER_UNAVAILABLE_NOTICE,
+  PORTRAIT_PICKER_UNSUPPORTED_NOTICE,
   resolvePortraitStartFolder,
 } from "../src/file-picker.ts";
 import { root, sandbox } from "./sandbox.ts";
@@ -111,9 +112,20 @@ test("buildPortalPickerArgs and parsePortalPickerOutput handle picked, cancelled
   expect(parsePortalPickerOutput(PORTRAIT_PICKER_EXIT.PICKED, "\n", "")).toEqual({
     status: "cancelled",
   });
-  expect(parsePortalPickerOutput(PORTRAIT_PICKER_EXIT.PICKED, "/tmp/a\n/tmp/b\n", "").status).toBe("unavailable");
+  expect(parsePortalPickerOutput(PORTRAIT_PICKER_EXIT.PICKED, "/tmp/a\n/tmp/b\n", "")).toEqual({
+    status: "unsupported",
+    reason: PORTRAIT_PICKER_UNSUPPORTED_NOTICE,
+  });
   expect(parsePortalPickerOutput(PORTRAIT_PICKER_EXIT.CANCELLED, "", "")).toEqual({
     status: "cancelled",
+  });
+  expect(parsePortalPickerOutput(PORTRAIT_PICKER_EXIT.UNSUPPORTED, "", "selected file is not a local path")).toEqual({
+    status: "unsupported",
+    reason: "selected file is not a local path",
+  });
+  expect(parsePortalPickerOutput(PORTRAIT_PICKER_EXIT.UNSUPPORTED, "", "")).toEqual({
+    status: "unsupported",
+    reason: PORTRAIT_PICKER_UNSUPPORTED_NOTICE,
   });
   expect(parsePortalPickerOutput(PORTRAIT_PICKER_EXIT.UNAVAILABLE, "", "portal offline\nmore detail")).toEqual({
     status: "unavailable",
@@ -235,6 +247,8 @@ def main():
         if method_name == "Close":
             recorded["closedHandles"].append(object_path)
             invocation.return_value(None)
+            if spec.get("waitForClose"):
+                GLib.idle_add(loop.quit)
 
     def on_method_call(connection, sender, object_path, interface_name, method_name, parameters, invocation):
         parent_window, title, options = parameters.unpack()
@@ -261,13 +275,14 @@ def main():
         })
         invocation.return_value(GLib.Variant("(o)", (handle,)))
 
-        if spec.get("terminateChild"):
-            def send_sigterm():
+        kill_sig = spec.get("killSignal")
+        if kill_sig:
+            def send_kill():
                 proc = child_holder["proc"]
                 if proc is not None and proc.poll() is None:
-                    proc.send_signal(signal.SIGTERM)
+                    proc.send_signal(getattr(signal, kill_sig))
                 return GLib.SOURCE_REMOVE
-            GLib.timeout_add(150, send_sigterm)
+            GLib.timeout_add(150, send_kill)
             return
 
         def send_response():
@@ -287,13 +302,15 @@ def main():
         GLib.timeout_add(50, send_response)
 
     def run_child_thread():
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdin_mode = subprocess.DEVNULL if spec.get("devnullStdin") else subprocess.PIPE
+        proc = subprocess.Popen(cmd, stdin=stdin_mode, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         child_holder["proc"] = proc
         stdout, stderr = proc.communicate()
         result_holder["code"] = proc.returncode
         result_holder["stdout"] = stdout
         result_holder["stderr"] = stderr
-        GLib.idle_add(loop.quit)
+        if not spec.get("waitForClose"):
+            GLib.idle_add(loop.quit)
 
     def start_child():
         threading.Thread(target=run_child_thread, daemon=True).start()
@@ -355,7 +372,10 @@ async function runWithMockPortal(
     responseCode?: number;
     uris?: string[];
     customHandle?: string;
-    terminateChild?: boolean;
+    killSignal?: "SIGTERM" | "SIGKILL";
+    waitForClose?: boolean;
+    devnullStdin?: boolean;
+    directPythonHelper?: boolean;
   },
 ) {
   const driver = join(s.home, "mock-portal-driver.py");
@@ -367,6 +387,10 @@ async function runWithMockPortal(
   writeFileSync(specPath, JSON.stringify(spec));
   writeFileSync(dbusConf, ISOLATED_DBUS_CONF);
 
+  const targetCmd = spec.directPythonHelper
+    ? ["python3", join(root, "scripts/portal-pick-image.py"), "--title", PORTRAIT_PICKER_TITLE]
+    : [process.execPath, join(root, "src/cli.ts"), "panel", "pick-image"];
+
   const run = await s.exec([
     "dbus-run-session",
     "--config-file",
@@ -376,10 +400,7 @@ async function runWithMockPortal(
     driver,
     specPath,
     outPath,
-    process.execPath,
-    join(root, "src/cli.ts"),
-    "panel",
-    "pick-image",
+    ...targetCmd,
   ]);
   expect(run.code, run.stderr).toBe(0);
   return JSON.parse(readFileSync(outPath, "utf8")) as {
@@ -492,26 +513,46 @@ test("panel pick-image speaks xdg-desktop-portal FileChooser over D-Bus, filters
     expect(legacy.child.code).toBe(PORTRAIT_PICKER_EXIT.PICKED);
     expect(legacy.child.stdout).toBe(`${portraitFile}\n`);
 
-    // 7. Non-local URIs (https:// and remote file://other-host/...) are rejected with exit 2.
-    for (const remoteUri of ["https://example.com/portrait.png", "file://other-host/share/portrait.png"]) {
+    // 7. Non-local and unsupported URIs (https://, remote file://, embedded newline) exit 3 (UNSUPPORTED), not 2 (UNAVAILABLE).
+    for (const remoteUri of [
+      "https://example.com/portrait.png",
+      "file://other-host/share/portrait.png",
+      "file:///tmp/bad%0Aname.png",
+    ]) {
       const remote = await runWithMockPortal(s, { responseCode: 0, uris: [remoteUri] });
-      expect(remote.child.code, remoteUri).toBe(PORTRAIT_PICKER_EXIT.UNAVAILABLE);
+      expect(remote.child.code, remoteUri).toBe(PORTRAIT_PICKER_EXIT.UNSUPPORTED);
       expect(remote.child.stdout, remoteUri).toBe("");
-      expect(remote.child.stderr, remoteUri).toContain("not a local path");
+      expect(remote.child.stderr, remoteUri).toContain("omastoic:");
     }
 
     // 8. SIGTERM to `omastoic panel pick-image` forwards to Python helper and calls Request.Close.
-    const terminated = await runWithMockPortal(s, { terminateChild: true });
+    const terminated = await runWithMockPortal(s, { killSignal: "SIGTERM" });
     expect(terminated.child.code).toBe(PORTRAIT_PICKER_EXIT.CANCELLED);
     expect(terminated.recorded.closedHandles).toEqual([terminated.recorded.calls[0]!.handle]);
 
-    // 9. Without ~/Pictures, current_folder falls back to $HOME.
+    // 9. SIGKILL to `omastoic panel pick-image` (mimicking QProcess::~QProcess on panel unload)
+    //    closes the stdin pipe; portal-pick-image.py detects HUP and still calls Request.Close.
+    const killed = await runWithMockPortal(s, { killSignal: "SIGKILL", waitForClose: true });
+    expect(killed.recorded.calls).toHaveLength(1);
+    expect(killed.recorded.closedHandles).toEqual([killed.recorded.calls[0]!.handle]);
+
+    // 10. Running portal-pick-image.py directly with /dev/null on stdin does not falsely cancel.
+    const devnull = await runWithMockPortal(s, {
+      responseCode: 0,
+      uris: [pickedUri],
+      devnullStdin: true,
+      directPythonHelper: true,
+    });
+    expect(devnull.child.code).toBe(PORTRAIT_PICKER_EXIT.PICKED);
+    expect(devnull.child.stdout).toBe(`${portraitFile}\n`);
+
+    // 11. Without ~/Pictures, current_folder falls back to $HOME.
     rmSync(pictures, { recursive: true, force: true });
     const homeFallback = await runWithMockPortal(s, { responseCode: 1, uris: [] });
     expect(homeFallback.child.code).toBe(PORTRAIT_PICKER_EXIT.CANCELLED);
     expect(homeFallback.recorded.calls[0]!.current_folder_bytes).toEqual([...Buffer.from(s.home), 0]);
 
-    // 10. Session bus present, but no org.freedesktop.portal.Desktop service -> exits 2 (unavailable).
+    // 12. Session bus present, but no org.freedesktop.portal.Desktop service -> exits 2 (unavailable).
     const noPortal = await runWithMockPortal(s, { exposePortal: false });
     expect(noPortal.child.code).toBe(PORTRAIT_PICKER_EXIT.UNAVAILABLE);
     expect(noPortal.child.stdout).toBe("");

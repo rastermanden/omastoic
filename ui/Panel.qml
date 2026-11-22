@@ -43,6 +43,7 @@ Item {
   property int pickRequestId: 0
   property var activePickProcess: null
   readonly property string pickerUnavailableNotice: "Could not open the file picker. Type a path instead."
+  readonly property string pickerUnsupportedNotice: "Choose a JPEG or PNG saved on this computer."
   property string pendingRemove: ""
   property string pendingRemoveAuthor: ""
   property string confirmRemoveAuthor: ""
@@ -186,7 +187,7 @@ Item {
   }
 
   function clearPickerNotice() {
-    if (notice === pickerUnavailableNotice) notice = ""
+    if (notice === pickerUnavailableNotice || notice === pickerUnsupportedNotice) notice = ""
   }
 
   function cancelImagePick() {
@@ -195,8 +196,8 @@ Item {
     let proc = activePickProcess
     activePickProcess = null
     if (proc) {
-      if (proc.running) proc.running = false
-      else proc.destroy()
+      proc.cancelled = true
+      proc.running = false
     }
   }
 
@@ -272,7 +273,7 @@ Item {
     }
     error = ""
     errorScope = ""
-    notice = pickerUnavailableNotice
+    notice = exitStatus === 3 ? pickerUnsupportedNotice : pickerUnavailableNotice
     Qt.callLater(function() {
       if (root.opened && root.authorOpen && !root.pickingImage) {
         authorImageField.forceActiveFocus()
@@ -798,6 +799,8 @@ Item {
       bordered: true
       foreground: root.ink
       accent: host.destructive ? Commons.Color.urgent : Commons.Color.accent
+      Accessible.role: Accessible.Button
+      Accessible.name: host.label
       onClicked: {
         if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""
         host.activated()
@@ -973,6 +976,7 @@ Item {
     Process {
       id: proc
       property int requestId: 0
+      property bool cancelled: false
       property bool processExited: false
       property bool settled: false
       property int exitStatus: 0
@@ -1001,9 +1005,13 @@ Item {
         root.settlePickProcess(proc)
       }
       onRunningChanged: {
+        if (proc.cancelled && proc.running) {
+          proc.running = false
+          return
+        }
         if (!proc.running && !proc.processExited && !proc.settled) {
           Qt.callLater(function() {
-            if (proc && !proc.processExited && !proc.settled) {
+            if (proc && !proc.running && !proc.processExited && !proc.settled) {
               proc.processExited = true
               proc.exitStatus = 2
               proc.streamsLeft = 0
@@ -1841,12 +1849,13 @@ Item {
                     id: authorImageField
                     width: parent.width
                     anchors.verticalCenter: parent.verticalCenter
+                    Accessible.name: root.editingAuthorSlug !== "" ? "New portrait image path" : "Portrait image path"
                     placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current portrait" : "/path/to/portrait.png"
                     placeholderTextColor: root.hint
                     foreground: root.ink
                     onTextChanged: {
                       root.newAuthorImage = text
-                      if (root.notice === root.pickerUnavailableNotice) {
+                      if (root.notice === root.pickerUnavailableNotice || root.notice === root.pickerUnsupportedNotice) {
                         root.clearPickerNotice()
                         if (activeFocus) root.reveal(authorImageField)
                       }

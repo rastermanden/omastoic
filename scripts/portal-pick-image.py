@@ -7,7 +7,8 @@ so the portal's directed Response signal reaches this process.
 Exit codes:
   0: a local file was chosen (printed to stdout with a trailing newline)
   1: the user cancelled or picked nothing
-  2: the desktop portal could not be reached or returned an unusable result
+  2: the desktop portal could not be reached or ended unexpectedly
+  3: the user chose a remote or unsupported file path
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import os
 import secrets
 import signal
 import socket
+import stat
 import sys
 
 sys.dont_write_bytecode = True
@@ -27,6 +29,7 @@ CLOSE_TIMEOUT_MS = 1_000
 EXIT_PICKED = 0
 EXIT_CANCELLED = 1
 EXIT_UNAVAILABLE = 2
+EXIT_UNSUPPORTED = 3
 
 FILTER_LABEL = "JPEG and PNG images"
 FILTER_RULES = [
@@ -67,6 +70,16 @@ def is_local_hostname(hostname: str | None) -> bool:
     return lower == "localhost" or lower == socket.gethostname().lower()
 
 
+def stdin_is_parent_pipe() -> bool:
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return False
+        mode = os.fstat(0).st_mode
+        return stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode)
+    except (OSError, ValueError):
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--title", default="Choose portrait image")
@@ -95,6 +108,7 @@ def main() -> int:
     loop = GLib.MainLoop()
     outcome: dict[str, object] = {"status": "pending", "uris": []}
     active_handle: list[str] = []
+    closed_sent = False
 
     def on_response(_connection, _sender, _path, _interface, _signal, params):
         try:
@@ -170,9 +184,11 @@ def main() -> int:
         subscribe(handle)
 
     def cancel_and_close() -> bool:
+        nonlocal closed_sent
         if outcome["status"] == "pending":
             outcome["status"] = "cancelled"
-        if active_handle:
+        if active_handle and not closed_sent:
+            closed_sent = True
             try:
                 bus.call_sync(
                     "org.freedesktop.portal.Desktop",
@@ -190,12 +206,32 @@ def main() -> int:
         loop.quit()
         return GLib.SOURCE_REMOVE
 
+    def on_stdin_event(_fd_or_ch, condition) -> bool:
+        if condition & (GLib.IOCondition.HUP | GLib.IOCondition.ERR):
+            return cancel_and_close()
+        if condition & GLib.IOCondition.IN:
+            try:
+                chunk = os.read(0, 1)
+            except OSError:
+                return cancel_and_close()
+            if not chunk:
+                return cancel_and_close()
+        return GLib.SOURCE_CONTINUE
+
     if GLibUnix is not None:
         GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, cancel_and_close)
         GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, cancel_and_close)
     else:
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, cancel_and_close)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, cancel_and_close)
+
+    if stdin_is_parent_pipe():
+        watch_cond = GLib.IOCondition.HUP | GLib.IOCondition.ERR | GLib.IOCondition.IN
+        if GLibUnix is not None and hasattr(GLibUnix, "fd_add_full"):
+            GLibUnix.fd_add_full(GLib.PRIORITY_DEFAULT, 0, watch_cond, on_stdin_event)
+        else:
+            GLib.io_add_watch(0, GLib.PRIORITY_DEFAULT, watch_cond, on_stdin_event)
+
     GLib.timeout_add_seconds(ANSWER_TIMEOUT_SEC, cancel_and_close)
     loop.run()
 
@@ -213,21 +249,21 @@ def main() -> int:
     first_uri = uris[0]
     if not isinstance(first_uri, str):
         print("selected file is not a local path", file=sys.stderr)
-        return EXIT_UNAVAILABLE
+        return EXIT_UNSUPPORTED
 
     try:
         path, hostname = GLib.filename_from_uri(first_uri)
     except (GLib.Error, TypeError, ValueError, UnicodeError) as exc:
         print(f"selected file is not a local path: {exc}", file=sys.stderr)
-        return EXIT_UNAVAILABLE
+        return EXIT_UNSUPPORTED
 
     if not is_local_hostname(hostname):
         print("selected file is not a local path", file=sys.stderr)
-        return EXIT_UNAVAILABLE
+        return EXIT_UNSUPPORTED
 
     if not path or "\n" in path or "\r" in path or "\x00" in path:
         print("selected file path is not supported", file=sys.stderr)
-        return EXIT_UNAVAILABLE
+        return EXIT_UNSUPPORTED
 
     sys.stdout.write(f"{path}\n")
     sys.stdout.flush()

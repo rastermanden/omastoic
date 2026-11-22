@@ -3417,6 +3417,10 @@ async function main(): Promise<number> {
         if (picked.status === "cancelled") {
           return PORTRAIT_PICKER_EXIT.CANCELLED;
         }
+        if (picked.status === "unsupported") {
+          console.error(`omastoic: ${picked.reason}`);
+          return PORTRAIT_PICKER_EXIT.UNSUPPORTED;
+        }
         console.error(`omastoic: ${picked.reason}`);
         return PORTRAIT_PICKER_EXIT.UNAVAILABLE;
       }
