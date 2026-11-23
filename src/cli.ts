@@ -23,6 +23,7 @@ import { createBrandingSlot, ownsBranding as slotOwnsBranding, preserveDisplaced
 import { dirname, join } from "node:path";
 import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { headerPortraitLayout, padPortrait, portraitDownscale, transcodePortrait } from "./portrait.ts";
+import { pickPortraitImage, PORTRAIT_PICKER_EXIT } from "./file-picker.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import {
   CALM_EFFECTS,
@@ -3238,10 +3239,10 @@ function commandUsage(rawCommand: string, styled = false): string | null {
       ].join("\n");
     case "panel":
       return [
-        heading("omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>'"),
+        heading("omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>' | omastoic panel pick-image"),
         "",
-        "Read or update settings and saved panel size as JSON for the Quickshell",
-        "settings panel. Reads JSON from the argument or stdin on apply or size.",
+        "Read or update settings, save panel size, or pick a portrait image for the",
+        "Quickshell settings panel. Reads JSON from the argument or stdin on apply or size.",
       ].join("\n");
     case "render-png":
       return [
@@ -3407,7 +3408,26 @@ async function main(): Promise<number> {
         console.log(JSON.stringify(parsed.size));
         return 0;
       }
-      console.error("usage: omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>'");
+      if (action === "pick-image") {
+        const picked = await pickPortraitImage({
+          home: HOME,
+          watchStdin: rest.includes("--watch-stdin"),
+        });
+        if (picked.status === "picked") {
+          process.stdout.write(`${picked.path}\n`);
+          return PORTRAIT_PICKER_EXIT.PICKED;
+        }
+        if (picked.status === "cancelled") {
+          return PORTRAIT_PICKER_EXIT.CANCELLED;
+        }
+        if (picked.status === "unsupported") {
+          console.error(`omastoic: ${picked.reason}`);
+          return PORTRAIT_PICKER_EXIT.UNSUPPORTED;
+        }
+        console.error(`omastoic: ${picked.reason}`);
+        return PORTRAIT_PICKER_EXIT.UNAVAILABLE;
+      }
+      console.error("usage: omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>' | omastoic panel pick-image");
       return 1;
     }
     case "ui": {
