@@ -172,10 +172,14 @@ test.skipIf(!hasImageMagick)("config --add-author accepts a JPEG with CRLF comme
 
     // Confirm ImageMagick really emits `#text\r#` comments in PGM output for this fixture.
     const rawPgm = Bun.spawnSync([
-      imBin, "-background", "white", commentedJpeg,
+      imBin, "-background", "white",
+      "-define", `jpeg:size=${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}`,
+      commentedJpeg,
       "-auto-orient", "-alpha", "remove", "-alpha", "off",
-      "-colorspace", "Gray", "-blur", "0x0.6",
-      "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`,
+      "-colorspace", "Gray",
+      "-resize", `${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}^>`,
+      "-blur", "0x0.6",
+      "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`,
       "-compress", "none", "pgm:-",
     ]);
     expect(new TextDecoder().decode(rawPgm.stderr)).toBe("");
@@ -464,3 +468,166 @@ test("non-decode converter failures report a faithful reason instead of blaming 
     s.cleanup();
   }
 }, 20000);
+
+test("ImageMagick transcode passes jpeg:size before input for JPEGs only and resizes before blur", async () => {
+  const s = sandbox();
+  const sampleJpg = join(root, "assets/local/marcus.jpg");
+  const samplePng = join(s.home, "sample.png");
+  writeFileSync(
+    samplePng,
+    makePng(68, 80, (x, y) => ((x - 34) ** 2 + (y - 34) ** 2 < 20 ** 2 ? 20 : 250)),
+  );
+
+  const argsLog = join(s.home, "magick-args.log");
+  const callCount = join(s.home, "magick-calls.txt");
+  const fakeBin = join(s.home, "fake-im-bin");
+  mkdirSync(fakeBin, { recursive: true });
+  for (const [name, target] of [
+    ["flock", Bun.which("flock")],
+    ["sh", Bun.which("sh")],
+    ["bash", Bun.which("bash")],
+    ["cat", Bun.which("cat")],
+  ] as const) {
+    if (target) {
+      s.put(join(fakeBin, name), `#!/bin/sh\nexec "${target}" "$@"\n`);
+      chmodSync(join(fakeBin, name), 0o755);
+    }
+  }
+  const blankPgm = makePgm(16, 16, () => 255);
+  const portraitPgm = makePgm(16, 16, (x, y) => (x >= 4 && x < 12 && y >= 4 && y < 12 ? 20 : 240));
+  s.put(join(s.home, "blank.pgm"), blankPgm);
+  s.put(join(s.home, "portrait.pgm"), portraitPgm);
+  s.put(
+    join(fakeBin, "magick"),
+    `#!/bin/sh
+printf '%s\\0' "$@" >> "${argsLog}"
+printf '\\n---END---\\n' >> "${argsLog}"
+n=0
+[ -f "${callCount}" ] && n=$(cat "${callCount}")
+n=$((n + 1))
+printf '%s' "$n" > "${callCount}"
+if [ "\${FAKE_BLANK_FIRST:-0}" = "1" ] && [ "$n" -eq 1 ]; then
+  cat "${join(s.home, "blank.pgm")}"
+else
+  cat "${join(s.home, "portrait.pgm")}"
+fi
+`,
+  );
+  chmodSync(join(fakeBin, "magick"), 0o755);
+
+  const readCalls = () =>
+    readFileSync(argsLog, "utf8")
+      .split("\n---END---\n")
+      .filter(Boolean)
+      .map((entry) => entry.split("\0").filter(Boolean));
+
+  try {
+    // 1. JPEG primary + fallback pass: both hint jpeg:size before input and resize before blur.
+    const jpgRun = await s.cli(
+      [
+        "config", "--add-author", "rufus", "--name", "Musonius Rufus",
+        "--image", sampleJpg, "--citation", "Lectures VI", "--text", "Train both soul and body.",
+      ],
+      { PATH: fakeBin, FAKE_BLANK_FIRST: "1" },
+    );
+    expect(jpgRun.stderr).toBe("");
+    expect(jpgRun.code).toBe(0);
+
+    const jpgCalls = readCalls();
+    expect(jpgCalls).toHaveLength(2);
+    const expectedDims = [
+      [PORTRAIT_COLS * 4, PORTRAIT_ROWS * 8],
+      [PORTRAIT_COLS * 2, PORTRAIT_ROWS * 4],
+    ] as const;
+    for (const [idx, [w, h]] of expectedDims.entries()) {
+      const argv = jpgCalls[idx]!;
+      const defineIdx = argv.indexOf("-define");
+      const inputIdx = argv.findIndex((arg) => arg.endsWith("/source.jpg"));
+      const preResizeIdx = argv.indexOf("-resize");
+      const blurIdx = argv.indexOf("-blur");
+      const finalResizeIdx = argv.indexOf("-resize", blurIdx + 1);
+      expect(defineIdx).toBeGreaterThanOrEqual(0);
+      expect(argv[defineIdx + 1]).toBe(`jpeg:size=${w * 2}x${h * 2}`);
+      expect(inputIdx).toBeGreaterThan(defineIdx + 1);
+      expect(preResizeIdx).toBeGreaterThan(inputIdx);
+      expect(argv[preResizeIdx + 1]).toBe(`${w * 2}x${h * 2}^>`);
+      expect(blurIdx).toBeGreaterThan(preResizeIdx + 1);
+      expect(argv[blurIdx + 1]).toBe("0x0.6");
+      expect(finalResizeIdx).toBeGreaterThan(blurIdx + 1);
+      expect(argv[finalResizeIdx + 1]).toBe(`${w}x${h}`);
+    }
+
+    // 2. PNG pass: no jpeg:size hint, and resize still precedes blur.
+    writeFileSync(argsLog, "");
+    writeFileSync(callCount, "0");
+    const pngRun = await s.cli(
+      [
+        "config", "--add-author", "posidonius", "--name", "Posidonius",
+        "--image", samplePng, "--citation", "Fragment 1", "--text", "Reason guides.",
+      ],
+      { PATH: fakeBin },
+    );
+    expect(pngRun.stderr).toBe("");
+    expect(pngRun.code).toBe(0);
+
+    const pngCalls = readCalls();
+    expect(pngCalls).toHaveLength(1);
+    const pngArgv = pngCalls[0]!;
+    expect(pngArgv).not.toContain("-define");
+    expect(pngArgv.some((arg) => arg.includes("jpeg:size"))).toBe(false);
+    const pngInputIdx = pngArgv.findIndex((arg) => arg.endsWith("/source.png"));
+    const pngPreResizeIdx = pngArgv.indexOf("-resize");
+    const pngBlurIdx = pngArgv.indexOf("-blur");
+    const pngFinalResizeIdx = pngArgv.indexOf("-resize", pngBlurIdx + 1);
+    expect(pngInputIdx).toBeGreaterThanOrEqual(0);
+    expect(pngPreResizeIdx).toBeGreaterThan(pngInputIdx);
+    expect(pngArgv[pngPreResizeIdx + 1]).toBe(`${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}^>`);
+    expect(pngBlurIdx).toBeGreaterThan(pngPreResizeIdx + 1);
+    expect(pngFinalResizeIdx).toBeGreaterThan(pngBlurIdx + 1);
+    expect(pngArgv[pngFinalResizeIdx + 1]).toBe(`${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`);
+  } finally {
+    s.cleanup();
+  }
+}, 20000);
+
+test.skipIf(!hasImageMagick)("transcodePortrait handles a ~6 MB 5990x7300 JPEG in under 5 s and keeps bundled JPEGs valid", async () => {
+  const imBin = (Bun.which("magick") ?? Bun.which("convert"))!;
+  const s = sandbox();
+  const largeJpg = join(s.home, "large-5990x7300.jpg");
+  try {
+    // Tile a small portrait with noise into a 5990x7300 ~6 MB JPEG quickly without committing a binary fixture.
+    const gen = Bun.spawnSync([
+      imBin,
+      join(root, "assets/local/marcus.jpg"),
+      "-resize", "5990x7300!",
+      "-attenuate", "0.35",
+      "+noise", "Gaussian",
+      "-quality", "86",
+      largeJpg,
+    ]);
+    expect(gen.exitCode).toBe(0);
+    const sizeBytes = readFileSync(largeJpg).length;
+    expect(sizeBytes).toBeGreaterThan(4 * 1024 * 1024);
+
+    const started = performance.now();
+    const art = await transcodePortrait(largeJpg);
+    const elapsedMs = performance.now() - started;
+
+    const lines = art.replace(/\n+$/, "").split("\n");
+    expect(art).toMatch(/[\u2801-\u28ff]/);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+    expect(Math.max(...lines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    expect(elapsedMs).toBeLessThan(5000);
+
+    for (const slug of ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus"]) {
+      const portrait = await transcodePortrait(join(root, "assets/local", `${slug}.jpg`));
+      const pLines = portrait.replace(/\n+$/, "").split("\n");
+      expect(portrait, slug).toMatch(/[\u2801-\u28ff]/);
+      expect(pLines.length, slug).toBeLessThanOrEqual(PORTRAIT_ROWS);
+      expect(Math.max(...pLines.map((line) => [...line].length)), slug).toBeLessThanOrEqual(PORTRAIT_COLS);
+    }
+  } finally {
+    s.cleanup();
+  }
+}, 30000);

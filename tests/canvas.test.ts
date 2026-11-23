@@ -31,7 +31,7 @@ test("every author in the book has a name, dates and a portrait", () => {
 });
 
 test("audit grid: all 84 quotes fit, or explicitly request a reading area", () => {
-  for (const [cols, rows] of [[92, 25], [60, 30], [40, 24], [20, 8], [60, 12], [80, 24]]) {
+  for (const [cols, rows] of [[91, 23], [88, 24], [92, 25], [60, 30], [40, 24], [20, 8], [60, 12], [80, 24]]) {
     for (const q of quotes) {
       const block = compose(q, authors.get(q.author), { cols, rows, art: art(q.author) });
       expect(width(block)).toBeLessThanOrEqual(cols);
@@ -87,17 +87,97 @@ const quote: Quote = {
 test("the full canvas fits the grid it was asked for", () => {
   const block = compose(quote, authors.get("marcus"), { cols: 111, rows: 30, art: art("marcus") });
   expect(width(block)).toBeLessThanOrEqual(111);
-  expect(height(block)).toBeLessThanOrEqual(30);
-  expect(block).toContain("MARCUS AURELIUS");
-  expect(block).toContain("Meditations VIII.47");
+  expect(height(block)).toBeLessThanOrEqual(26);
+  expect(block).toContain("M A R C U S   A U R E L I U S");
+  expect(block).toContain("— Meditations VIII.47");
 });
 
-test("every portrait and quote pair fits the smallest grid the layout claims with horizontal margin", () => {
+test("every portrait and quote pair fits the smallest grid the layout claims with horizontal and vertical margin", () => {
   for (const q of quotes) {
     const block = compose(q, authors.get(q.author), { cols: 92, rows: 25, art: art(q.author) });
     expect(width(block)).toBeLessThanOrEqual(86);
-    expect(height(block)).toBeLessThanOrEqual(25);
+    expect(height(block)).toBeLessThanOrEqual(23);
   }
+});
+
+test("91x23 and 88x24 leave vertical breathing room, anchor caption directly under portrait, and centre quotes on the whole plate", () => {
+  for (const [cols, rows] of [[91, 23], [88, 24]] as const) {
+    for (const q of quotes) {
+      const author = authors.get(q.author)!;
+      const block = compose(q, author, { cols, rows, art: art(q.author) });
+      const lines = block.split("\n");
+      expect(block).toMatch(/[\u2801-\u28ff]/);
+      expect(block).not.toContain("\u2800");
+      expect(width(block)).toBeLessThanOrEqual(cols - 6);
+      expect(lines.length).toBeLessThanOrEqual(rows - 2);
+      const topMargin = Math.floor((rows - lines.length) / 2);
+      const bottomMargin = rows - lines.length - topMargin;
+      expect(topMargin).toBeGreaterThanOrEqual(1);
+      expect(bottomMargin).toBeGreaterThanOrEqual(1);
+
+      // Caption sits directly under the portrait with no floating blank row.
+      const lastArtRow = lines.findLastIndex((line) => /[\u2801-\u28ff]/u.test(line));
+      const spaced = author.name.toUpperCase().split(/\s+/).map((w) => [...w].join(" ")).join("   ");
+      expect(lines[lastArtRow + 1]).toContain(spaced);
+      expect(lines[lastArtRow + 2]).toContain(author.dates);
+
+      // Quote block (body, blank line, em-dash citation) centres within 1 row of the whole plate.
+      const quoteStart = lines.findIndex((line) => line.includes("“"));
+      const citationLine = lines.findLastIndex((line) => line.includes(`— ${q.citation.split(" ")[0]}`));
+      expect(quoteStart).toBeGreaterThanOrEqual(0);
+      expect(citationLine).toBeGreaterThan(quoteStart);
+      const quoteCenter = (quoteStart + citationLine) / 2;
+      const plateCenter = (lines.length - 1) / 2;
+      expect(Math.abs(quoteCenter - plateCenter)).toBeLessThanOrEqual(1);
+
+      // Blank line separates quote body from em-dash citation and no text is truncated.
+      expect(block).toContain("— ");
+      expect(block.replace(/[\u2800-\u28ff\s]/gu, "")).toContain(q.text.replace(/\s/g, ""));
+      expect(block.replace(/[\u2800-\u28ff\s]/gu, "")).toContain(q.citation.replace(/\s/g, ""));
+    }
+  }
+});
+
+test("layout snapshots for 91x23 and 88x24 preserve portrait hierarchy and alignment", () => {
+  const senecaShort: Quote = {
+    author: "seneca",
+    citation: "On Anger II.29",
+    text: "The greatest remedy for anger is delay.",
+  };
+  const seneca91 = compose(senecaShort, authors.get("seneca"), { cols: 91, rows: 23, art: art("seneca") });
+  const senecaLines = seneca91.split("\n");
+  expect(senecaLines).toHaveLength(21);
+  expect(senecaLines[9]).toContain("“The greatest remedy for anger is delay.”");
+  expect(senecaLines[10]).not.toContain("On Anger");
+  expect(senecaLines[11]).toContain("— On Anger II.29");
+  expect(senecaLines[19]!.trim()).toBe("S E N E C A");
+  expect(senecaLines[20]!.trim()).toBe("c. 4 BC – AD 65");
+
+  const marcus88 = compose(quote, authors.get("marcus"), { cols: 88, rows: 24, art: art("marcus") });
+  const marcusLines = marcus88.split("\n");
+  expect(marcusLines).toHaveLength(22);
+  expect(marcusLines[8]).toContain("“If thou art pained");
+  expect(marcusLines[11]).not.toContain("Meditations");
+  expect(marcusLines[12]).toContain("— Meditations VIII.47");
+  expect(marcusLines[20]!.trim()).toBe("M A R C U S   A U R E L I U S");
+  expect(marcusLines[21]!.trim()).toBe("AD 121 – 180");
+
+  // Long ~370-char quote at 91x23 keeps vertical margin and never truncates.
+  const longQuote: Quote = {
+    author: "marcus",
+    citation: "Meditations II.1 (extended)",
+    text:
+      "Begin the morning by saying to thyself, I shall meet with the busy-body, the ungrateful, arrogant, " +
+      "deceitful, envious, unsocial. All these things happen to them by reason of their ignorance of what is " +
+      "good and evil. But I who have seen the nature of the good that it is beautiful, and of the bad that it " +
+      "is ugly, can neither be injured by any of them nor be angry.",
+  };
+  const long91 = compose(longQuote, authors.get("marcus"), { cols: 91, rows: 23, art: art("marcus") });
+  const longLines = long91.split("\n");
+  expect(longLines.length).toBeLessThanOrEqual(21);
+  expect(width(long91)).toBeLessThanOrEqual(85);
+  expect(long91.replace(/[\u2800-\u28ff\s]/gu, "")).toContain(longQuote.text.replace(/\s/g, ""));
+  expect(long91).toContain("— Meditations II.1 (extended)");
 });
 
 test("a citation longer than 52 characters wraps instead of dropping the portrait", () => {
@@ -131,13 +211,13 @@ test("extreme 1:9 tall and 10:1 wide portraits keep readable name and dates line
     for (const portrait of [tall1to9, tall1col, wide10to1, smallWide10to1]) {
       const block = compose(quote, marcus, { cols, rows, art: portrait });
       const lines = block.split("\n");
+      const artW = Math.max(...portrait.map(cellWidth));
+      const expectedName = artW >= 29 ? "M A R C U S   A U R E L I U S" : "MARCUS AURELIUS";
       expect(block).toMatch(/[\u2801-\u28ff]/);
       expect(width(block)).toBeLessThanOrEqual(cols - 6);
-      expect(height(block)).toBeLessThanOrEqual(rows);
-      expect(block).toContain("MARCUS AURELIUS");
+      expect(height(block)).toBeLessThanOrEqual(rows - 2);
+      expect(block).toContain(expectedName);
       expect(block).toContain("AD 121 – 180");
-      expect(lines.find((line) => line.includes("MARCUS AURELIUS"))!.trim()).toBe("MARCUS AURELIUS");
-      expect(lines.find((line) => line.includes("AD 121 – 180"))!.trim()).toBe("AD 121 – 180");
       for (const line of lines) {
         expect(line).toBe(line.replace(/\s+$/, ""));
       }
@@ -185,7 +265,7 @@ test("typical portrait aspect ratios keep their unpadded left alignment", () => 
     expect(lines[0]!.startsWith("⣿".repeat(expectedWidth))).toBe(true);
     const quoteRow = lines.find((line) => line.includes("“"))!;
     expect(quoteRow.indexOf("“")).toBe(expectedWidth + 4);
-    expect(block).toContain("MARCUS AURELIUS");
+    expect(block).toContain(expectedWidth >= 29 ? "M A R C U S   A U R E L I U S" : "MARCUS AURELIUS");
     expect(block).toContain("AD 121 – 180");
   }
 });
@@ -198,7 +278,7 @@ test("grids too small for an extreme portrait and readable label fall back to qu
   for (const [portrait, cols, rows] of [
     [tall1to9, 55, 30],
     [tall1to9, 50, 30],
-    [tall1to9, 92, 20],
+    [tall1to9, 92, 12],
     [wide10to1, 68, 25],
     [wide10to1, 92, 4],
     [["", ""], 92, 25],

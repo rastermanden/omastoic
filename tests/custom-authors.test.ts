@@ -225,9 +225,9 @@ test("config --add-author adds a JPEG author under ~/.config/omastoic/ without t
     const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
     expectOk(shown, "show");
     expect(shown.stdout).toMatch(/[\u2801-\u28ff]/);
-    expect(shown.stdout).toContain("MUSONIUS RUFUS");
+    expect(shown.stdout).toContain("M U S O N I U S   R U F U S");
     expect(shown.stdout).toContain("c. AD 30 – 100");
-    expect(shown.stdout).toContain("Lectures VI");
+    expect(shown.stdout).toContain("— Lectures VI");
     expect(shown.stdout).toContain("We will train both soul and body.");
 
     // Appears in config --plain picker and can be selected by number 7.
@@ -278,7 +278,7 @@ test("PNG images, optional dates, long citations, panel state/apply, and additio
     const longCiteShown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
     expectOk(longCiteShown, "show with long citation");
     expect(longCiteShown.stdout).toMatch(/[\u2801-\u28ff]/);
-    expect(longCiteShown.stdout).toContain("HIEROCLES");
+    expect(longCiteShown.stdout).toContain("H I E R O C L E S");
     expect(longCiteShown.stdout.replace(/[\u2800-\u28ff\s]/gu, "")).toContain(longCitation.replace(/\s/g, ""));
 
     // Panel can select the new author and add another quote for them.
@@ -299,7 +299,7 @@ test("PNG images, optional dates, long citations, panel state/apply, and additio
     const shown = await s.cli(["show", "--cols", "92", "--rows", "25"]);
     expectOk(shown, "show");
     expect(shown.stdout).toMatch(/[\u2801-\u28ff]/);
-    expect(shown.stdout).toContain("HIEROCLES");
+    expect(shown.stdout).toContain("H I E R O C L E S");
 
     // Status reports 2 quotes and a portrait.
     const status = await s.cli(["status"]);
@@ -1364,8 +1364,14 @@ test.skipIf(!hasImageMagick)("JPEG with harmless extraneous bytes before marker 
   // Confirm the fixture triggers libjpeg's extraneous-bytes warning while exiting 0 in production decode flags.
   const magick = Bun.which("magick") ?? Bun.which("convert")!;
   const probe = Bun.spawnSync([
-    magick, "-background", "white", paddedJpeg, "-auto-orient", "-alpha", "remove", "-alpha", "off",
-    "-colorspace", "Gray", "-blur", "0x0.6", "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`, "-compress", "none", "pgm:-",
+    magick, "-background", "white",
+    "-define", `jpeg:size=${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}`,
+    paddedJpeg, "-auto-orient", "-alpha", "remove", "-alpha", "off",
+    "-colorspace", "Gray",
+    "-resize", `${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}^>`,
+    "-blur", "0x0.6",
+    "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`,
+    "-compress", "none", "pgm:-",
   ]);
   expect(probe.exitCode).toBe(0);
   expect(probe.stderr.toString()).toContain("extraneous bytes before marker 0xda");
@@ -1582,10 +1588,12 @@ test.skipIf(!hasImageMagick)("extreme 1:9, 10:1, and standard portraits fill the
       expect(Math.max(...outLines.map((line) => [...line].length)), `${c.slug} width`).toBeLessThanOrEqual(92);
       expect(shown.stdout, `${c.slug} has braille`).toMatch(/[\u2801-\u28ff]/);
       const upperName = c.name.toUpperCase();
-      expect(shown.stdout, `${c.slug} full name`).toContain(upperName);
+      const spacedName = upperName.split(/\s+/).map((w) => [...w].join(" ")).join("   ");
+      const shownName = spacedName.length <= Math.max(box.width, 20) ? spacedName : upperName;
+      expect(shown.stdout, `${c.slug} full name`).toContain(shownName);
       expect(shown.stdout, `${c.slug} full dates`).toContain(c.dates);
-      const nameLine = outLines.find((line) => line.includes(upperName))!;
-      expect(nameLine.trim(), `${c.slug} name does not sit beside quote`).toBe(upperName);
+      const nameLine = outLines.find((line) => line.includes(shownName))!;
+      expect(nameLine.trim(), `${c.slug} name does not sit beside quote`).toBe(shownName);
       const datesLine = outLines.find((line) => line.includes(c.dates))!;
       expect(datesLine.trim(), `${c.slug} dates do not sit beside quote`).toBe(c.dates);
 

@@ -26,7 +26,7 @@ test("native backend installs and does not require ttfx", async () => {
   } finally { s.cleanup(); }
 });
 
-test("native preview writes a fresh canvas and launches with --input", async () => {
+test("native preview writes a fresh canvas and launches with --input and calm --include-effects", async () => {
   const s = sandbox();
   nativeLauncher(s, `printf '%s\\n' "$*" >> "$HOME/launch.log"`);
   const branding = join(s.config, "omarchy/branding/screensaver.txt");
@@ -43,10 +43,68 @@ test("native preview writes a fresh canvas and launches with --input", async () 
     expect(launched).toContain("force");
     expect(launched).toContain("--input");
     expect(launched).toContain(branding);
+    expect(launched).toContain("--include-effects");
+    expect(launched).toContain("colorshift,highlight,sweep");
+    expect(launched).not.toContain("print");
+    expect(launched).not.toContain("waves");
+    expect(launched).not.toContain("decrypt");
+    expect(launched).not.toContain("rain");
+    expect(launched).not.toContain("matrix");
     const second = readFileSync(branding, "utf8");
     expect(second).not.toBe(first);
     expect(second.length).toBeGreaterThan(40);
   } finally { s.cleanup(); }
+});
+
+test("native preview passes only colorshift, highlight, and sweep for short and long quotes, including from off state", async () => {
+  const s = sandbox();
+  nativeLauncher(s, `printf '%s\\n' "$*" >> "$HOME/launch.log"`);
+  const longText =
+    "All mankind being all equal and independent, no one ought to harm another in his life, health, liberty, " +
+    "or possessions; for men being all the workmanship of one omnipotent and infinitely wise Maker, they are " +
+    "his property, sent into the world by his order and about his business, made to last during his, not one " +
+    "another's pleasure, and furnished with like faculties.";
+  try {
+    expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+    expect((await s.cli(["config", "--add", `marcus\tSecond Treatise II.6\t${longText}`])).code).toBe(0);
+
+    // Launching from off state with a long custom quote omits print and waves.
+    const longFromOff = await s.cli(["preview", "--quote", "c01"]);
+    expect(longFromOff.code).toBe(0);
+
+    // Launching with a bundled long quote (q17, Meditations II.1, 215 chars) omits print and waves.
+    const longBundled = await s.cli(["preview", "--quote", "q17"]);
+    expect(longBundled.code).toBe(0);
+
+    // Launching with a short bundled quote (q01, 95 chars) also omits print and waves.
+    const shortBundled = await s.cli(["preview", "--quote", "q01"]);
+    expect(shortBundled.code).toBe(0);
+
+    // Launching with the shortest bundled quote (q30, 39 chars) also omits print and waves.
+    const shortestBundled = await s.cli(["preview", "--quote", "q30"]);
+    expect(shortestBundled.code).toBe(0);
+
+    const lines = readFileSync(join(s.home, "launch.log"), "utf8").trim().split("\n");
+    expect(lines).toHaveLength(4);
+    for (const line of lines) {
+      expect(line).toContain("--include-effects colorshift,highlight,sweep");
+      expect(line).not.toContain("print");
+      expect(line).not.toContain("waves");
+      expect(line).not.toContain("decrypt");
+      expect(line).not.toContain("rain");
+      expect(line).not.toContain("matrix");
+    }
+  } finally { s.cleanup(); }
+});
+
+test("README documents calm preview effects and idle-start behaviour", () => {
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  expect(readme).toContain("### Screensaver effects");
+  expect(readme).toContain("--include-effects");
+  expect(readme).toContain("`colorshift`, `highlight`, and\n`sweep`");
+  expect(readme).toContain("Both `print` and `waves` stay out");
+  expect(readme).toContain("3 seconds");
+  expect(readme).toContain("Idle starts");
 });
 
 test("native preview explains a missing screensaver binary", async () => {

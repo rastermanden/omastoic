@@ -19,9 +19,10 @@ Omastoic writes the file Omarchy already reads,
 `omarchy-launch-screensaver` execs it. Idle and *System → Screensaver* pass no
 arguments, so they show the branding file. The program reads its text once, at
 start. Omastoic leaves the next quote there and writes a different one when
-that process exits. `omastoic preview` is the launch Omastoic does itself: it
-passes `--input` pointed at the same file. The quote does not change while the
-overlay is up. This path does not need `ttfx`.
+that process exits. `omastoic preview` is the launch Omastoic does itself. It
+passes `--input` pointed at the same file and `--include-effects` with a calm
+effect set. The quote does not change while the overlay is up. This path does
+not need `ttfx`.
 
 **Terminal (older Omarchy).** The saver rereads the branding file between
 effects, and the service swaps the quote on your interval while a screensaver
@@ -206,6 +207,25 @@ shows “Resize to read quote” and its citation, never a cut sentence. The
 portraits are AI-imagined illustrations, not photographs.
 [docs/ART.md](docs/ART.md) is how they were made.
 [CREDITS.md](CREDITS.md) names the translations.
+
+### Screensaver effects
+
+Some `omarchy-screensaver` effects scramble the braille portrait and quote with
+random glyphs (`decrypt`, `rain`, `matrix`). The `print` effect types the
+canvas character by character and loops before holding the whole composition.
+The `waves` effect takes more than 3 seconds to reach a legible frame.
+
+When you run `omastoic preview` on the native backend, Omastoic passes
+`--include-effects` to limit random selection to `colorshift`, `highlight`, and
+`sweep`. Both `print` and `waves` stay out for every quote length so the
+portrait and quote become readable within 3 seconds.
+
+Idle starts and *System → Screensaver* call `omarchy-launch-screensaver` with
+no arguments. Omarchy does not provide an effect-filter setting for those
+launches, and Omastoic does not replace Omarchy's launcher. On idle starts,
+`omarchy-screensaver` picks from its full built-in effect list. The older
+terminal backend runs `omarchy-screensaver` with `ttfx --random-effect` and
+ignores extra launcher arguments.
 
 ### Other native effects
 
