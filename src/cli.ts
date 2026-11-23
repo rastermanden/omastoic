@@ -55,6 +55,15 @@ import {
 } from "./settings.ts";
 
 const ROOT = dirname(import.meta.dir);
+
+function manifestVersion(): string {
+  const manifest = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8")) as { version?: unknown } | null;
+  const version = typeof manifest === "object" && manifest !== null ? manifest.version : undefined;
+  if (typeof version !== "string" || version.trim() === "") {
+    throw new Error("manifest.json has no version");
+  }
+  return version.trim();
+}
 const HOME = process.env.HOME ?? "";
 const CONFIG_HOME = process.env.XDG_CONFIG_HOME ?? join(HOME, ".config");
 const STATE_HOME = process.env.XDG_STATE_HOME ?? join(HOME, ".local/state");
@@ -3006,6 +3015,7 @@ async function status(opts: { verbose?: boolean } = {}): Promise<number> {
   const field = (label: string, value: string) => `${styleDim(label.padEnd(labelWidth), styled)}${value}`;
 
   const metaLines = [
+    field("version:", manifestVersion()),
     field("backend:", backendLine),
     field("service:", unit.stdout.toString().trim() || "not installed"),
   ];
@@ -3042,6 +3052,8 @@ function usage(styled = false): string {
     ["omastoic config", "Choose authors, quotes, and seconds, or edit custom ones"],
     ["omastoic ui", "Open the settings panel in the Omarchy shell"],
     ["omastoic status", "Show status, backend, and quote book (--verbose for details)"],
+    ["omastoic version", "Print the version from manifest.json"],
+    ["omastoic --version", "Same"],
     ["omastoic uninstall", "Remove the service, menu row, and plugin (--purge for data)"],
   ], colWidth);
   const helpRows = formatTwoColumn([
@@ -3179,6 +3191,13 @@ function commandUsage(rawCommand: string, styled = false): string | null {
         ...formatTwoColumn([
           ["--verbose, -v", "Also show grid size, cell metrics, and canvas file path"],
         ], 16),
+      ].join("\n");
+    case "version":
+      return [
+        heading("omastoic version | omastoic --version"),
+        "",
+        "Print the installed version from manifest.json without writing",
+        "state or screensaver files.",
       ].join("\n");
     case "uninstall":
       return [
@@ -3350,6 +3369,10 @@ async function main(): Promise<number> {
       return install();
     case "uninstall":
       return uninstall({ purge: rest.includes("--purge") });
+    case "version":
+    case "--version":
+      console.log(manifestVersion());
+      return 0;
     case "status":
       return status({ verbose: rest.includes("--verbose") || rest.includes("-v") });
     case "config":

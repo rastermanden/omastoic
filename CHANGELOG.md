@@ -8,6 +8,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- `omastoic --version` and `omastoic version` print the version from
+  `manifest.json`. `omastoic status` shows that same version on one line (#80).
+
 ## 2.5.0 - 2026-11-22
 
 ### Added

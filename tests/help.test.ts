@@ -6,7 +6,7 @@ import { pty } from "./pty.ts";
 
 const commands = [
   "show", "on", "off", "toggle", "next", "preview", "daemon", "setup", "install",
-  "uninstall", "status", "config", "configure", "panel", "ui", "render-png",
+  "uninstall", "status", "version", "config", "configure", "panel", "ui", "render-png",
 ];
 
 const ANSI_ESCAPE = /\x1b\[[0-9;]*m/;
@@ -30,7 +30,6 @@ test("--help and -h print per-command usage for every command and do not run it"
         expect(result.stderr).toBe("");
       }
     }
-
     // `config --help` documents config-specific options.
     const configHelp = await s.cli(["config", "--help"]);
     expect(configHelp.code).toBe(0);
@@ -47,7 +46,7 @@ test("--help and -h print per-command usage for every command and do not run it"
     expect(uninstallHelp.stdout).toContain("omastoic uninstall");
     expect(uninstallHelp.stdout).toContain("--purge");
 
-    for (const args of [["--help"], ["-h"], ["help"], []]) {
+    for (const args of [["--help"], ["-h"], ["help"], ["--version", "--help"], ["--version", "-h"], []]) {
       const result = await s.cli(args);
       expect(result.code, JSON.stringify(args)).toBe(0);
       expect(result.stdout).toContain("Install:");
