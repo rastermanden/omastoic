@@ -3,12 +3,14 @@
 // rectangular block that fits inside the terminal it will be shown in.
 
 import { join } from "node:path";
+import { portraitDownscale } from "./portrait.ts";
 
 export type Quote = { author: string; citation: string; text: string };
 export type Author = { slug: string; name: string; dates: string };
 
 export const ART_GAP = 4;
 const MIN_LABEL_WIDTH = 20;
+const MIN_SCALED_ART_ROWS = 12;
 export const AUTHOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MAX_AUTHOR_FIELD = 128;
 const MAX_ART_BYTES = 64 * 1024;
@@ -117,6 +119,29 @@ const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - cellWidth(s
 const centre = (s: string, w: number) => pad(" ".repeat(Math.max(0, Math.floor((w - cellWidth(s)) / 2))) + s, w);
 const right = (s: string, w: number) => pad(" ".repeat(Math.max(0, w - cellWidth(s))) + s, w);
 
+/** Space uppercase single-width letters for display hierarchy when it fits on one line. */
+function spaceCapitals(name: string): string | null {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return null;
+  const spacedWords: string[] = [];
+  for (const word of words) {
+    const chars = [...graphemes.segment(word)].map((entry) => entry.segment);
+    if (chars.some((ch) => cellWidth(ch) !== 1)) return null;
+    spacedWords.push(chars.join(" "));
+  }
+  return spacedWords.join("   ");
+}
+
+function formatCaption(name: string, dates: string, leftWidth: number): string[] {
+  const spaced = spaceCapitals(name);
+  const nameLines =
+    spaced && cellWidth(spaced) <= leftWidth
+      ? [centre(spaced, leftWidth)]
+      : wrap(name, leftWidth).map((l) => centre(l, leftWidth));
+  const dateLines = dates ? wrap(dates, leftWidth).map((l) => centre(l, leftWidth)) : [];
+  return [...nameLines, ...dateLines];
+}
+
 /**
  * Pick a quote at random, avoiding the ones most recently shown. `recent` holds
  * indexes from previous calls; the returned list is the one to store back.
@@ -153,42 +178,60 @@ export function compose(quote: Quote, author: Author | undefined, layout: Layout
   const dates = author?.dates ?? "";
 
   if (art && art.length) {
-    const trimmedArt = art.map((l) => l.replace(/[\s\u2800]+$/u, ""));
-    const artWidth = Math.max(...trimmedArt.map(cellWidth));
-    if (artWidth > 0) {
-      const leftWidth = Math.max(artWidth, MIN_LABEL_WIDTH);
+    const baseArt = art.map((l) => l.replace(/[\s\u2800]+$/u, ""));
+    const baseArtWidth = Math.max(...baseArt.map(cellWidth));
+    const verticalMargin = rows >= 26 ? 2 : 1;
+    const maxRows = rows - verticalMargin * 2;
+    if (baseArtWidth > 0 && maxRows >= 1) {
+      let activeArt = baseArt;
+      let artWidth = baseArtWidth;
+      let leftWidth = Math.max(artWidth, MIN_LABEL_WIDTH);
+      let caption = formatCaption(name, dates, leftWidth);
+
+      // Keep top and bottom breathing room by scaling tall portraits down to
+      // fit the available rows before falling back to quote-only.
+      for (let pass = 0; pass < 2 && activeArt.length + caption.length > maxRows; pass++) {
+        const maxArtRows = maxRows - caption.length;
+        if (maxArtRows < MIN_SCALED_ART_ROWS || maxArtRows >= baseArt.length) break;
+        const targetCols = Math.max(1, Math.min(baseArtWidth, Math.round((baseArtWidth * maxArtRows) / baseArt.length)));
+        const scaled = portraitDownscale(baseArt.join("\n"), maxArtRows, targetCols);
+        if (!scaled) break;
+        const scaledLines = scaled.split("\n").map((l) => l.replaceAll("\u2800", " ").replace(/\s+$/, ""));
+        const scaledWidth = Math.max(0, ...scaledLines.map(cellWidth));
+        if (!scaledLines.length || scaledWidth === 0) break;
+        activeArt = scaledLines;
+        artWidth = scaledWidth;
+        leftWidth = Math.max(artWidth, MIN_LABEL_WIDTH);
+        caption = formatCaption(name, dates, leftWidth);
+      }
+
       const margin = cols >= 72 ? 6 : 4;
       const textWidth = Math.min(52, cols - leftWidth - ART_GAP - margin);
-      if (textWidth >= 28) {
+      if (textWidth >= 28 && activeArt.length + caption.length <= maxRows) {
         const body = wrap(`“${quote.text}”`, textWidth);
-        const citation = wrap(quote.citation, textWidth).map((l) => right(l, textWidth));
+        const citation = wrap(`— ${quote.citation}`, textWidth).map((l) => right(l, textWidth));
         const text = [...body, "", ...citation];
 
         const artInset = " ".repeat(Math.floor((leftWidth - artWidth) / 2));
-        const nameLines = wrap(name, leftWidth).map((l) => centre(l, leftWidth));
-        const dateLines = dates ? wrap(dates, leftWidth).map((l) => centre(l, leftWidth)) : [];
-        const label = ["", ...nameLines, ...dateLines];
-
-        // Sit the quote against the portrait's optical centre, and keep the
-        // museum label underneath both so the name never sits beside the quote.
-        const plateRows = Math.max(trimmedArt.length, text.length);
-        const artTop = Math.floor((plateRows - trimmedArt.length) / 2);
-        const textTop = Math.floor((plateRows - text.length) / 2);
-        const left = [
-          ...Array.from({ length: artTop }, () => ""),
-          ...trimmedArt.map((l) => pad(artInset + l, leftWidth)),
-          ...Array.from({ length: plateRows - artTop - trimmedArt.length }, () => ""),
-          ...label,
+        const leftPlate = [
+          ...activeArt.map((l) => pad(artInset + l, leftWidth)),
+          ...caption,
         ];
+
+        // Anchor the caption directly under the portrait and centre the quote
+        // block against the entire plate (portrait plus caption).
+        const plateRows = Math.max(leftPlate.length, text.length);
+        const leftTop = Math.floor((plateRows - leftPlate.length) / 2);
+        const textTop = Math.floor((plateRows - text.length) / 2);
         const gap = " ".repeat(ART_GAP);
 
         const out: string[] = [];
-        for (let i = 0; i < left.length; i++) {
-          const l = pad(left[i] ?? "", leftWidth);
+        for (let i = 0; i < plateRows; i++) {
+          const l = pad(i >= leftTop ? (leftPlate[i - leftTop] ?? "") : "", leftWidth);
           const r = i >= textTop ? (text[i - textTop] ?? "") : "";
           out.push((l + gap + r).replace(/\s+$/, ""));
         }
-        if (fits(out)) return finish(out);
+        if (out.length <= maxRows && fits(out)) return finish(out);
       }
     }
   }
