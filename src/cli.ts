@@ -24,7 +24,14 @@ import { dirname, join } from "node:path";
 import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { headerPortraitLayout, padPortrait, portraitDownscale, transcodePortrait } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
-import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
+import {
+  CALM_EFFECTS,
+  explainLauncherFailure,
+  nativeLaunchScript,
+  previewEffects,
+  screensaverBackend,
+  type ScreensaverBackend,
+} from "./screensaver.ts";
 import { authorCompletionList, renderCompletion } from "./completions.ts";
 import { hasBlock, withBlock, withoutBlock } from "./menu.ts";
 import { ChunkSource, pickAuthors } from "./author-picker.ts";
@@ -266,12 +273,15 @@ async function installedBackend(): Promise<ScreensaverBackend> {
  * is the screensaver and runs until dismissed, so preview must leave it in
  * its own session instead of waiting out the overlay.
  */
-async function launchScreensaver(backend: Exclude<ScreensaverBackend, "missing">): Promise<number> {
+async function launchScreensaver(
+  backend: Exclude<ScreensaverBackend, "missing">,
+  effects: readonly string[] = CALM_EFFECTS,
+): Promise<number> {
   if (!Bun.which("omarchy-launch-screensaver")) {
     console.error("omastoic: omarchy-launch-screensaver is missing");
     return 1;
   }
-  if (backend === "native") return launchNative();
+  if (backend === "native") return launchNative(effects);
 
   const proc = Bun.spawn(["omarchy-launch-screensaver", "force"], {
     stdout: "pipe",
@@ -289,11 +299,11 @@ async function launchScreensaver(backend: Exclude<ScreensaverBackend, "missing">
   return code ?? 1;
 }
 
-async function launchNative(): Promise<number> {
+async function launchNative(effects: readonly string[] = CALM_EFFECTS): Promise<number> {
   mkdirSync(STATE, { recursive: true });
   const errorLog = join(STATE, "launch.err");
   rmSync(errorLog, { force: true });
-  const proc = Bun.spawn(["bash", "-c", nativeLaunchScript(BRANDING, errorLog)], {
+  const proc = Bun.spawn(["bash", "-c", nativeLaunchScript(BRANDING, errorLog, effects)], {
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
@@ -357,7 +367,10 @@ const preserveDisplaced = (): Promise<void> => slotPreserveDisplaced(brandingSlo
 const restoreSlot = (): Promise<void> => slotRestoreSlot(brandingSlot);
 const standAside = (): void => slotStandAside(brandingSlot);
 
-async function renderQuote(size?: { cols: number; rows: number }, forced?: Quote): Promise<{ text: string; recent: number[] }> {
+async function renderQuote(
+  size?: { cols: number; rows: number },
+  forced?: Quote,
+): Promise<{ text: string; quote: Quote; recent: number[] }> {
   const quotes = await quoteBook();
   if (!quotes.length) throw new Error("the quote book is empty");
 
@@ -370,6 +383,7 @@ async function renderQuote(size?: { cols: number; rows: number }, forced?: Quote
       rows: grid.rows,
       art,
     }),
+    quote: chosen.quote,
     recent: chosen.recent,
   };
 }
@@ -381,33 +395,37 @@ async function render(size?: { cols: number; rows: number }, remember = true, fo
 }
 
 /** Replace the branding file in one step, so a running ttfx never reads a half-written canvas. */
-async function writeBranding(takeSlot = false, forced?: Quote): Promise<boolean> {
+async function writeBranding(takeSlot = false, forced?: Quote): Promise<Quote | null> {
   let recentIds: number[] | null = null;
+  let writtenQuote: Quote | null = null;
   const wrote = await writeSlot(
     brandingSlot,
     async () => {
       const drawn = await renderQuote(undefined, forced);
       recentIds = drawn.recent;
+      writtenQuote = drawn.quote;
       return `${drawn.text}\n`;
     },
     takeSlot,
   );
   if (wrote && !forced && recentIds) atomicWrite(join(STATE, "recent.json"), JSON.stringify(recentIds));
-  return wrote;
+  return wrote ? writtenQuote : null;
 }
 
 async function stopDaemon(): Promise<void> {
   if (owned.owns("unit", UNIT)) await checked(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
 }
 
-async function on(): Promise<number> {
+async function activate(forced?: Quote): Promise<{ code: number; quote: Quote | null }> {
   const wasEnabled = enabled();
   const previousCanvas = wasEnabled && ownsBranding() ? await Bun.file(BRANDING).text().catch(() => null) : null;
   await preserveDisplaced();
 
+  let quote: Quote | null = null;
   try {
     setEnabled(true);
-    if (!(await writeBranding(true))) throw new Error("could not activate the Stoics");
+    quote = await writeBranding(true, forced);
+    if (!quote) throw new Error("could not activate the Stoics");
     if (owned.owns("unit", UNIT)) await checked(["systemctl", "--user", "enable", "--now", "omastoic.service"]);
     else console.log("→ not installed as a service yet; run: omastoic setup");
   } catch (error) {
@@ -423,7 +441,11 @@ async function on(): Promise<number> {
 
   console.log("→ the Stoics have the screensaver");
   notify("Screensaver: the Stoics");
-  return 0;
+  return { code: 0, quote };
+}
+
+async function on(): Promise<number> {
+  return (await activate()).code;
 }
 
 async function off(): Promise<number> {
@@ -3094,7 +3116,7 @@ function commandUsage(rawCommand: string, styled = false): string | null {
         heading("omastoic preview [--quote <id>]"),
         "",
         "Write a fresh canvas and start the screensaver now. On the native",
-        "backend, passes that file with --input.",
+        "backend, passes --input and a calm --include-effects list.",
         "",
         section("Options:"),
         ...formatTwoColumn([
@@ -3291,12 +3313,14 @@ async function main(): Promise<number> {
         forced = found;
       }
       const wasEnabled = enabled();
+      let shownQuote: Quote | null = null;
       if (!wasEnabled) {
-        const code = await on();
-        if (code) return code;
-      }
-      if (forced || wasEnabled) {
-        if (!(await writeBranding(false, forced))) return 1;
+        const activated = await activate(forced);
+        if (activated.code) return activated.code;
+        shownQuote = activated.quote;
+      } else {
+        shownQuote = await writeBranding(false, forced);
+        if (!shownQuote) return 1;
       }
       const backend = await installedBackend();
       if (backend === "missing") {
@@ -3310,7 +3334,8 @@ async function main(): Promise<number> {
         console.log("→ this canvas is what the next start will read");
         return 0;
       }
-      const code = await launchScreensaver(backend);
+      const effects = shownQuote ? previewEffects([...shownQuote.text].length) : CALM_EFFECTS;
+      const code = await launchScreensaver(backend, effects);
       if (backend === "terminal") {
         await waitForLiveGrid();
         if (!(await writeBranding(false, forced))) return 1;

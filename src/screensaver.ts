@@ -7,6 +7,17 @@
 
 export type ScreensaverBackend = "native" | "terminal" | "missing";
 
+/** Effects that keep braille portraits and quotes legible instead of scrambling glyphs. */
+export const CALM_EFFECTS = ["colorshift", "highlight", "sweep", "waves"] as const;
+
+/** Above this quote length, `print` takes too long to finish typing the canvas. */
+export const PRINT_MAX_QUOTE_CHARS = 200;
+
+/** Curated effect list passed by `omastoic preview` via `--include-effects`. */
+export function previewEffects(quoteChars: number): readonly string[] {
+  return quoteChars <= PRINT_MAX_QUOTE_CHARS ? [...CALM_EFFECTS, "print"] : [...CALM_EFFECTS];
+}
+
 const NATIVE_LAUNCHER = /\/usr\/lib\/omarchy-screensaver\//;
 
 /** The dev-channel launcher is a short script that execs the native binary. */
@@ -25,8 +36,14 @@ export function shellQuote(value: string): string {
  * clearly up, or with its status if it exits first. A failed `exec` of a
  * missing binary lands in `errorLog`.
  */
-export function nativeLaunchScript(inputPath: string, errorLog: string): string {
-  const command = `setsid omarchy-launch-screensaver force --input ${shellQuote(inputPath)} >/dev/null 2>${shellQuote(errorLog)} </dev/null`;
+export function nativeLaunchScript(
+  inputPath: string,
+  errorLog: string,
+  effects: readonly string[] = CALM_EFFECTS,
+): string {
+  const effectList = effects.join(",");
+  const effectArgs = effectList ? ` --include-effects ${shellQuote(effectList)}` : "";
+  const command = `setsid omarchy-launch-screensaver force --input ${shellQuote(inputPath)}${effectArgs} >/dev/null 2>${shellQuote(errorLog)} </dev/null`;
   return `${command} &
 child=$!
 sleep 0.4
