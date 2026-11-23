@@ -555,10 +555,12 @@ export async function transcodePortrait(
           [
             imBin,
             "-background", "white",
+            ...(kind === "jpeg" ? ["-define", `jpeg:size=${w * 2}x${h * 2}`] : []),
             staged,
             "-auto-orient",
             "-alpha", "remove", "-alpha", "off",
             "-colorspace", "Gray",
+            "-resize", `${w * 2}x${h * 2}^>`,
             "-blur", "0x0.6",
             "-resize", `${w}x${h}`,
             "-compress", "none",
