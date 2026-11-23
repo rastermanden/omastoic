@@ -172,10 +172,14 @@ test.skipIf(!hasImageMagick)("config --add-author accepts a JPEG with CRLF comme
 
     // Confirm ImageMagick really emits `#text\r#` comments in PGM output for this fixture.
     const rawPgm = Bun.spawnSync([
-      imBin, "-background", "white", commentedJpeg,
+      imBin, "-background", "white",
+      "-define", `jpeg:size=${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}`,
+      commentedJpeg,
       "-auto-orient", "-alpha", "remove", "-alpha", "off",
-      "-colorspace", "Gray", "-blur", "0x0.6",
-      "-resize", `${PORTRAIT_COLS * 2}x${PORTRAIT_ROWS * 4}`,
+      "-colorspace", "Gray",
+      "-resize", `${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}^>`,
+      "-blur", "0x0.6",
+      "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`,
       "-compress", "none", "pgm:-",
     ]);
     expect(new TextDecoder().decode(rawPgm.stderr)).toBe("");
