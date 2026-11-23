@@ -212,12 +212,13 @@ portraits are AI-imagined illustrations, not photographs.
 
 Some `omarchy-screensaver` effects scramble the braille portrait and quote with
 random glyphs (`decrypt`, `rain`, `matrix`). The `print` effect types the
-canvas character by character and takes more than 30 seconds on long quotes.
+canvas character by character and loops before holding the whole composition.
+The `waves` effect takes more than 3 seconds to reach a legible frame.
 
 When you run `omastoic preview` on the native backend, Omastoic passes
-`--include-effects` to limit random selection to `colorshift`, `highlight`,
-`sweep`, and `waves`. Quotes up to 200 characters also include `print`. Longer
-quotes omit `print` so the screen stays readable within a few seconds.
+`--include-effects` to limit random selection to `colorshift`, `highlight`, and
+`sweep`. Both `print` and `waves` stay out for every quote length so the
+portrait and quote become readable within 3 seconds.
 
 Idle starts and *System → Screensaver* call `omarchy-launch-screensaver` with
 no arguments. Omarchy does not provide an effect-filter setting for those

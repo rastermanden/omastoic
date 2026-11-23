@@ -7,15 +7,12 @@
 
 export type ScreensaverBackend = "native" | "terminal" | "missing";
 
-/** Effects that keep braille portraits and quotes legible instead of scrambling glyphs. */
-export const CALM_EFFECTS = ["colorshift", "highlight", "sweep", "waves"] as const;
-
-/** Above this quote length, `print` takes too long to finish typing the canvas. */
-export const PRINT_MAX_QUOTE_CHARS = 200;
+/** Effects that keep braille portraits and quotes legible within 3 s of start. */
+export const CALM_EFFECTS = ["colorshift", "highlight", "sweep"] as const;
 
 /** Curated effect list passed by `omastoic preview` via `--include-effects`. */
-export function previewEffects(quoteChars: number): readonly string[] {
-  return quoteChars <= PRINT_MAX_QUOTE_CHARS ? [...CALM_EFFECTS, "print"] : [...CALM_EFFECTS];
+export function previewEffects(_quoteChars?: number): readonly string[] {
+  return [...CALM_EFFECTS];
 }
 
 const NATIVE_LAUNCHER = /\/usr\/lib\/omarchy-screensaver\//;

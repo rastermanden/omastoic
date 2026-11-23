@@ -3334,7 +3334,7 @@ async function main(): Promise<number> {
         console.log("→ this canvas is what the next start will read");
         return 0;
       }
-      const effects = shownQuote ? previewEffects([...shownQuote.text].length) : CALM_EFFECTS;
+      const effects = previewEffects(shownQuote ? [...shownQuote.text].length : undefined);
       const code = await launchScreensaver(backend, effects);
       if (backend === "terminal") {
         await waitForLiveGrid();

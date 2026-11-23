@@ -4,7 +4,6 @@ import {
   explainLauncherFailure,
   nativeLaunchScript,
   previewEffects,
-  PRINT_MAX_QUOTE_CHARS,
   screensaverBackend,
   shellQuote,
 } from "../src/screensaver.ts";
@@ -40,25 +39,29 @@ test("the native launch script passes force, --input, and --include-effects, and
   expect(script).toContain("setsid");
   expect(script).toContain("omarchy-launch-screensaver force --input");
   expect(script).toContain(shellQuote("/home/me/.config/omarchy/branding/screensaver.txt"));
+  expect(script).toContain(`--include-effects ${shellQuote("colorshift,highlight,sweep")}`);
   expect(script).toContain(`--include-effects ${shellQuote(CALM_EFFECTS.join(","))}`);
   expect(script).not.toContain("print");
+  expect(script).not.toContain("waves");
   expect(script).toContain("echo running");
   expect(nativeLaunchScript("/tmp/it's a quote.txt", "/tmp/err")).toContain(`'/tmp/it'\\''s a quote.txt'`);
 
-  const shortScript = nativeLaunchScript("/tmp/canvas.txt", "/tmp/err", previewEffects(120));
-  expect(shortScript).toContain(`--include-effects ${shellQuote("colorshift,highlight,sweep,waves,print")}`);
-  const longScript = nativeLaunchScript("/tmp/canvas.txt", "/tmp/err", previewEffects(PRINT_MAX_QUOTE_CHARS + 1));
-  expect(longScript).toContain(`--include-effects ${shellQuote("colorshift,highlight,sweep,waves")}`);
+  const shortScript = nativeLaunchScript("/tmp/canvas.txt", "/tmp/err", previewEffects(39));
+  expect(shortScript).toContain(`--include-effects ${shellQuote("colorshift,highlight,sweep")}`);
+  expect(shortScript).not.toContain("print");
+  expect(shortScript).not.toContain("waves");
+  const longScript = nativeLaunchScript("/tmp/canvas.txt", "/tmp/err", previewEffects(370));
+  expect(longScript).toContain(`--include-effects ${shellQuote("colorshift,highlight,sweep")}`);
   expect(longScript).not.toContain("print");
+  expect(longScript).not.toContain("waves");
 });
 
-test("previewEffects returns the calm set and excludes print above 200 quote characters", () => {
-  expect(previewEffects(1)).toEqual(["colorshift", "highlight", "sweep", "waves", "print"]);
-  expect(previewEffects(PRINT_MAX_QUOTE_CHARS)).toEqual(["colorshift", "highlight", "sweep", "waves", "print"]);
-  expect(previewEffects(PRINT_MAX_QUOTE_CHARS + 1)).toEqual(["colorshift", "highlight", "sweep", "waves"]);
-  expect(previewEffects(370)).toEqual(["colorshift", "highlight", "sweep", "waves"]);
-  for (const destructive of ["decrypt", "rain", "matrix"]) {
-    expect(previewEffects(50)).not.toContain(destructive);
-    expect(previewEffects(370)).not.toContain(destructive);
+test("previewEffects returns the calm 3-effect set and excludes print and waves for every quote length", () => {
+  for (const len of [undefined, 0, 1, 39, 120, 200, 201, 370] as const) {
+    const effects = previewEffects(len);
+    expect(effects).toEqual(["colorshift", "highlight", "sweep"]);
+    for (const excluded of ["print", "waves", "decrypt", "rain", "matrix"]) {
+      expect(effects).not.toContain(excluded);
+    }
   }
 });

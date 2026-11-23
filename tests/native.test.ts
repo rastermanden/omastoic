@@ -44,7 +44,9 @@ test("native preview writes a fresh canvas and launches with --input and calm --
     expect(launched).toContain("--input");
     expect(launched).toContain(branding);
     expect(launched).toContain("--include-effects");
-    expect(launched).toContain("colorshift,highlight,sweep,waves");
+    expect(launched).toContain("colorshift,highlight,sweep");
+    expect(launched).not.toContain("print");
+    expect(launched).not.toContain("waves");
     expect(launched).not.toContain("decrypt");
     expect(launched).not.toContain("rain");
     expect(launched).not.toContain("matrix");
@@ -54,7 +56,7 @@ test("native preview writes a fresh canvas and launches with --input and calm --
   } finally { s.cleanup(); }
 });
 
-test("native preview includes print for short quotes and excludes print for long quotes, including from off state", async () => {
+test("native preview passes only colorshift, highlight, and sweep for short and long quotes, including from off state", async () => {
   const s = sandbox();
   nativeLauncher(s, `printf '%s\\n' "$*" >> "$HOME/launch.log"`);
   const longText =
@@ -66,25 +68,32 @@ test("native preview includes print for short quotes and excludes print for long
     expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
     expect((await s.cli(["config", "--add", `marcus\tSecond Treatise II.6\t${longText}`])).code).toBe(0);
 
-    // Launching from off state with a long custom quote (> 200 chars) omits print.
+    // Launching from off state with a long custom quote omits print and waves.
     const longFromOff = await s.cli(["preview", "--quote", "c01"]);
     expect(longFromOff.code).toBe(0);
 
-    // Launching with a bundled long quote (q17, Meditations II.1, 215 chars) omits print.
+    // Launching with a bundled long quote (q17, Meditations II.1, 215 chars) omits print and waves.
     const longBundled = await s.cli(["preview", "--quote", "q17"]);
     expect(longBundled.code).toBe(0);
 
-    // Launching with a short bundled quote (q01, 95 chars) includes print alongside the calm set.
+    // Launching with a short bundled quote (q01, 95 chars) also omits print and waves.
     const shortBundled = await s.cli(["preview", "--quote", "q01"]);
     expect(shortBundled.code).toBe(0);
 
+    // Launching with the shortest bundled quote (q30, 39 chars) also omits print and waves.
+    const shortestBundled = await s.cli(["preview", "--quote", "q30"]);
+    expect(shortestBundled.code).toBe(0);
+
     const lines = readFileSync(join(s.home, "launch.log"), "utf8").trim().split("\n");
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("--include-effects colorshift,highlight,sweep,waves");
-    expect(lines[0]).not.toContain("print");
-    expect(lines[1]).toContain("--include-effects colorshift,highlight,sweep,waves");
-    expect(lines[1]).not.toContain("print");
-    expect(lines[2]).toContain("--include-effects colorshift,highlight,sweep,waves,print");
+    expect(lines).toHaveLength(4);
+    for (const line of lines) {
+      expect(line).toContain("--include-effects colorshift,highlight,sweep");
+      expect(line).not.toContain("print");
+      expect(line).not.toContain("waves");
+      expect(line).not.toContain("decrypt");
+      expect(line).not.toContain("rain");
+      expect(line).not.toContain("matrix");
+    }
   } finally { s.cleanup(); }
 });
 
@@ -92,11 +101,9 @@ test("README documents calm preview effects and idle-start behaviour", () => {
   const readme = readFileSync(join(root, "README.md"), "utf8");
   expect(readme).toContain("### Screensaver effects");
   expect(readme).toContain("--include-effects");
-  expect(readme).toContain("colorshift");
-  expect(readme).toContain("highlight");
-  expect(readme).toContain("sweep");
-  expect(readme).toContain("waves");
-  expect(readme).toContain("200 characters");
+  expect(readme).toContain("`colorshift`, `highlight`, and\n`sweep`");
+  expect(readme).toContain("Both `print` and `waves` stay out");
+  expect(readme).toContain("3 seconds");
   expect(readme).toContain("Idle starts");
 });
 
