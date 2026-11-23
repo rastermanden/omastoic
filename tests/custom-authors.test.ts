@@ -217,7 +217,8 @@ test("config --add-author adds a JPEG author under ~/.config/omastoic/ without t
 
     const status = await s.cli(["status"]);
     expectOk(status, "status");
-    expect(status.stdout).toContain("1 quotes:");
+    expect(status.stdout).toContain("1 quote:");
+    expect(status.stdout).not.toContain("1 quotes:");
     expect(status.stdout).toMatch(/Musonius Rufus\s+1\s+portrait/);
 
     // Screensaver canvas shows the braille portrait, display name, dates, citation, and quote.
@@ -1632,3 +1633,89 @@ test.skipIf(!hasImageMagick)("extreme 1:9, 10:1, and standard portraits fill the
     expect(hline3Box.rows).toBeLessThanOrEqual(2);
   } finally { s.cleanup(); }
 }, 30000);
+
+test("custom author date ranges normalize on add, replace, panel, and read without rewriting existing files", async () => {
+  const s = sandbox();
+  try {
+    // CLI add with hyphen normalizes to spaced en dash.
+    const addedHyphen = await s.cli([
+      "config", "--add-author", "locke", "--name", "John Locke", "--dates", "1632-1704",
+      "--image", sampleJpeg, "--citation", "Essay I.1", "--text", "Reading furnishes the mind.",
+    ]);
+    expectOk(addedHyphen, "add hyphen dates");
+    const authorsFile = join(s.config, "omastoic/authors.tsv");
+    expect(readFileSync(authorsFile, "utf8")).toContain("locke\tJohn Locke\t1632 – 1704\n");
+
+    // CLI replace with tight en dash normalizes to spaced en dash.
+    const replacedEnDash = await s.cli([
+      "config", "--replace-author", "locke", "--dates", "1632–1704",
+    ]);
+    expectOk(replacedEnDash, "replace en-dash dates");
+    expect(readFileSync(authorsFile, "utf8")).toContain("locke\tJohn Locke\t1632 – 1704\n");
+
+    // Free text stays unchanged.
+    const addedFree = await s.cli([
+      "config", "--add-author", "diogenes", "--name", "Diogenes", "--dates", "fl. 300 BC",
+      "--image", sampleJpeg, "--citation", "Lives VI", "--text", "Stand out of my sunlight.",
+    ]);
+    expectOk(addedFree, "add free text dates");
+    expect(readFileSync(authorsFile, "utf8")).toContain("diogenes\tDiogenes\tfl. 300 BC\n");
+
+    // Panel add and replace produce the exact same normalization.
+    const panelAdd = await s.cli(["panel", "apply", JSON.stringify({
+      addAuthor: {
+        slug: "hume",
+        name: "David Hume",
+        dates: "1711-1776",
+        image: sampleJpeg,
+        citation: "Treatise I",
+        text: "Custom is the great guide of human life.",
+      },
+    })]);
+    expectOk(panelAdd, "panel add dates");
+    const panelAddState = JSON.parse(panelAdd.stdout);
+    expect(panelAddState.samples.find((a: { slug: string }) => a.slug === "hume")?.dates).toBe("1711 – 1776");
+    expect(readFileSync(authorsFile, "utf8")).toContain("hume\tDavid Hume\t1711 – 1776\n");
+
+    const panelReplace = await s.cli(["panel", "apply", JSON.stringify({
+      replaceAuthor: { slug: "hume", dates: "1711—1776" },
+    })]);
+    expectOk(panelReplace, "panel replace dates");
+    const panelReplaceState = JSON.parse(panelReplace.stdout);
+    expect(panelReplaceState.samples.find((a: { slug: string }) => a.slug === "hume")?.dates).toBe("1711 – 1776");
+
+    // An existing unnormalized row on disk is normalized on read without rewriting the file.
+    const raw128 = `${"1".repeat(126)}-2`;
+    const rawTsv = `${readFileSync(authorsFile, "utf8")}kant\tImmanuel Kant\t1724–1804\nlongrange\tLong Range\t${raw128}\n`;
+    s.put(authorsFile, rawTsv);
+    const state = await s.cli(["panel", "state"]);
+    expectOk(state, "panel state on existing unnormalized row");
+    const parsedState = JSON.parse(state.stdout);
+    expect(parsedState.samples.find((a: { slug: string }) => a.slug === "kant")?.dates).toBe("1724 – 1804");
+    expect(parsedState.samples.find((a: { slug: string }) => a.slug === "longrange")?.dates).toBe(raw128);
+    expect(readFileSync(authorsFile, "utf8")).toBe(rawTsv);
+
+    // Name-only replace on a 128-character tight range succeeds and preserves its dates.
+    const nameOnly = await s.cli(["config", "--replace-author", "longrange", "--name", "Renamed Range"]);
+    expectOk(nameOnly, "name-only replace on 128-char range");
+    expect(readFileSync(authorsFile, "utf8")).toContain(`longrange\tRenamed Range\t${raw128}\n`);
+
+    // Write-time add and replace accept 127- and 128-char tight ranges and reject 129-char dates.
+    const raw127 = `${"1".repeat(125)}-2`;
+    const add127 = await s.cli([
+      "config", "--add-author", "edge127", "--name", "Edge 127", "--dates", raw127,
+      "--image", sampleJpeg, "--citation", "Note", "--text", "Boundary line.",
+    ]);
+    expectOk(add127, "add 127-char tight date range");
+    expect(readFileSync(authorsFile, "utf8")).toContain(`edge127\tEdge 127\t${raw127}\n`);
+
+    const replace128 = await s.cli(["config", "--replace-author", "edge127", "--dates", raw128]);
+    expectOk(replace128, "replace 128-char tight date range");
+    expect(readFileSync(authorsFile, "utf8")).toContain(`edge127\tEdge 127\t${raw128}\n`);
+
+    const raw129 = `${"1".repeat(127)}-2`;
+    const reject129 = await s.cli(["config", "--replace-author", "edge127", "--dates", raw129]);
+    expect(reject129.code).toBe(1);
+    expect(reject129.stderr).toContain("at most 128 characters");
+  } finally { s.cleanup(); }
+});

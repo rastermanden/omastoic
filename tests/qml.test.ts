@@ -37,7 +37,8 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain('text: "Omastoic"');
   expect(source).toContain('label: "Preview"');
   expect(source).toContain("id: quoteSlot");
-  expect(source).toContain("height: Math.max(Style.font.body * 1.35 * 3, quotePreviewText.implicitHeight)");
+  expect(source).toContain("height: Math.ceil(Style.font.body * 1.35) * 3");
+  expect(source).toContain("id: citationSlot");
   expect(source).toContain("anchors.verticalCenter: quoteSlot.verticalCenter");
   expect(source).toContain("elide: Text.ElideRight");
   expect(source).not.toContain("fontSizeMode");
@@ -75,6 +76,11 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).not.toContain('text: "Reload"');
   expect(source).not.toContain("Search");
   expect(source).not.toContain("Author slug");
+  expect(source).not.toContain("Short id");
+  expect(source).not.toContain("Replace author");
+  expect(source).toContain('"Save changes"');
+  expect(source).toContain('"Edit "');
+  expect(source).toContain("component QuoteArea");
   expect(source).toContain("anchors.top: parent.top");
   expect(source).toContain("restoreCommitted");
   expect(source).toContain("previewTimer");
@@ -105,7 +111,7 @@ test("hover stays distinct from focus and from the selected tint", () => {
   expect(source).toContain("Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16)");
   expect(source).toContain("Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08)");
   expect(source).toContain("border.color: activeFocus ? Commons.Color.accent : root.ink");
-  expect(source).toContain("border.color: inner.activeFocus ? Commons.Color.accent : root.ink");
+  expect(source).toContain("border.color: host.destructive ? Commons.Color.urgent : (inner.activeFocus ? Commons.Color.accent : root.ink)");
   expect(source).toContain("buttonHover.hovered && host.available");
   expect(source).toContain("enabled: !host.available");
   expect(source).toContain("selected: false");
@@ -470,6 +476,7 @@ Item {
   property bool focusable: true
   property bool bordered: true
   property color foreground: "white"
+  property color accent: "#7aa2f7"
   signal clicked()
   signal rightClicked()
   implicitWidth: 80
@@ -534,11 +541,12 @@ Item {
       "tst_panel.qml",
       `import QtQuick
 import QtTest
+import MockCommons as Commons
 
 Item {
   id: harness
-  width: 800
-  height: 900
+  width: 1280
+  height: 800
 
   PanelUnderTest {
     id: panel
@@ -565,6 +573,16 @@ Item {
 
     function seedPanel() {
       panel.opened = true
+      panel.saving = false
+      panel.notice = ""
+      panel.error = ""
+      panel.errorScope = ""
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      if (scroller) scroller.contentY = 0
       var ok = panel.adoptState(JSON.stringify({
         settings: { authors: ["marcus", "musonius", "hierocles"], interval: 60 },
         portraitFont: 8,
@@ -650,13 +668,13 @@ Item {
       compare(panel.opened, true)
       compare(panel.confirmRemoveAuthor, "")
 
+      var cancelAddBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelAddBtn !== null)
+      panel.reveal(cancelAddBtn)
+      wait(20)
+      mouseClick(cancelAddBtn)
       scroller.contentY = 0
-      waitForRendering(panel)
-      var closeAuthorBtn = findOne(panel, function(item) { return item.label === "Close" && item.visible })
-      verify(closeAuthorBtn !== null)
-      mouseClick(closeAuthorBtn)
-      scroller.contentY = 0
-      waitForRendering(panel)
+      wait(20)
 
       // 4. Clicking Edit cancels Remove?.
       mouseClick(musoniusRemove)
@@ -692,10 +710,14 @@ Item {
       mouseClick(hieroclesRemove)
       compare(panel.confirmRemoveAuthor, "hierocles")
 
-      // 7. Escape cancels Remove? without closing the panel.
+      // 7. Escape cancels Remove? without closing the panel and clears focus from Remove.
+      var hieroclesInner = findOne(hieroclesRemove, function(item) { return item.hasOwnProperty("focusable") })
+      verify(hieroclesInner !== null)
+      compare(hieroclesInner.activeFocus, true)
       keyClick(Qt.Key_Escape)
       compare(panel.confirmRemoveAuthor, "")
       compare(panel.opened, true)
+      compare(hieroclesInner.activeFocus, false)
 
       // 8. Second click on the same armed Remove? button commits removal.
       mouseClick(musoniusRemove)
@@ -704,6 +726,592 @@ Item {
       mouseClick(musoniusRemove)
       compare(panel.confirmRemoveAuthor, "")
       compare(panel.saving, true)
+    }
+
+    function test_form_error_placement_clears_on_close_and_empty_pick_hint_visible() {
+      seedPanel()
+      wait(0)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      // Open Add author and simulate a failed submit ("already exists").
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      panel.addingAuthor = true
+      panel.saving = true
+      var applyRunObj = {
+        exited: true,
+        exitCode: 1,
+        stdout: "",
+        stderr: 'omastoic: "musonius" already exists. Use Edit on that author to update it.',
+        streamsLeft: 0,
+      }
+      panel.settleRun(applyRunObj, "Could not save that.")
+      waitForRendering(panel)
+
+      compare(panel.error, '"musonius" already exists. Use Edit on that author to update it.')
+      compare(panel.errorScope, "author")
+      compare(panel.statusText, "")
+
+      // Error renders inside the author form, directly above the submit button, and is visible.
+      var authorErr = findOne(panel, function(item) {
+        return item.text === panel.error && item.visible
+      })
+      var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(authorErr !== null)
+      verify(submitBtn !== null)
+      var errTop = authorErr.mapToItem(scroller.contentItem, 0, 0).y
+      var submitTop = submitBtn.mapToItem(scroller.contentItem, 0, 0).y
+      verify(errTop < submitTop)
+      verify(errTop >= scroller.contentY - 1)
+      verify(errTop + authorErr.height <= scroller.contentY + scroller.height + 1)
+
+      // Cancel the form: no error remains; opening Edit on another author shows no error.
+      var cancelAddBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelAddBtn !== null)
+      panel.reveal(cancelAddBtn)
+      wait(20)
+      mouseClick(cancelAddBtn)
+      wait(20)
+      compare(panel.error, "")
+      compare(panel.errorScope, "")
+      compare(authorErr.visible, false)
+
+      var editButtons = findAll(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editButtons.length >= 1)
+      mouseClick(editButtons[0])
+      waitForRendering(panel)
+      compare(panel.error, "")
+      compare(authorErr.visible, false)
+
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelBtn !== null)
+      mouseClick(cancelBtn)
+      waitForRendering(panel)
+
+      // Unticking the last selected author shows the empty-pick hint fully inside the 1280x800 viewport.
+      scroller.contentY = 0
+      panel.selectedAuthors = ["marcus"]
+      panel.toggleAuthor("marcus")
+      waitForRendering(panel)
+      compare(panel.authorListHint, "Pick at least one author.")
+      var hintItem = findOne(panel, function(item) {
+        return item.text === "Pick at least one author." && item.visible
+      })
+      verify(hintItem !== null)
+      var hintInViewport = hintItem.mapToItem(scroller, 0, 0)
+      verify(hintInViewport.y >= 0)
+      verify(hintInViewport.y + hintItem.height <= scroller.height)
+    }
+
+    function test_layout_stability_scroll_restore_and_urgent_remove_confirm() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius", "hierocles"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          {
+            slug: "musonius",
+            name: "Musonius Rufus",
+            dates: "c. AD 30 – 100",
+            custom: true,
+            portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿",
+            citation: "Lectures VI: A Very Long Citation That Used To Wrap Onto A Second Line And Shift Every Row Below It",
+            text: "A much longer four-line or five-line quotation that exceeds three lines in the narrow preview header column and used to push the list down whenever the preview switched to this author.",
+          },
+          { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Elements", text: "Draw the circles inward." },
+        ],
+      }))
+      compare(ok, true)
+      waitForRendering(panel)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      var marcusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Marcus Aurelius" })
+      var musoniusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Musonius Rufus" })
+      var hieroclesRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Hierocles" })
+      verify(marcusRow !== null && musoniusRow !== null && hieroclesRow !== null)
+
+      var marcusY0 = marcusRow.mapToItem(scroller, 0, 0).y
+      var musoniusY0 = musoniusRow.mapToItem(scroller, 0, 0).y
+      var hieroclesY0 = hieroclesRow.mapToItem(scroller, 0, 0).y
+
+      // 1. Toggling Marcus off switches the header preview to Musonius's long quote + long citation; rows do not shift.
+      mouseClick(marcusRow, 20, marcusRow.height / 2)
+      wait(0)
+      verify(Math.abs(marcusRow.mapToItem(scroller, 0, 0).y - marcusY0) <= 1)
+      verify(Math.abs(musoniusRow.mapToItem(scroller, 0, 0).y - musoniusY0) <= 1)
+      verify(Math.abs(hieroclesRow.mapToItem(scroller, 0, 0).y - hieroclesY0) <= 1)
+
+      // Toggling Musonius off switches to Hierocles (short quote); rows still do not shift.
+      mouseClick(musoniusRow, 20, musoniusRow.height / 2)
+      wait(0)
+      verify(Math.abs(marcusRow.mapToItem(scroller, 0, 0).y - marcusY0) <= 1)
+      verify(Math.abs(musoniusRow.mapToItem(scroller, 0, 0).y - musoniusY0) <= 1)
+      verify(Math.abs(hieroclesRow.mapToItem(scroller, 0, 0).y - hieroclesY0) <= 1)
+
+      // Unticking the last author shows the hint without moving any row.
+      mouseClick(hieroclesRow, 20, hieroclesRow.height / 2)
+      wait(0)
+      compare(panel.authorListHint, "Pick at least one author.")
+      verify(Math.abs(marcusRow.mapToItem(scroller, 0, 0).y - marcusY0) <= 1)
+      verify(Math.abs(musoniusRow.mapToItem(scroller, 0, 0).y - musoniusY0) <= 1)
+
+      // 2. Remove -> Remove? keeps the same width and leaves Edit at the exact same x position, with urgent styling.
+      var editBtn = findOne(musoniusRow, function(item) { return item.label === "Edit" && item.visible })
+      var removeBtn = findOne(musoniusRow, function(item) { return item.keepsRemoveConfirm === true && item.visible })
+      verify(editBtn !== null && removeBtn !== null)
+      var editXBefore = editBtn.mapToItem(musoniusRow, 0, 0).x
+      var removeWidthBefore = removeBtn.width
+      compare(removeBtn.destructive, false)
+
+      mouseClick(removeBtn)
+      wait(0)
+      compare(removeBtn.label, "Remove?")
+      compare(removeBtn.destructive, true)
+      compare(removeBtn.width, removeWidthBefore)
+      compare(editBtn.mapToItem(musoniusRow, 0, 0).x, editXBefore)
+
+      var chrome = findOne(removeBtn, function(item) { return item.border && item.border.width === 2 })
+      verify(chrome !== null)
+      compare(String(chrome.border.color), "#f7768e")
+
+      // Catppuccin Latte (light theme) uses the light theme's urgent colour (#d20f39) on Remove? border, fill, and inner accent.
+      var savedAccent = Commons.Color.accent
+      var savedUrgent = Commons.Color.urgent
+      var savedPopups = Commons.Color.popups
+      Commons.Color.accent = "#1e66f5"
+      Commons.Color.urgent = "#d20f39"
+      Commons.Color.popups = { background: "#eff1f5", border: "#bcc0cc", text: "#4c4f69" }
+      wait(20)
+      compare(String(chrome.border.color), "#d20f39")
+      compare(chrome.border.width, 2)
+      verify(Math.abs(chrome.color.r - Commons.Color.urgent.r) < 0.01)
+      verify(Math.abs(chrome.color.g - Commons.Color.urgent.g) < 0.01)
+      verify(Math.abs(chrome.color.b - Commons.Color.urgent.b) < 0.01)
+      verify(Math.abs(chrome.color.a - 0.20) < 0.01)
+      var removeInner = findOne(removeBtn, function(item) { return item.hasOwnProperty("focusable") })
+      verify(removeInner !== null)
+      compare(String(removeInner.accent), "#d20f39")
+      Commons.Color.accent = savedAccent
+      Commons.Color.urgent = savedUrgent
+      Commons.Color.popups = savedPopups
+      wait(20)
+
+      // 3. Opening Edit and pressing Cancel restores contentY so the row stays under the pointer.
+      scroller.contentY = 0
+      wait(0)
+      var rowYBeforeEdit = musoniusRow.mapToItem(scroller, 0, 0).y
+      mouseClick(editBtn)
+      wait(20)
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelBtn !== null)
+      panel.reveal(cancelBtn)
+      wait(20)
+      mouseClick(cancelBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+      compare(scroller.contentY, 0)
+      compare(musoniusRow.mapToItem(scroller, 0, 0).y, rowYBeforeEdit)
+    }
+
+    function test_author_forms_wording_advanced_slug_plain_count_and_multiline_quote() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [
+          { id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Desk note", text: "One line." },
+          { id: "c02", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Two lines." },
+        ],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      // 1. Custom count reads as plain secondary text (not a bordered RingButton).
+      var countLabel = findOne(panel, function(item) {
+        return item.text === "▸ 2 custom quotes" && item.visible
+      })
+      verify(countLabel !== null)
+      compare(countLabel.parent.border.width, 0)
+      compare(findOne(panel, function(item) { return item.label === "2 of your own" }), null)
+
+      // 2. Edit form uses Edit <name> + Save changes + Cancel.
+      var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editBtn !== null)
+      mouseClick(editBtn)
+      wait(20)
+      verify(findOne(panel, function(item) { return item.text === "Edit Musonius Rufus" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "Save changes" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "Cancel" && item.visible }) !== null)
+      compare(findOne(panel, function(item) { return item.label === "Replace author" }), null)
+      compare(findOne(panel, function(item) { return item.label === "Close" && item.visible }), null)
+
+      var cancelEdit = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      panel.reveal(cancelEdit)
+      wait(20)
+      mouseClick(cancelEdit)
+      wait(20)
+      compare(panel.authorOpen, false)
+
+      // 3. Add an author keeps its own label, hides slug under Advanced, derives slug from Name, and shows Cancel.
+      var addAuthorTrigger = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorTrigger !== null)
+      mouseClick(addAuthorTrigger)
+      wait(20)
+      compare(addAuthorTrigger.label, "Add an author")
+      compare(findOne(panel, function(item) { return item.label === "Close" && item.visible }), null)
+      verify(findOne(panel, function(item) { return item.label === "Add author" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "Cancel" && item.visible }) !== null)
+
+      // Author id field is hidden until Advanced is opened.
+      var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" })
+      verify(slugField !== null)
+      compare(slugField.visible, false)
+
+      // Fill Name, Image, Citation, and a 300-character Quote without opening Advanced.
+      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var citationField = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var quoteArea = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
+      verify(nameField !== null && imageField !== null && citationField !== null && quoteArea !== null)
+
+      nameField.text = "John Locke"
+      compare(panel.newAuthorSlug, "john-locke")
+      imageField.text = "/tmp/locke.png"
+      citationField.text = "An Essay Concerning Human Understanding"
+      var quote300 = "Reading furnishes the mind only with materials of knowledge; it is thinking makes what we read ours. We are of the ruminating kind, and it is not enough to cram ourselves with a great load of collections; unless we chew them over again, they will not give us strength and nourishment for our daily work."
+      verify(quote300.length >= 300)
+      quoteArea.text = quote300
+      wait(20)
+
+      // 300-character quote fits completely inside the multiline QuoteArea without clipping.
+      verify(quoteArea.contentHeight <= quoteArea.viewportHeight + 1)
+      compare(panel.authorReady, true)
+
+      // Tab moves focus out of QuoteArea without inserting a tab character.
+      quoteArea.takeFocus()
+      wait(10)
+      compare(quoteArea.editFocused, true)
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(quoteArea.editFocused, false)
+      compare(quoteArea.text.indexOf("\t"), -1)
+
+      // Ctrl+Return submits the form with the derived slug without opening Advanced.
+      quoteArea.takeFocus()
+      wait(10)
+      keyClick(Qt.Key_Return, Qt.ControlModifier)
+      wait(10)
+      compare(panel.saving, true)
+      compare(panel.addingAuthor, true)
+      panel.saving = false
+      panel.addingAuthor = false
+      panel.notice = ""
+
+      // Opening Advanced reveals the editable Author id field with the derived slug.
+      var advToggle = findOne(panel, function(item) { return item.text === "▸ Advanced" && item.visible })
+      verify(advToggle !== null)
+      panel.reveal(advToggle)
+      wait(20)
+      mouseClick(advToggle)
+      wait(20)
+      compare(panel.authorAdvancedOpen, true)
+      compare(slugField.visible, true)
+      compare(slugField.text, "john-locke")
+    }
+
+    function test_review_fixes_cancel_mid_save_scrolled_hint_error_reveal_and_id_collision() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["chrysippus"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "epictetus", name: "Epictetus", dates: "c. AD 50 – 135", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Enchiridion 1", text: "Some things are in our control." },
+          { slug: "zeno", name: "Zeno of Citium", dates: "c. 334 – 262 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Well-being is realized by small steps." },
+          { slug: "cleanthes", name: "Cleanthes", dates: "c. 330 – 230 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Hymn", text: "Lead me, Zeus." },
+          { slug: "chrysippus", name: "Chrysippus", dates: "c. 279 – 206 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Live in agreement." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      // #112: Cancelling an author form mid-save still displays a subsequent CLI failure in the visible status line.
+      panel.openAddAuthor()
+      wait(20)
+      panel.addingAuthor = true
+      panel.saving = true
+      panel.closeAuthorForm()
+      wait(20)
+      panel.settleRun({
+        exited: true,
+        exitCode: 1,
+        stdout: "",
+        stderr: "omastoic: portrait image could not be read",
+        streamsLeft: 0,
+      }, "Could not save that.")
+      wait(20)
+      compare(panel.error, "Portrait image could not be read")
+      compare(panel.errorScope, "")
+      compare(panel.statusText, "Portrait image could not be read")
+      var visibleErr = findOne(panel, function(item) {
+        return item.text === "Portrait image could not be read" && item.visible
+      })
+      verify(visibleErr !== null)
+
+      // #115 & #122: Bundled author id collision capitalizes the panel error and automatically expands Advanced.
+      panel.openAddAuthor()
+      wait(20)
+      compare(panel.authorAdvancedOpen, false)
+      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      verify(nameField !== null)
+      nameField.text = "Seneca"
+      compare(panel.newAuthorSlug, "seneca")
+      panel.addingAuthor = true
+      panel.saving = true
+      panel.settleRun({
+        exited: true,
+        exitCode: 1,
+        stdout: "",
+        stderr: 'omastoic: author "seneca" is already a bundled author',
+        streamsLeft: 0,
+      }, "Could not save that.")
+      wait(20)
+      compare(panel.error, 'Author "seneca" is already a bundled author')
+      compare(panel.authorAdvancedOpen, true)
+      var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" && item.visible })
+      verify(slugField !== null)
+
+      // #114 (author form): Triggering an author form error with the submit button at the bottom edge keeps BOTH error and submit button inside the viewport.
+      var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(submitBtn !== null)
+      panel.error = ""
+      panel.errorScope = ""
+      wait(20)
+      var submitBottom = submitBtn.mapToItem(scroller.contentItem, 0, 0).y + submitBtn.height
+      scroller.contentY = Math.max(0, submitBottom - scroller.height)
+      wait(20)
+      panel.submitAuthor()
+      wait(20)
+      var authorErr = findOne(panel, function(item) { return item.text === panel.error && item.visible })
+      verify(authorErr !== null)
+      var errInView = authorErr.mapToItem(scroller, 0, 0)
+      var submitInView = submitBtn.mapToItem(scroller, 0, 0)
+      verify(errInView.y >= -1 && errInView.y + authorErr.height <= scroller.height + 1)
+      verify(submitInView.y >= -1 && submitInView.y + submitBtn.height <= scroller.height + 1)
+
+      panel.closeAuthorForm()
+      wait(20)
+
+      // #114 (quote form): Triggering a quote form error with Add quote at the bottom edge keeps BOTH error and submit button inside the viewport.
+      panel.toggleQuoteForm()
+      wait(20)
+      var quoteSubmitBtn = findOne(panel, function(item) { return item.label === "Add quote" && item.visible })
+      verify(quoteSubmitBtn !== null)
+      panel.error = ""
+      panel.errorScope = ""
+      wait(20)
+      var quoteSubmitBottom = quoteSubmitBtn.mapToItem(scroller.contentItem, 0, 0).y + quoteSubmitBtn.height
+      scroller.contentY = Math.max(0, quoteSubmitBottom - scroller.height)
+      wait(20)
+      panel.addQuote()
+      wait(20)
+      var quoteErr = findOne(panel, function(item) { return item.text === panel.error && item.visible })
+      verify(quoteErr !== null)
+      var quoteErrInView = quoteErr.mapToItem(scroller, 0, 0)
+      var quoteSubmitInView = quoteSubmitBtn.mapToItem(scroller, 0, 0)
+      verify(quoteErrInView.y >= -1 && quoteErrInView.y + quoteErr.height <= scroller.height + 1)
+      verify(quoteSubmitInView.y >= -1 && quoteSubmitInView.y + quoteSubmitBtn.height <= scroller.height + 1)
+
+      // #113: Unticking the last selected author while a form is open scrolls the empty-pick hint into view.
+      panel.toggleAuthor("chrysippus")
+      wait(20)
+      compare(panel.authorListHint, "Pick at least one author.")
+      var hintItem = findOne(panel, function(item) {
+        return item.text === "Pick at least one author." && item.visible
+      })
+      verify(hintItem !== null)
+      var hintInView = hintItem.mapToItem(scroller, 0, 0)
+      verify(hintInView.y >= 0 && hintInView.y + hintItem.height <= scroller.height)
+
+      // #118: A non-ASCII author name opens Advanced immediately and clicking Add author never dead-ends if Advanced is re-collapsed.
+      panel.closeQuoteForm()
+      panel.openAddAuthor()
+      wait(20)
+      var nonAsciiName = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var nonAsciiImage = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var nonAsciiCitation = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var nonAsciiQuote = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
+      verify(nonAsciiName !== null && nonAsciiImage !== null && nonAsciiCitation !== null && nonAsciiQuote !== null)
+      nonAsciiName.text = "Ἐπίκτητος"
+      wait(20)
+      compare(panel.newAuthorSlug, "")
+      compare(panel.authorAdvancedOpen, true)
+      nonAsciiImage.text = "/tmp/epictetus.png"
+      nonAsciiCitation.text = "Enchiridion 1"
+      nonAsciiQuote.text = "Some things are in our control."
+      // Even if the user re-collapses Advanced, Add author remains clickable and re-opens Advanced with guidance.
+      panel.authorAdvancedOpen = false
+      wait(20)
+      var addBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(addBtn !== null)
+      compare(addBtn.available, true)
+      panel.reveal(addBtn)
+      wait(20)
+      mouseClick(addBtn)
+      wait(20)
+      compare(panel.authorAdvancedOpen, true)
+      compare(panel.errorScope, "author")
+      verify(panel.error.indexOf("Author id") !== -1)
+    }
+
+    function test_opening_add_forms_scrolls_first_field_into_view_including_after_cancel() {
+      panel.opened = true
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "seneca", "epictetus", "zeno", "cleanthes", "chrysippus", "locke", "hume", "kant", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "epictetus", name: "Epictetus", dates: "c. AD 50 – 135", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Enchiridion 1", text: "Some things are in our control." },
+          { slug: "zeno", name: "Zeno of Citium", dates: "c. 334 – 262 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Well-being is realized by small steps." },
+          { slug: "cleanthes", name: "Cleanthes", dates: "c. 330 – 230 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Hymn", text: "Lead me, Zeus." },
+          { slug: "chrysippus", name: "Chrysippus", dates: "c. 279 – 206 BC", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Frag", text: "Live in agreement." },
+          { slug: "locke", name: "John Locke", dates: "1632 – 1704", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Essay I", text: "Reading furnishes the mind." },
+          { slug: "hume", name: "David Hume", dates: "1711 – 1776", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Treatise", text: "Custom is the great guide." },
+          { slug: "kant", name: "Immanuel Kant", dates: "1724 – 1804", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Critique", text: "Dare to know." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "Lectures VI", text: "Train." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      verify(addAuthorBtn !== null && addQuoteBtn !== null)
+
+      // Scroll so Add an author / Add your own quote sit right at the bottom edge of the 1280x800 viewport.
+      panel.reveal(addAuthorBtn)
+      wait(20)
+
+      // 1. Single click on Add an author brings Name field into view; Cancel then click again repeats reliably.
+      for (var round = 0; round < 2; round++) {
+        mouseClick(addAuthorBtn)
+        wait(30)
+        compare(panel.authorOpen, true)
+        var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+        verify(nameField !== null)
+        var namePos = nameField.mapToItem(scroller, 0, 0)
+        verify(namePos.y >= -1 && namePos.y + nameField.height <= scroller.height + 1)
+
+        var cancelAuthor = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+        verify(cancelAuthor !== null)
+        mouseClick(cancelAuthor)
+        wait(30)
+        compare(panel.authorOpen, false)
+      }
+
+      // 2. Single click on Add your own quote (right after Cancel) brings Citation field into view; repeat after Cancel.
+      for (var qround = 0; qround < 2; qround++) {
+        mouseClick(addQuoteBtn)
+        wait(30)
+        compare(panel.quoteOpen, true)
+        var citeField = findOne(panel, function(item) { return item.placeholderText === "Meditations IV.17" && item.visible })
+        verify(citeField !== null)
+        var citePos = citeField.mapToItem(scroller, 0, 0)
+        verify(citePos.y >= -1 && citePos.y + citeField.height <= scroller.height + 1)
+
+        var cancelQuote = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+        verify(cancelQuote !== null)
+        mouseClick(cancelQuote)
+        wait(30)
+        compare(panel.quoteOpen, false)
+      }
+    }
+
+    function test_preview_button_right_aligned_with_and_without_portrait() {
+      panel.opened = true
+      panel.saving = false
+      panel.notice = ""
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+      var ok = panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\n⣿\n⣿\n⣿\n⣿\n⣿\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "noportrait", name: "No Portrait", dates: "", custom: true, portrait: "", citation: "Note 1", text: "Plain words." },
+        ],
+      }))
+      compare(ok, true)
+      wait(20)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      var previewBtn = findOne(panel, function(item) { return item.label === "Preview" && item.visible })
+      verify(scroller !== null && previewBtn !== null)
+
+      // With portrait: Preview button aligns with the right edge of the header content.
+      compare(panel.hasPortrait, true)
+      var rightWithPortrait = previewBtn.mapToItem(scroller, 0, 0).x + previewBtn.width
+      verify(Math.abs(rightWithPortrait - scroller.width) <= 1)
+
+      // Without portrait: select only the portraitless author; Preview stays right-aligned at the exact same right edge.
+      panel.selectedAuthors = ["noportrait"]
+      wait(20)
+      compare(panel.hasPortrait, false)
+      var rightWithoutPortrait = previewBtn.mapToItem(scroller, 0, 0).x + previewBtn.width
+      verify(Math.abs(rightWithoutPortrait - scroller.width) <= 1)
+      verify(Math.abs(rightWithoutPortrait - rightWithPortrait) <= 1)
     }
   }
 }
@@ -720,7 +1328,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("3 passed, 0 failed");
+    expect(combined, combined).toContain("9 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -873,6 +1481,7 @@ Item {
   property bool focusable: true
   property bool bordered: true
   property color foreground: "white"
+  property color accent: "#7aa2f7"
   signal clicked()
   signal rightClicked()
   implicitWidth: 80
@@ -1193,7 +1802,7 @@ Item {
       verify(scroller.contentY <= Math.max(0, scroller.contentHeight - scroller.height) + 1)
 
       // Close author form so next checks start clean.
-      var closeAuthorBtn = findOne(panel, function(item) { return item.label === "Close" && item.visible })
+      var closeAuthorBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
       verify(closeAuthorBtn !== null)
       mouseClick(closeAuthorBtn)
       wait(0)

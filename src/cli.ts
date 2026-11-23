@@ -21,7 +21,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { createBrandingSlot, ownsBranding as slotOwnsBranding, preserveDisplaced as slotPreserveDisplaced, rememberWrite as slotRememberWrite, restoreSlot as slotRestoreSlot, standAside as slotStandAside, writeSlot } from "./branding.ts";
 import { dirname, join } from "node:path";
-import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
+import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { headerPortraitLayout, padPortrait, portraitDownscale, transcodePortrait } from "./portrait.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import { explainLauncherFailure, nativeLaunchScript, screensaverBackend, type ScreensaverBackend } from "./screensaver.ts";
@@ -984,7 +984,7 @@ async function validateNewAuthorInput(
 ): Promise<{ ok: true; value: ValidatedNewAuthor } | { ok: false; error: string }> {
   const slug = flatField(input.slug);
   const name = flatField(input.name);
-  const dates = flatField(input.dates ?? "");
+  const dates = normalizeAuthorDates(flatField(input.dates ?? ""));
   const image = input.image.trim();
 
   if (!slug || !AUTHOR_SLUG.test(slug)) {
@@ -1346,7 +1346,7 @@ async function validateReplaceAuthorInput(
 
   let cleanDates: string | undefined;
   if (hasDates) {
-    cleanDates = flatField(input.dates!);
+    cleanDates = normalizeAuthorDates(flatField(input.dates!));
     if (cleanDates.length > 128) return { ok: false, error: "author dates must be at most 128 characters" };
     try {
       parseAuthors(`${slug}\tPlaceholder\t${cleanDates}\n`);
@@ -2937,36 +2937,70 @@ async function panelApply(raw: string): Promise<number> {
   });
 }
 
-async function status(): Promise<number> {
+function useTerminalStyle(): boolean {
+  if (!process.stdout.isTTY) return false;
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "") return false;
+  if (process.env.TERM === "dumb") return false;
+  return true;
+}
+
+function styleBold(text: string, styled: boolean): string {
+  return styled ? `\x1b[1m${text}\x1b[0m` : text;
+}
+
+function styleDim(text: string, styled: boolean): string {
+  return styled ? `\x1b[2m${text}\x1b[0m` : text;
+}
+
+function formatTwoColumn(rows: ReadonlyArray<readonly [string, string]>, colWidth: number): string[] {
+  return rows.map(([left, right]) => `  ${left.padEnd(colWidth)}${right}`);
+}
+
+async function status(opts: { verbose?: boolean } = {}): Promise<number> {
+  const verbose = Boolean(opts.verbose);
+  const styled = useTerminalStyle();
   const quotes = await quoteBook();
   const byAuthor = new Map<string, number>();
   for (const q of quotes) byAuthor.set(q.author, (byAuthor.get(q.author) ?? 0) + 1);
 
   const names = await authors();
-  console.log(`${quotes.length} quotes:`);
-  for (const [slug, count] of [...byAuthor].sort((a, b) => b[1] - a[1])) {
-    const art = (await loadPortrait(slug)) ? "portrait" : "no portrait";
-    console.log(`  ${(names.get(slug)?.name ?? slug).padEnd(18)} ${String(count).padStart(3)}  ${art}`);
-  }
+  const cfg = await config();
+  const catalog = [...choicesOf(await bundledBook()), ...choicesOf((await indexedCustom()).quotes)];
+  const summarySettings = describeSettings(cfg, names, catalog);
 
-  const size = await screensaverSize();
   const unit = Bun.spawnSync(["systemctl", "--user", "is-active", "omastoic.service"]);
   const on = enabled();
   const ours = on && ownsBranding();
+  const stateLabel = on ? (ours ? "on" : "stood aside") : "off";
   const backend = await installedBackend();
   const backendLine = backend === "native"
-    ? "native — one quote when the screensaver starts; it reads the canvas once"
+    ? "native, one quote when the screensaver starts"
     : backend === "terminal"
-      ? "terminal/ttfx — a new quote on the interval while it is up"
+      ? "terminal (ttfx), a new quote on the interval while it is up"
       : "not found";
 
-  console.log(`
-screensaver:      ${on ? (ours ? "the Stoics" : "the Stoics (stood aside)") : "Omarchy's"}
-backend:          ${backendLine}
-settings:         ${describeSettings(await config(), names, [...choicesOf(await bundledBook()), ...choicesOf((await indexedCustom()).quotes)])}
-grid:             ${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)
-canvas file:      ${BRANDING}
-rotation service: ${unit.stdout.toString().trim() || "not installed"}`);
+  const summaryLine = `Stoics: ${stateLabel} · ${summarySettings}`;
+  const labelWidth = verbose ? 14 : 10;
+  const field = (label: string, value: string) => `${styleDim(label.padEnd(labelWidth), styled)}${value}`;
+
+  const metaLines = [
+    field("backend:", backendLine),
+    field("service:", unit.stdout.toString().trim() || "not installed"),
+  ];
+  if (verbose) {
+    const size = await screensaverSize();
+    metaLines.push(field("grid:", `${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)`));
+    metaLines.push(field("canvas file:", BRANDING));
+  }
+
+  const quoteLabel = quotes.length === 1 ? "1 quote:" : `${quotes.length} quotes:`;
+  const bookLines = [styleDim(quoteLabel, styled)];
+  for (const [slug, count] of [...byAuthor].sort((a, b) => b[1] - a[1])) {
+    const art = (await loadPortrait(slug)) ? "portrait" : "no portrait";
+    bookLines.push(`  ${(names.get(slug)?.name ?? slug).padEnd(18)} ${String(count).padStart(3)}  ${styleDim(art, styled)}`);
+  }
+
+  console.log([styleBold(summaryLine, styled), "", ...metaLines, "", ...bookLines].join("\n"));
   return 0;
 }
 
@@ -2976,44 +3010,226 @@ async function requireOn(): Promise<boolean> {
   return false;
 }
 
-function usage(): string {
-  return `omastoic — the Stoics on your Omarchy screensaver
+function usage(styled = false): string {
+  const colWidth = 20;
+  const commands = formatTwoColumn([
+    ["omastoic toggle", "Hand the screensaver to the Stoics, or give it back"],
+    ["omastoic next", "Write another quote if the Stoics still own the slot"],
+    ["omastoic preview", "Write a new canvas and start the screensaver now"],
+    ["omastoic show", "Print a canvas as text (--cols, --rows); no writes"],
+    ["omastoic config", "Choose authors, quotes, and seconds, or edit custom ones"],
+    ["omastoic ui", "Open the settings panel in the Omarchy shell"],
+    ["omastoic status", "Show status, backend, and quote book (--verbose for details)"],
+    ["omastoic uninstall", "Remove the service, menu row, and plugin (--purge for data)"],
+  ], colWidth);
+  const helpRows = formatTwoColumn([
+    ["omastoic --help", "Print this help and do nothing"],
+    ["omastoic <cmd> -h", "Print help for one command (--help works too)"],
+  ], colWidth);
 
-  omastoic toggle      hand the screensaver to the Stoics, or give it back
-  omastoic next        write another quote, only if the Stoics still own the slot
-  omastoic preview     write a new canvas and start the screensaver now
-                       (native: passes that file with --input)
-  omastoic show --cols 92 --rows 25  read-only text export; no desktop/state writes
-  omastoic config      choose authors, their quotes, and seconds, or manage custom quotes and authors
-                       (--plain asks for numbers instead of keys)
-  omastoic ui          open the settings panel in the Omarchy shell
-  omastoic status      who has the screensaver, and what is in the quote book
-  omastoic uninstall   take the service, menu row and plugin back out
+  return [
+    styleBold("omastoic: the Stoics on your Omarchy screensaver", styled),
+    "",
+    ...commands,
+    "",
+    ...helpRows,
+    "",
+    `${styleDim("Install:", styled)}  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable`,
+    `${styleDim("Remove:", styled)}   omastoic uninstall`,
+    `          omarchy plugin remove ${PLUGIN_ID}`,
+    "",
+    "Appearance → Branding → Screensaver → Stoics is the same toggle.",
+    "Edit Text, Set From Image, and Restore Default stay Omarchy's. If they",
+    "write the slot, the Stoics stand aside.",
+    "",
+    "The native screensaver reads the canvas once per start, and the next",
+    "quote is written when that start ends. The older terminal screensaver",
+    "changes quotes on the interval while it is up. Omarchy's launcher",
+    "starts the native program, which is not on PATH.",
+    "",
+    `${styleDim("Authors:", styled)}  ${USER_AUTHORS_FILE}`,
+    `${styleDim("Quotes:", styled)}   ${join(USER_CONFIG, "quotes.tsv")}`,
+    `${styleDim("Settings:", styled)} ${join(USER_CONFIG, "config.json")}`,
+  ].join("\n");
+}
 
-  omastoic --help      print this and do nothing
-  omastoic <command> --help   same, for any command (-h works too)
+function commandUsage(rawCommand: string, styled = false): string | null {
+  const command = rawCommand === "configure" ? "config" : rawCommand;
+  const heading = (line: string) => styleBold(line, styled);
+  const section = (label: string) => styleDim(label, styled);
 
-Install:  omarchy plugin add https://github.com/rastermanden/omastoic.git --enable
-Remove:   omastoic uninstall
-          omarchy plugin remove ${PLUGIN_ID}
-
-Appearance → Branding → Screensaver → Stoics is the same toggle. Edit Text, Set From Image
-and Restore Default stay Omarchy's; if they write the slot, the Stoics
-stand aside.
-
-The native screensaver reads the canvas once per start. The next quote is
-written when that start ends. The terminal screensaver still changes quote
-on the interval while it is up. The native program is not on PATH; Omarchy's
-launcher starts it.
-
-Authors:  ${USER_AUTHORS_FILE}
-Quotes:   ${join(USER_CONFIG, "quotes.tsv")}
-Settings: ${join(USER_CONFIG, "config.json")}`;
+  switch (command) {
+    case "toggle":
+      return [
+        heading("omastoic toggle"),
+        "",
+        "Hand the screensaver slot to the Stoics, or restore what was there",
+        "before. Appearance → Branding → Screensaver → Stoics runs the same",
+        "command.",
+      ].join("\n");
+    case "on":
+      return [
+        heading("omastoic on"),
+        "",
+        "Hand the screensaver slot to the Stoics, back up existing branding,",
+        "write a canvas, and start the rotation service.",
+      ].join("\n");
+    case "off":
+      return [
+        heading("omastoic off"),
+        "",
+        "Stop the rotation service and restore the screensaver branding that",
+        "was in the slot before Omastoic took it.",
+      ].join("\n");
+    case "next":
+      return [
+        heading("omastoic next"),
+        "",
+        "Write a fresh quote canvas if the Stoics still own the screensaver",
+        "slot. On the native screensaver, the new quote appears on the next",
+        "start.",
+      ].join("\n");
+    case "preview":
+      return [
+        heading("omastoic preview [--quote <id>]"),
+        "",
+        "Write a fresh canvas and start the screensaver now. On the native",
+        "backend, passes that file with --input.",
+        "",
+        section("Options:"),
+        ...formatTwoColumn([
+          ["--quote <id>", "Render one specific quote id (such as q01 or c01)"],
+        ], 16),
+      ].join("\n");
+    case "show":
+      return [
+        heading("omastoic show [--cols <n>] [--rows <n>]"),
+        "",
+        "Print one rendered canvas to stdout without writing desktop or state",
+        "files.",
+        "",
+        section("Options:"),
+        ...formatTwoColumn([
+          ["--cols <n>", "Grid width in terminal cells (default: tty width or 92)"],
+          ["--rows <n>", "Grid height in terminal rows (default: tty height or 25)"],
+        ], 14),
+      ].join("\n");
+    case "config":
+      return [
+        heading("omastoic config [options]"),
+        "",
+        "Choose which authors and quotes appear, set the rotation interval,",
+        "or manage custom quotes and authors. Run with no flags for the",
+        "interactive picker.",
+        "",
+        section("Options:"),
+        ...formatTwoColumn([
+          ["--authors <list>", "Comma-separated author slugs, or all"],
+          ["--interval <n>", "Seconds between quotes (1 to 3600)"],
+          ["--quotes <spec>", "Filter quotes: slug=q01,q02, slug=all, slug=none, or all"],
+          ["--add [tsv]", "Add a custom quote (prompted, or slug\\tcitation\\ttext)"],
+          ["--add-author [slug]", "Add a custom author with a JPEG/PNG portrait and quote"],
+          ["--replace-author <slug>", "Update a custom author's portrait, details, or quotes"],
+          ["--remove-author <slug>", "Remove a custom author, their portrait, and their quotes"],
+          ["--name <text>", "Display name for --add-author or --replace-author"],
+          ["--dates <text>", "Optional dates for --add-author or --replace-author"],
+          ["--image <path>", "Portrait JPEG or PNG for --add-author or --replace-author"],
+          ["--citation <text>", "Quote citation for --add-author or --replace-author"],
+          ["--text <text>", "Quote text for --add-author or --replace-author"],
+          ["--list", "List bundled and custom quote ids"],
+          ["--plain", "Use numbered prompts instead of key navigation"],
+        ], 26),
+      ].join("\n");
+    case "ui":
+      return [
+        heading("omastoic ui"),
+        "",
+        "Toggle the Omastoic settings panel inside the running Omarchy shell.",
+      ].join("\n");
+    case "status":
+      return [
+        heading("omastoic status [--verbose]"),
+        "",
+        "Show whether the Stoics own the screensaver, active settings,",
+        "backend, and the quote book.",
+        "",
+        section("Options:"),
+        ...formatTwoColumn([
+          ["--verbose, -v", "Also show grid size, cell metrics, and canvas file path"],
+        ], 16),
+      ].join("\n");
+    case "uninstall":
+      return [
+        heading("omastoic uninstall [--purge]"),
+        "",
+        "Restore displaced branding and remove the rotation service, menu",
+        "row, shell completions, and launcher.",
+        "",
+        section("Options:"),
+        ...formatTwoColumn([
+          ["--purge", "Also delete saved settings, custom quotes, authors, and portraits"],
+        ], 12),
+      ].join("\n");
+    case "setup":
+      return [
+        heading("omastoic setup [--on-first] [--quiet]"),
+        "",
+        "Install or refresh the launcher, menu row, completions, and user",
+        "systemd units.",
+        "",
+        section("Options:"),
+        ...formatTwoColumn([
+          ["--on-first", "Hand the screensaver slot to the Stoics on first install"],
+          ["--quiet", "Suppress status output"],
+        ], 14),
+      ].join("\n");
+    case "install":
+      return [
+        heading("omastoic install"),
+        "",
+        "Run setup and hand the screensaver slot to the Stoics.",
+      ].join("\n");
+    case "daemon":
+      return [
+        heading("omastoic daemon"),
+        "",
+        "Run the background quote rotation loop used by omastoic.service.",
+      ].join("\n");
+    case "panel":
+      return [
+        heading("omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>'"),
+        "",
+        "Read or update settings and saved panel size as JSON for the Quickshell",
+        "settings panel. Reads JSON from the argument or stdin on apply or size.",
+      ].join("\n");
+    case "render-png":
+      return [
+        heading("omastoic render-png <canvas.txt> [out.png]"),
+        "",
+        "Render a text canvas file to a PNG image using the current theme",
+        "foreground colour.",
+      ].join("\n");
+    default:
+      return null;
+  }
 }
 
 function helpRequested(argv: string[]): boolean {
   if (argv.length === 0 || argv[0] === "help") return true;
   return argv.some((arg) => arg === "--help" || arg === "-h");
+}
+
+function helpOutput(argv: string[]): string {
+  const styled = useTerminalStyle();
+  if (argv.length === 0) return usage(styled);
+  if (argv[0] === "help") {
+    return (argv[1] ? commandUsage(argv[1], styled) : null) ?? usage(styled);
+  }
+  const first = argv[0];
+  if (first && !first.startsWith("-")) {
+    return commandUsage(first, styled) ?? usage(styled);
+  }
+  return usage(styled);
 }
 
 async function main(): Promise<number> {
@@ -3110,7 +3326,7 @@ async function main(): Promise<number> {
     case "uninstall":
       return uninstall({ purge: rest.includes("--purge") });
     case "status":
-      return status();
+      return status({ verbose: rest.includes("--verbose") || rest.includes("-v") });
     case "config":
     case "configure":
       return configure(rest);
@@ -3157,7 +3373,7 @@ async function main(): Promise<number> {
       return 0;
     }
     default:
-      console.log(usage());
+      console.log(usage(useTerminalStyle()));
       return 1;
   }
 }
@@ -3165,7 +3381,7 @@ async function main(): Promise<number> {
 try {
   const argv = Bun.argv.slice(2);
   if (helpRequested(argv)) {
-    console.log(usage());
+    console.log(helpOutput(argv));
     process.exit(0);
   }
   const command = argv[0];

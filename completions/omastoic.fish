@@ -27,3 +27,4 @@ complete -c omastoic -n "__fish_seen_subcommand_from config" -l plain -d "Ask fo
 complete -c omastoic -n "__fish_seen_subcommand_from uninstall" -l purge -d "Also drop quotes and settings"
 complete -c omastoic -n "__fish_seen_subcommand_from show" -l cols -x -d "Grid width in cells"
 complete -c omastoic -n "__fish_seen_subcommand_from show" -l rows -x -d "Grid height in cells"
+complete -c omastoic -n "__fish_seen_subcommand_from status" -s v -l verbose -d "Show grid size, cell metrics, and canvas path"
