@@ -901,6 +901,7 @@ test("config --remove-author deletes row, quotes, art, and selection while keepi
     const removed = await s.cli(["config", "--remove-author", "musonius"]);
     expectOk(removed, "remove musonius");
     expect(removed.stdout).toContain("removed author Musonius Rufus (musonius)");
+    expect(removed.stdout).not.toContain("was the only selected author");
 
     // Bundled files stay untouched.
     expect(readFileSync(join(root, "data/authors.tsv"), "utf8")).toBe(bundledAuthorsBefore);
@@ -930,14 +931,51 @@ test("config --remove-author deletes row, quotes, art, and selection while keepi
     expect(readFileSync(join(s.config, "omastoic/authors.tsv"), "utf8")).toBe(authorsAfter);
     expect(existsSync(join(s.config, "omastoic/art/hierocles.txt"))).toBe(true);
 
-    // Removing the only selected author falls back cleanly to remaining Stoics.
+    // Removing the only selected author switches explicitly to Marcus Aurelius and states the new rotation.
     expectOk(await s.cli(["config", "--authors", "hierocles"]), "select only hierocles");
-    expectOk(await s.cli(["config", "--remove-author", "hierocles"]), "remove only selected author");
+    const removedOnly = await s.cli(["config", "--remove-author", "hierocles"]);
+    expectOk(removedOnly, "remove only selected author");
+    expect(removedOnly.stdout).toContain("removed author Hierocles (hierocles)");
+    expect(removedOnly.stdout).toContain("Hierocles was the only selected author. Rotation is now Marcus Aurelius.");
+    expect(removedOnly.stdout).toContain("Marcus Aurelius · every 60s");
     expect(existsSync(join(s.config, "omastoic/art/hierocles.txt"))).toBe(false);
-    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toEqual(["marcus"]);
     const statusAfter = await s.cli(["status"]);
     expectOk(statusAfter, "status after removing sole selected author");
     expect(statusAfter.stdout).toContain("Marcus Aurelius");
+    expect(statusAfter.stdout).not.toContain("Seneca");
+  } finally { s.cleanup(); }
+}, 30000);
+
+test("removing the sole selected author respects explicit --authors and skips a muted first Stoic", async () => {
+  const s = sandbox();
+  const pngPath = join(s.home, "portrait.png");
+  writePortraitPng(pngPath);
+  try {
+    expectOk(await s.cli([
+      "config", "--add-author", "hierocles", "--name", "Hierocles",
+      "--image", pngPath, "--citation", "Elements", "--text", "Hierocles line.",
+    ]), "add hierocles");
+    expectOk(await s.cli(["config", "--authors", "hierocles", "--quotes", "marcus=none"]), "select hierocles and mute marcus");
+
+    // Since marcus has no kept quotes, removing the sole selected author switches to Seneca.
+    const removedMuted = await s.cli(["config", "--remove-author", "hierocles"]);
+    expectOk(removedMuted, "remove hierocles with marcus muted");
+    expect(removedMuted.stdout).toContain("Hierocles was the only selected author. Rotation is now Seneca.");
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toEqual(["seneca"]);
+
+    // Passing explicit --authors with --remove-author uses that rotation without a fallback notice.
+    expectOk(await s.cli([
+      "config", "--add-author", "musonius", "--name", "Musonius Rufus",
+      "--image", pngPath, "--citation", "Lectures VI", "--text", "Musonius line.",
+    ]), "add musonius");
+    expectOk(await s.cli(["config", "--authors", "musonius"]), "select only musonius");
+    const removedExplicit = await s.cli(["config", "--remove-author", "musonius", "--authors", "epictetus"]);
+    expectOk(removedExplicit, "remove musonius with explicit --authors");
+    expect(removedExplicit.stdout).toContain("removed author Musonius Rufus (musonius)");
+    expect(removedExplicit.stdout).not.toContain("was the only selected author");
+    expect(removedExplicit.stdout).toContain("Epictetus · every 60s");
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toEqual(["epictetus"]);
   } finally { s.cleanup(); }
 }, 30000);
 
@@ -1092,6 +1130,7 @@ test("panel state and panel apply replace and remove custom authors while protec
     expect(stateAfterRemove.authors.map((entry: { slug: string }) => entry.slug)).not.toContain("musonius");
     expect(stateAfterRemove.samples.map((entry: { slug: string }) => entry.slug)).not.toContain("musonius");
     expect(stateAfterRemove.settings.authors).toEqual(["marcus"]);
+    expect(stateAfterRemove.notice).toBeUndefined();
     expect(existsSync(join(s.config, "omastoic/art/musonius.txt"))).toBe(false);
     expect(readFileSync(join(s.config, "omastoic/quotes.tsv"), "utf8")).not.toContain("Updated panel quote.");
 
@@ -1130,6 +1169,21 @@ test("panel state and panel apply replace and remove custom authors while protec
     expect(emptyPanelReplace.code).toBe(1);
     expect(emptyPanelReplace.stderr).not.toContain("--image");
     expect(emptyPanelReplace.stderr).not.toContain("--name");
+
+    // Removing the only selected custom author via panel apply switches explicitly to Marcus Aurelius and returns a clear notice.
+    expectOk(await s.cli(["panel", "apply", JSON.stringify({ authors: ["hierocles"] })]), "select only hierocles via panel");
+    const removedOnlyPanel = await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: "hierocles" })]);
+    expectOk(removedOnlyPanel, "panel apply removeAuthor on sole selected author");
+    const stateAfterOnly = JSON.parse(removedOnlyPanel.stdout);
+    expect(stateAfterOnly.settings.authors).toEqual(["marcus"]);
+    expect(stateAfterOnly.allAuthors).toBe(false);
+    expect(stateAfterOnly.notice).toBe("Removed Hierocles. Rotation is now Marcus Aurelius.");
+    expect(stateAfterOnly.authors.filter((entry: { selected: boolean }) => entry.selected).map((entry: { slug: string }) => entry.slug)).toEqual(["marcus"]);
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toEqual(["marcus"]);
+    const statusAfterPanel = await s.cli(["status"]);
+    expectOk(statusAfterPanel, "status after panel remove sole author");
+    expect(statusAfterPanel.stdout).toContain("Marcus Aurelius");
+    expect(statusAfterPanel.stdout).not.toContain("Seneca");
   } finally { s.cleanup(); }
 }, 30000);
 

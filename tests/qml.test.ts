@@ -586,6 +586,8 @@ Item {
       panel.opened = true
       panel.saving = false
       panel.notice = ""
+      panel.pendingApplyNotice = ""
+      panel.rotationNotice = ""
       panel.error = ""
       panel.errorScope = ""
       panel.closeAuthorForm()
@@ -1358,6 +1360,8 @@ Item {
       panel.replacingAuthor = false
       panel.addingQuote = false
       panel.notice = ""
+      panel.pendingApplyNotice = ""
+      panel.rotationNotice = ""
       panel.error = ""
       panel.errorScope = ""
       panel.authorListHint = ""
@@ -1623,6 +1627,161 @@ Item {
       asyncProc.running = true
       compare(asyncProc.running, false)
     }
+
+    function test_remove_last_selected_author_shows_notice_matches_rotation_and_keeps_untick_guard() {
+      panel.opened = true
+      panel.saving = false
+      panel.notice = ""
+      panel.pendingApplyNotice = ""
+      panel.rotationNotice = ""
+      panel.error = ""
+      panel.errorScope = ""
+      panel.closeAuthorForm()
+      panel.closeQuoteForm()
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+      scroller.contentY = 0
+
+      // Seed with ONLY the custom author hierocles selected.
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["hierocles"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elements", text: "Circles." },
+        ],
+      })), true)
+      wait(20)
+      compare(panel.selectedAuthors.join(","), "hierocles")
+      compare(panel.preview.slug, "hierocles")
+
+      // Click Remove -> Remove? on Hierocles.
+      var removes = removeButtons()
+      compare(removes.length, 1)
+      mouseClick(removes[0])
+      compare(panel.confirmRemoveAuthor, "hierocles")
+      mouseClick(removes[0])
+      compare(panel.confirmRemoveAuthor, "")
+      compare(panel.saving, true)
+
+      var applyProc = findProcessFor("apply")
+      verify(applyProc !== null)
+      var removePayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(removePayload.removeAuthor, "hierocles")
+      compare(removePayload.authors, undefined)
+
+      // Settle with explicit fallback rotation to Marcus Aurelius and clear notice.
+      var fallbackNotice = "Removed Hierocles. Rotation is now Marcus Aurelius."
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: { authors: ["marcus"], interval: 60 },
+        notice: fallbackNotice,
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+        ],
+      }), "", false)
+      wait(20)
+
+      compare(panel.saving, false)
+      compare(panel.selectedAuthors.join(","), "marcus")
+      compare(panel.committedAuthors.join(","), "marcus")
+      compare(panel.preview.slug, "marcus")
+      compare(panel.notice, fallbackNotice)
+      compare(panel.statusText, fallbackNotice)
+
+      var noticeItem = findOne(panel, function(item) {
+        return item.text === fallbackNotice && item.visible
+      })
+      verify(noticeItem !== null)
+      var noticeInView = noticeItem.mapToItem(scroller, 0, 0)
+      verify(noticeInView.y >= -1 && noticeInView.y + noticeItem.height <= scroller.height + 1)
+
+      // Only Marcus Aurelius's row has a visible checkmark; Seneca's row does not.
+      var marcusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Marcus Aurelius" })
+      var senecaRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Seneca" })
+      verify(marcusRow !== null && senecaRow !== null)
+      var marcusCheck = findOne(marcusRow, function(item) { return item.text === "✓" })
+      var senecaCheck = findOne(senecaRow, function(item) { return item.text === "✓" })
+      verify(marcusCheck !== null && senecaCheck !== null)
+      compare(marcusCheck.visible, true)
+      compare(senecaCheck.visible, false)
+
+      // Unticking the now-sole selected author still preserves the #102 guard and hint.
+      panel.toggleAuthor("marcus")
+      wait(20)
+      compare(panel.selectedAuthors.join(","), "marcus")
+      compare(panel.authorListHint, "Pick at least one author.")
+      compare(panel.notice, "")
+
+      // Uncommitted untick before removing the remaining custom author flushes the untick first, then removes.
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["seneca", "hierocles"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elements", text: "Circles." },
+        ],
+      })), true)
+      wait(20)
+      panel.toggleAuthor("seneca")
+      compare(panel.selectedAuthors.join(","), "hierocles")
+      removes = removeButtons()
+      compare(removes.length, 1)
+      mouseClick(removes[0])
+      mouseClick(removes[0])
+      var flushPayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(flushPayload.authors.join(","), "hierocles")
+      compare(flushPayload.removeAuthor, undefined)
+      compare(panel.applyQueued, true)
+
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: { authors: ["hierocles"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elements", text: "Circles." },
+        ],
+      }), "", false)
+      var secondPayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(secondPayload.removeAuthor, "hierocles")
+      compare(secondPayload.authors, undefined)
+
+      // Removing a selected author when another selected author remains keeps that other author and shows normal "Saved".
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: { authors: ["marcus"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+        ],
+      }), "", false)
+      wait(20)
+      compare(panel.selectedAuthors.join(","), "marcus")
+      compare(panel.notice, "Saved")
+      compare(panel.rotationNotice, "")
+    }
   }
 }
 `,
@@ -1638,7 +1797,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("10 passed, 0 failed");
+    expect(combined, combined).toContain("11 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

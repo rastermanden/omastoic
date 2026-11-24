@@ -43,6 +43,7 @@ import { renderCanvasPng, themeForeground } from "./png.ts";
 import { parsePanelSizeCommand, readPanelSize, writePanelSize } from "./panel-size.ts";
 import {
   applyQuoteFlags,
+  authorsAfterRemoval,
   compactSettings,
   DEFAULT_INTERVAL,
   describeSettings,
@@ -1579,7 +1580,11 @@ async function commitRemoveAuthor(
   currentSettings: Settings,
   bundled: BundledQuote[],
   quiet = false,
-): Promise<{ ok: true; author: Author; nextSettings: Settings; settingsSaved: boolean; rollback: () => void } | { ok: false; error: string }> {
+  explicitAuthors?: string[],
+): Promise<
+  | { ok: true; author: Author; nextSettings: Settings; settingsSaved: boolean; fallbackAuthor: Author | null; rollback: () => void }
+  | { ok: false; error: string }
+> {
   const checkedSlug = await checkEditableCustomSlug(rawSlug, "removed");
   if (!checkedSlug.ok) return checkedSlug;
   const slug = checkedSlug.slug;
@@ -1600,10 +1605,11 @@ async function commitRemoveAuthor(
   const nextAuthorsText = removeAuthorFromTsv(existingAuthorsText, slug).text;
   const nextCustomAuthors = nextAuthorsText ? parseAuthors(nextAuthorsText) : new Map<string, Author>();
   const bundledMap = await bundledAuthors();
-  const nextRoster = [...bundledMap.keys()];
-  for (const key of nextCustomAuthors.keys()) {
-    if (!nextRoster.includes(key)) nextRoster.push(key);
+  const nextRosterMap = new Map<string, Author>(bundledMap);
+  for (const [key, author] of nextCustomAuthors) {
+    if (!nextRosterMap.has(key)) nextRosterMap.set(key, author);
   }
+  const nextRoster = [...nextRosterMap.keys()];
 
   const quotesPath = join(USER_CONFIG, "quotes.tsv");
   let existingQuotesText = "";
@@ -1642,13 +1648,25 @@ async function commitRemoveAuthor(
     }
   }
 
-  let nextSettings: Settings = { ...currentSettings };
-  if (nextSettings.authors?.length) {
-    nextSettings.authors = nextSettings.authors.filter((item) => item !== slug);
-  }
-  nextSettings = remapCustomQuoteIds(nextSettings, beforeCustom, afterCustom, slug);
-
+  let nextSettings: Settings = remapCustomQuoteIds({ ...currentSettings }, beforeCustom, afterCustom, slug);
   const nextCatalog = [...choicesOf(bundled), ...choicesOf(afterCustom)];
+  let fallbackAuthor: Author | null = null;
+  if (explicitAuthors !== undefined) {
+    nextSettings.authors = explicitAuthors;
+  } else {
+    const resolved = authorsAfterRemoval(
+      nextSettings.authors,
+      slug,
+      nextRoster,
+      nextCatalog,
+      nextSettings.quotes,
+    );
+    nextSettings.authors = resolved.authors;
+    if (resolved.fallback) {
+      fallbackAuthor = nextRosterMap.get(resolved.fallback) ?? { slug: resolved.fallback, name: resolved.fallback, dates: "" };
+    }
+  }
+
   let hadSettingsFile = false;
   let existingSettingsText = "";
   try {
@@ -1661,7 +1679,9 @@ async function commitRemoveAuthor(
 
   const compactedNext = compactSettings(nextSettings, nextRoster, nextCatalog, true);
   const nextSettingsJson = `${JSON.stringify(compactedNext, null, 2)}\n`;
-  const settingsNeedsSave = hadSettingsFile && existingSettingsText !== nextSettingsJson;
+  const settingsNeedsSave =
+    (hadSettingsFile && existingSettingsText !== nextSettingsJson) ||
+    (!hadSettingsFile && Object.keys(compactedNext).length > 0);
 
   let wroteAuthors = false;
   let wroteQuotes = false;
@@ -1706,8 +1726,11 @@ async function commitRemoveAuthor(
 
   if (!quiet) {
     console.log(`→ removed author ${removedAuthor.name} (${slug})`);
+    if (fallbackAuthor) {
+      console.log(`→ ${removedAuthor.name} was the only selected author. Rotation is now ${fallbackAuthor.name}.`);
+    }
   }
-  return { ok: true, author: removedAuthor, nextSettings, settingsSaved: settingsNeedsSave, rollback };
+  return { ok: true, author: removedAuthor, nextSettings, settingsSaved: settingsNeedsSave, fallbackAuthor, rollback };
 }
 
 async function promptCustomQuote(io: ConfigIo): Promise<PromptedQuote> {
@@ -2347,9 +2370,14 @@ async function configure(rest: string[]): Promise<number> {
           return 1;
         }
         const remainingSlugs = slugs.filter((item) => item !== pendingRemoveAuthorSlug);
-        if (authorsFlag != null && parseAuthorList(authorsFlag, remainingSlugs) == null) {
-          console.error(`omastoic: unknown author — try: ${remainingSlugs.join(", ")} (or all)`);
-          return 1;
+        let explicitAuthors: string[] | undefined;
+        if (authorsFlag != null) {
+          const parsed = parseAuthorList(authorsFlag, remainingSlugs);
+          if (parsed == null) {
+            console.error(`omastoic: unknown author — try: ${remainingSlugs.join(", ")} (or all)`);
+            return 1;
+          }
+          explicitAuthors = parsed;
         }
         if (quoteFlags.length) {
           const remainingCustom = indexCustom(customBook.quotes.filter((quote) => quote.author !== pendingRemoveAuthorSlug));
@@ -2361,7 +2389,7 @@ async function configure(rest: string[]): Promise<number> {
             return 1;
           }
         }
-        const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled);
+        const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled, false, explicitAuthors);
         if (!removed.ok) {
           console.error(`omastoic: ${removed.error}`);
           return 1;
@@ -2464,7 +2492,7 @@ async function configure(rest: string[]): Promise<number> {
 // through the same validators, lock and daemon restart as `omastoic config`.
 
 /** What the panel renders. Read-only: no lock, no writes, no state directory. */
-async function panelState(): Promise<string> {
+async function panelState(notice = ""): Promise<string> {
   const roster = await authors();
   const bundledRoster = await bundledAuthors();
   const settings = await config();
@@ -2498,6 +2526,7 @@ async function panelState(): Promise<string> {
       settings,
       summary: describeSettings(settings, roster, catalog),
       allAuthors: !settings.authors?.length,
+      ...(notice ? { notice } : {}),
       backend,
       intervalApplied: backend !== "native",
       authors: [...roster.values()].map((author) => ({
@@ -2864,12 +2893,13 @@ async function panelApply(raw: string): Promise<number> {
       catalog = [...choicesOf(bundled), ...choicesOf(custom.quotes)];
     }
 
+    let panelNotice = "";
     if (pendingRemoveAuthorSlug) {
       if (!slugs.includes(pendingRemoveAuthorSlug)) {
         console.error(`omastoic: author "${pendingRemoveAuthorSlug}" is not a custom author`);
         return 1;
       }
-      const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled, true);
+      const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled, true, requestedAuthors);
       if (!removed.ok) {
         console.error(`omastoic: ${removed.error}`);
         return 1;
@@ -2877,7 +2907,9 @@ async function panelApply(raw: string): Promise<number> {
       authorMutated = true;
       next = removed.nextSettings;
       removeRollback = removed.rollback;
-      if (requestedAuthors !== undefined) next.authors = requestedAuthors;
+      if (removed.fallbackAuthor) {
+        panelNotice = `Removed ${removed.author.name}. Rotation is now ${removed.fallbackAuthor.name}.`;
+      }
       roster = await authors();
       slugs = [...roster.keys()];
       custom = await indexedCustom();
@@ -2964,7 +2996,7 @@ async function panelApply(raw: string): Promise<number> {
     }
     if (pendingQuoteFile) atomicWrite(pendingQuoteFile.path, pendingQuoteFile.body);
     if (settingsChanged || added || authorMutated || removedId) await restartDaemon();
-    console.log(await panelState());
+    console.log(await panelState(panelNotice));
     return 0;
   });
 }

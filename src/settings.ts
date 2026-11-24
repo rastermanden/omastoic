@@ -167,6 +167,39 @@ export function applyQuoteFlags(
   return { ok: true, quotes: quoteAllowList(quotes ?? {}, roster, catalog, dropUnknownCustom) ?? undefined };
 }
 
+export function fallbackAuthorAfterRemoval(
+  remainingRoster: string[],
+  catalog: QuoteChoice[],
+  quotes?: Record<string, string[]>,
+): string | null {
+  for (const slug of remainingRoster) {
+    const hasKeptQuote = catalog.some(
+      (row) => row.author === slug && quoteKept(row.id, quotes?.[slug]),
+    );
+    if (hasKeptQuote) return slug;
+  }
+  return remainingRoster[0] ?? null;
+}
+
+/**
+ * Resolve `settings.authors` after removing a custom author. Keeps other
+ * selected authors intact; if the removed author was the only one selected,
+ * switches to the first remaining author with a quote in rotation.
+ */
+export function authorsAfterRemoval(
+  currentAuthors: string[] | undefined,
+  removedSlug: string,
+  remainingRoster: string[],
+  catalog: QuoteChoice[],
+  quotes?: Record<string, string[]>,
+): { authors: string[] | undefined; fallback: string | null } {
+  if (!currentAuthors?.length) return { authors: currentAuthors, fallback: null };
+  const remaining = currentAuthors.filter((item) => item !== removedSlug);
+  if (remaining.length > 0) return { authors: remaining, fallback: null };
+  const fallback = fallbackAuthorAfterRemoval(remainingRoster, catalog, quotes);
+  return { authors: fallback ? [fallback] : undefined, fallback };
+}
+
 /** Drop authors when the list is empty or the full roster — that is the default. */
 export function compactSettings(
   settings: Settings,
