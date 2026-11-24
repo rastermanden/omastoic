@@ -1575,12 +1575,17 @@ async function commitReplaceAuthor(
  * Remove a custom author row, their quotes, their art file, and their slug
  * from saved settings under the state lock, rolling back on failure.
  */
+type RemoveAuthorOverrides = {
+  authors?: string[];
+  quotes?: Record<string, string[]>;
+};
+
 async function commitRemoveAuthor(
   rawSlug: string,
   currentSettings: Settings,
   bundled: BundledQuote[],
   quiet = false,
-  explicitAuthors?: string[],
+  overrides?: RemoveAuthorOverrides,
 ): Promise<
   | { ok: true; author: Author; nextSettings: Settings; settingsSaved: boolean; fallbackAuthor: Author | null; rollback: () => void }
   | { ok: false; error: string }
@@ -1650,9 +1655,12 @@ async function commitRemoveAuthor(
 
   let nextSettings: Settings = remapCustomQuoteIds({ ...currentSettings }, beforeCustom, afterCustom, slug);
   const nextCatalog = [...choicesOf(bundled), ...choicesOf(afterCustom)];
+  if (overrides && Object.hasOwn(overrides, "quotes")) {
+    nextSettings.quotes = overrides.quotes;
+  }
   let fallbackAuthor: Author | null = null;
-  if (explicitAuthors !== undefined) {
-    nextSettings.authors = explicitAuthors;
+  if (overrides?.authors !== undefined) {
+    nextSettings.authors = overrides.authors;
   } else {
     const resolved = authorsAfterRemoval(
       nextSettings.authors,
@@ -2370,14 +2378,14 @@ async function configure(rest: string[]): Promise<number> {
           return 1;
         }
         const remainingSlugs = slugs.filter((item) => item !== pendingRemoveAuthorSlug);
-        let explicitAuthors: string[] | undefined;
+        const removeOverrides: RemoveAuthorOverrides = {};
         if (authorsFlag != null) {
           const parsed = parseAuthorList(authorsFlag, remainingSlugs);
           if (parsed == null) {
             console.error(`omastoic: unknown author — try: ${remainingSlugs.join(", ")} (or all)`);
             return 1;
           }
-          explicitAuthors = parsed;
+          removeOverrides.authors = parsed;
         }
         if (quoteFlags.length) {
           const remainingCustom = indexCustom(customBook.quotes.filter((quote) => quote.author !== pendingRemoveAuthorSlug));
@@ -2388,8 +2396,9 @@ async function configure(rest: string[]): Promise<number> {
             console.error(`omastoic: ${checkedQuotes.error}`);
             return 1;
           }
+          removeOverrides.quotes = checkedQuotes.quotes;
         }
-        const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled, false, explicitAuthors);
+        const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled, false, removeOverrides);
         if (!removed.ok) {
           console.error(`omastoic: ${removed.error}`);
           return 1;
@@ -2403,7 +2412,7 @@ async function configure(rest: string[]): Promise<number> {
         catalog = [...choicesOf(bundled), ...choicesOf(customBook.quotes)];
       }
 
-      if (authorsFlag != null) {
+      if (!pendingRemoveAuthorSlug && authorsFlag != null) {
         const parsed = parseAuthorList(authorsFlag, slugs);
         if (parsed == null) {
           replaceRollback?.();
@@ -2413,7 +2422,7 @@ async function configure(rest: string[]): Promise<number> {
         }
         next.authors = parsed;
       }
-      if (quoteFlags.length) {
+      if (!pendingRemoveAuthorSlug && quoteFlags.length) {
         const applied = applyQuoteFlags(next.quotes, quoteFlags, slugs, catalog, customBook.readable);
         if (!applied.ok) {
           replaceRollback?.();
@@ -2456,7 +2465,7 @@ async function configure(rest: string[]): Promise<number> {
         }
       }
     }
-    if (settingsTouched || selectionTouched) {
+    if ((settingsTouched || selectionTouched) && !pendingRemoveAuthorSlug) {
       try {
         await saveSettings(next, slugs, catalog, customBook.readable);
       } catch (error) {
@@ -2899,7 +2908,13 @@ async function panelApply(raw: string): Promise<number> {
         console.error(`omastoic: author "${pendingRemoveAuthorSlug}" is not a custom author`);
         return 1;
       }
-      const removed = await commitRemoveAuthor(pendingRemoveAuthorSlug, next, bundled, true, requestedAuthors);
+      const removed = await commitRemoveAuthor(
+        pendingRemoveAuthorSlug,
+        next,
+        bundled,
+        true,
+        requestedAuthors !== undefined ? { authors: requestedAuthors } : undefined,
+      );
       if (!removed.ok) {
         console.error(`omastoic: ${removed.error}`);
         return 1;

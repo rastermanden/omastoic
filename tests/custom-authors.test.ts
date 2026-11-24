@@ -976,6 +976,55 @@ test("removing the sole selected author respects explicit --authors and skips a 
     expect(removedExplicit.stdout).not.toContain("was the only selected author");
     expect(removedExplicit.stdout).toContain("Epictetus · every 60s");
     expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toEqual(["epictetus"]);
+
+    // Case A: muting Marcus in the same command as removing the sole selected author switches to Seneca with no ignored-authors warning.
+    expectOk(await s.cli(["config", "--quotes", "all"]), "reset quotes");
+    expectOk(await s.cli([
+      "config", "--add-author", "hierocles", "--name", "Hierocles",
+      "--image", pngPath, "--citation", "Elements", "--text", "Hierocles line.",
+    ]), "re-add hierocles for same-command mute");
+    expectOk(await s.cli(["config", "--authors", "hierocles"]), "select only hierocles");
+    const removedMuteSameCmd = await s.cli(["config", "--remove-author", "hierocles", "--quotes", "marcus=none"]);
+    expectOk(removedMuteSameCmd, "remove hierocles while muting marcus");
+    expect(removedMuteSameCmd.stdout).toContain("removed author Hierocles (hierocles)");
+    expect(removedMuteSameCmd.stdout).toContain("Hierocles was the only selected author. Rotation is now Seneca.");
+    expect(removedMuteSameCmd.stdout).toContain("Seneca · every 60s");
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({
+      authors: ["seneca"],
+      quotes: { marcus: [] },
+    });
+
+    // Case B: unmuting Marcus via --quotes all in the same command as removing the sole selected author switches to Marcus Aurelius.
+    expectOk(await s.cli([
+      "config", "--add-author", "hierocles", "--name", "Hierocles",
+      "--image", pngPath, "--citation", "Elements", "--text", "Hierocles line.",
+    ]), "re-add hierocles for same-command unmute");
+    expectOk(await s.cli(["config", "--authors", "hierocles"]), "select only hierocles with marcus still muted");
+    const removedUnmuteSameCmd = await s.cli(["config", "--remove-author", "hierocles", "--quotes", "all"]);
+    expectOk(removedUnmuteSameCmd, "remove hierocles while restoring all quotes");
+    expect(removedUnmuteSameCmd.stdout).toContain("removed author Hierocles (hierocles)");
+    expect(removedUnmuteSameCmd.stdout).toContain("Hierocles was the only selected author. Rotation is now Marcus Aurelius.");
+    expect(removedUnmuteSameCmd.stdout).toContain("Marcus Aurelius · every 60s");
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({
+      authors: ["marcus"],
+    });
+
+    // Case C: post-remap --quotes with custom quote ids is not remapped a second time inside commitRemoveAuthor.
+    expectOk(await s.cli([
+      "config", "--add-author", "hierocles", "--name", "Hierocles",
+      "--image", pngPath, "--citation", "Elements", "--text", "Hierocles line.",
+    ]), "re-add hierocles for custom-id remap check");
+    expectOk(await s.cli(["config", "--add", "seneca\tDesk note\tSeneca custom line."]), "add seneca custom quote");
+    expectOk(await s.cli(["config", "--authors", "hierocles"]), "select only hierocles");
+    const removedRemappedQuote = await s.cli([
+      "config", "--remove-author", "hierocles", "--quotes", "marcus=none", "--quotes", "seneca=c01",
+    ]);
+    expectOk(removedRemappedQuote, "remove hierocles with post-remap custom quote id");
+    expect(removedRemappedQuote.stdout).toContain("Hierocles was the only selected author. Rotation is now Seneca.");
+    expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8"))).toEqual({
+      authors: ["seneca"],
+      quotes: { marcus: [], seneca: ["c01"] },
+    });
   } finally { s.cleanup(); }
 }, 30000);
 
