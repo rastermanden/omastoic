@@ -1,8 +1,10 @@
 import { test, expect } from "bun:test";
 import {
   applyQuoteFlags,
+  authorsAfterRemoval,
   compactSettings,
   describeSettings,
+  fallbackAuthorAfterRemoval,
   inRotation,
   parseAuthorList,
   parseInterval,
@@ -204,4 +206,26 @@ test("cleared custom lines stay out when rotation falls back", () => {
   });
   expect(implicit.ignoredAuthors).toBe(true);
   expect(implicit.quotes.map((quote) => quote.text)).toContain("added");
+});
+
+test("authorsAfterRemoval keeps remaining picks and falls back explicitly when the sole selected author is removed", () => {
+  expect(authorsAfterRemoval(undefined, "hierocles", roster, catalog)).toEqual({
+    authors: undefined,
+    fallback: null,
+  });
+  expect(authorsAfterRemoval(["marcus", "hierocles"], "hierocles", roster, catalog)).toEqual({
+    authors: ["marcus"],
+    fallback: null,
+  });
+  expect(authorsAfterRemoval(["hierocles"], "hierocles", roster, catalog)).toEqual({
+    authors: ["marcus"],
+    fallback: "marcus",
+  });
+  // When marcus has all quotes disabled, fall back to the first remaining author with a kept quote.
+  expect(authorsAfterRemoval(["hierocles"], "hierocles", roster, catalog, { marcus: [] })).toEqual({
+    authors: ["seneca"],
+    fallback: "seneca",
+  });
+  // If every remaining author has all quotes disabled, still fall back to the first roster author.
+  expect(fallbackAuthorAfterRemoval(roster, catalog, { marcus: [], seneca: [] })).toBe("marcus");
 });

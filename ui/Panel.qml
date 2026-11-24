@@ -51,6 +51,8 @@ Item {
   property string editingAuthorOrigName: ""
   property string editingAuthorOrigDates: ""
   property string notice: ""
+  property string pendingApplyNotice: ""
+  property string rotationNotice: ""
   property string error: ""
   property string errorScope: ""
   property string authorListHint: ""
@@ -133,6 +135,8 @@ Item {
     error = ""
     errorScope = ""
     authorListHint = ""
+    pendingApplyNotice = ""
+    rotationNotice = ""
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
@@ -154,6 +158,8 @@ Item {
   function close() {
     cancelImagePick()
     clearPickerNotice()
+    clearRotationNotice()
+    pendingApplyNotice = ""
     opened = false
     resizing = false
     hasFormReturnY = false
@@ -188,6 +194,11 @@ Item {
 
   function clearPickerNotice() {
     if (notice === pickerUnavailableNotice || notice === pickerUnsupportedNotice) notice = ""
+  }
+
+  function clearRotationNotice() {
+    if (rotationNotice !== "" && notice === rotationNotice) notice = ""
+    rotationNotice = ""
   }
 
   function cancelImagePick() {
@@ -322,6 +333,8 @@ Item {
     error = ""
     errorScope = ""
     authorListHint = ""
+    pendingApplyNotice = ""
+    rotationNotice = ""
     notice = "Loading…"
     resetRun(stateRun)
     stateProcess.running = true
@@ -356,6 +369,8 @@ Item {
     var adopted = !failed && adoptState(run.stdout)
     if (failed || !adopted) {
       if (saving) restoreCommitted()
+      pendingApplyNotice = ""
+      rotationNotice = ""
       notice = ""
       error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       if ((addingAuthor || replacingAuthor) && authorOpen) {
@@ -385,8 +400,23 @@ Item {
     } else {
       error = ""
       errorScope = ""
-      notice = saving ? "Saved" : ""
-      if (saving) savedTimer.restart()
+      if (saving) {
+        if (pendingApplyNotice !== "") {
+          rotationNotice = pendingApplyNotice
+          notice = pendingApplyNotice
+          pendingApplyNotice = ""
+          savedTimer.stop()
+          root.revealAfterLayout(null, statusSlot, null)
+        } else {
+          rotationNotice = ""
+          notice = "Saved"
+          savedTimer.restart()
+        }
+      } else {
+        pendingApplyNotice = ""
+        rotationNotice = ""
+        notice = ""
+      }
     }
     saving = false
     addingAuthor = false
@@ -406,6 +436,7 @@ Item {
     adopting = true
     confirmRemoveAuthor = ""
     authorListHint = ""
+    pendingApplyNotice = typeof parsed.notice === "string" ? parsed.notice : ""
     var saved = parsed.settings && parsed.settings.authors instanceof Array ? parsed.settings.authors : []
     settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : ({})
     samples = parsed.samples instanceof Array ? parsed.samples : []
@@ -456,6 +487,7 @@ Item {
 
   function toggleAuthor(slug) {
     confirmRemoveAuthor = ""
+    clearRotationNotice()
     var next = []
     var found = false
     for (let i = 0; i < samples.length; i++) {
@@ -520,15 +552,21 @@ Item {
       if (pendingRemoveAuthor !== "" || pendingRemove !== "" || pendingQuote) applyQueued = true
     } else if (pendingRemoveAuthor !== "") {
       let removeSlug = pendingRemoveAuthor
-      payload.removeAuthor = removeSlug
       let nextWithoutRemoved = selectedAuthors.filter(function(slug) { return slug !== removeSlug })
       let committedWithoutRemoved = committedAuthors.filter(function(slug) { return slug !== removeSlug })
-      if (nextWithoutRemoved.length > 0 && nextWithoutRemoved.join(",") !== committedWithoutRemoved.join(",")) {
-        payload.authors = nextWithoutRemoved
+      if (nextWithoutRemoved.length === 0 && committedWithoutRemoved.length > 0) {
+        payload.authors = selectedAuthors
+        if (intervalApplied && interval !== committedInterval) payload.interval = interval
+        applyQueued = true
+      } else {
+        payload.removeAuthor = removeSlug
+        if (nextWithoutRemoved.length > 0 && nextWithoutRemoved.join(",") !== committedWithoutRemoved.join(",")) {
+          payload.authors = nextWithoutRemoved
+        }
+        if (intervalApplied && interval !== committedInterval) payload.interval = interval
+        pendingRemoveAuthor = ""
+        if (pendingRemove !== "" || pendingQuote) applyQueued = true
       }
-      if (intervalApplied && interval !== committedInterval) payload.interval = interval
-      pendingRemoveAuthor = ""
-      if (pendingRemove !== "" || pendingQuote) applyQueued = true
     } else {
       payload.authors = selectedAuthors
       if (intervalApplied) payload.interval = interval
@@ -553,6 +591,7 @@ Item {
 
   function toggleQuoteForm() {
     confirmRemoveAuthor = ""
+    clearRotationNotice()
     error = ""
     errorScope = ""
     authorListHint = ""
@@ -594,6 +633,7 @@ Item {
   function openAddAuthor() {
     cancelImagePick()
     clearPickerNotice()
+    clearRotationNotice()
     confirmRemoveAuthor = ""
     error = ""
     errorScope = ""
@@ -622,6 +662,7 @@ Item {
   function startEditAuthor(author) {
     cancelImagePick()
     clearPickerNotice()
+    clearRotationNotice()
     confirmRemoveAuthor = ""
     error = ""
     errorScope = ""
@@ -1374,6 +1415,7 @@ Item {
                     label: "Preview"
                     onActivated: {
                       root.confirmRemoveAuthor = ""
+                      root.clearRotationNotice()
                       root.error = ""
                       root.errorScope = ""
                       root.authorListHint = ""
