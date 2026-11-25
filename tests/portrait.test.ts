@@ -407,18 +407,58 @@ test("pgmToBraille keeps sparse drawings under 2% ink and rejects blank or near-
       makePgm(w, h, (x, y) => (x === 34 && y === 40 ? 235 : 248 + ((x * 7 + y * 13) % 8))),
     ),
   ).toBe("");
+  // Near-blank 6-level gradient with 6 isolated bright specks stays empty instead of amplifying shading.
+  const hotSpecks = new Set(["5,5", "20,10", "50,12", "12,60", "60,70", "35,75"]);
+  expect(
+    pgmToBraille(
+      makePgm(w, h, (x, y) => (hotSpecks.has(`${x},${y}`) ? 255 : (y < 40 ? 232 : 238))),
+    ),
+  ).toBe("");
+  // A genuine sparse bright cross on that same gentle gradient still converts cleanly.
+  expect(
+    pgmToBraille(
+      makePgm(w, h, (x, y) =>
+        (x === 34 && y >= 30 && y < 46) || (y === 38 && x >= 29 && x < 40)
+          ? 255
+          : (y < 40 ? 232 : 238),
+      ),
+    ),
+  ).toMatch(/[\u2801-\u28ff]/);
+
+  // Small PGMs and symmetric percentile tails reject 1-2 isolated dark or bright pixels alike.
+  expect(pgmToBraille(makePgm(7, 7, (x, y) => (x === 3 && y === 3 ? 0 : 255)))).toBe("");
+  expect(pgmToBraille(makePgm(7, 7, (x, y) => (x === 3 && y === 3 ? 255 : 0)))).toBe("");
+  expect(pgmToBraille(makePgm(5, 10, (x, y) => (x === 2 && y === 5 ? 0 : 255)))).toBe("");
+  expect(pgmToBraille(makePgm(5, 10, (x, y) => (x === 2 && y === 5 ? 255 : 0)))).toBe("");
+  expect(
+    pgmToBraille(makePgm(10, 10, (x, y) => ((x === 2 && y === 2) || (x === 7 && y === 7) ? 0 : 255))),
+  ).toBe("");
+  expect(
+    pgmToBraille(makePgm(10, 10, (x, y) => ((x === 2 && y === 2) || (x === 7 && y === 7) ? 255 : 0))),
+  ).toBe("");
 });
 
-test.skipIf(!hasImageMagick)("transcodePortrait keeps sparse PNG drawings under 2% ink and rejects blank or dead-pixel PNGs", async () => {
+test.skipIf(!hasImageMagick)("transcodePortrait keeps sparse PNG drawings under 2% ink and rejects blank or dead-pixel images", async () => {
+  const imBin = (Bun.which("magick") ?? Bun.which("convert"))!;
   const s = sandbox();
   const sparsePng = join(s.home, "sparse.png");
+  const sparseDarkPng = join(s.home, "sparse-dark.png");
   const thinStrokePng = join(s.home, "thin-stroke.png");
+  const smallSparsePng = join(s.home, "small-sparse-32.png");
   const blankPng = join(s.home, "blank.png");
   const nearBlankPng = join(s.home, "near-blank.png");
   const deadPixelPng = join(s.home, "dead-pixel.png");
   const brightDeadPixelPng = join(s.home, "bright-dead-pixel.png");
   const twoDotsPng = join(s.home, "two-dots.png");
   const twoAdjacentDotsPng = join(s.home, "two-adjacent-dots.png");
+  const smallDead8Png = join(s.home, "dead-8.png");
+  const smallDead16Png = join(s.home, "dead-16.png");
+  const smallDead32Png = join(s.home, "dead-32.png");
+  const smallBrightDead32Png = join(s.home, "bright-dead-32.png");
+  const smallDead48TwoAdjPng = join(s.home, "dead-48-2adj.png");
+  const smallDead52Png = join(s.home, "dead-52.png");
+  const smallDead60TwoAdjPng = join(s.home, "dead-60-2adj.png");
+  const smallDead32Jpg = join(s.home, "dead-32.jpg");
   writeFileSync(
     sparsePng,
     makePng(68, 80, (x, y) =>
@@ -426,8 +466,18 @@ test.skipIf(!hasImageMagick)("transcodePortrait keeps sparse PNG drawings under 
     ),
   );
   writeFileSync(
+    sparseDarkPng,
+    makePng(68, 80, (x, y) =>
+      (x === 34 && y >= 30 && y < 45) || (y === 37 && x >= 29 && x < 40) ? 255 : 0,
+    ),
+  );
+  writeFileSync(
     thinStrokePng,
     makePng(68, 80, (x, y) => (x === 34 && y >= 30 && y < 42 ? 0 : 255)),
+  );
+  writeFileSync(
+    smallSparsePng,
+    makePng(32, 32, (x, y) => (x === 16 && y >= 11 && y < 21 ? 0 : 255)),
   );
   writeFileSync(blankPng, makePng(68, 80, () => 255));
   writeFileSync(nearBlankPng, makePng(68, 80, (x, y) => 248 + ((x * 7 + y * 13) % 8)));
@@ -441,8 +491,23 @@ test.skipIf(!hasImageMagick)("transcodePortrait keeps sparse PNG drawings under 
     twoAdjacentDotsPng,
     makePng(68, 80, (x, y) => ((x === 34 || x === 35) && y === 40 ? 0 : 255)),
   );
+  writeFileSync(smallDead8Png, makePng(8, 8, (x, y) => (x === 4 && y === 4 ? 0 : 255)));
+  writeFileSync(smallDead16Png, makePng(16, 16, (x, y) => (x === 8 && y === 8 ? 0 : 255)));
+  writeFileSync(smallDead32Png, makePng(32, 32, (x, y) => (x === 16 && y === 16 ? 0 : 255)));
+  writeFileSync(smallBrightDead32Png, makePng(32, 32, (x, y) => (x === 16 && y === 16 ? 255 : 0)));
+  writeFileSync(
+    smallDead48TwoAdjPng,
+    makePng(48, 48, (x, y) => ((x === 24 || x === 25) && y === 24 ? 0 : 255)),
+  );
+  writeFileSync(smallDead52Png, makePng(52, 52, (x, y) => (x === 26 && y === 26 ? 0 : 255)));
+  writeFileSync(
+    smallDead60TwoAdjPng,
+    makePng(60, 60, (x, y) => ((x === 30 || x === 31) && y === 30 ? 0 : 255)),
+  );
+  const jpgGen = Bun.spawnSync([imBin, smallDead32Png, "-quality", "92", smallDead32Jpg]);
+  expect(jpgGen.exitCode).toBe(0);
   try {
-    for (const drawing of [sparsePng, thinStrokePng]) {
+    for (const drawing of [sparsePng, sparseDarkPng, thinStrokePng, smallSparsePng]) {
       const art = await transcodePortrait(drawing);
       const lines = art.replace(/\n+$/, "").split("\n");
       expect(art).toMatch(/[\u2801-\u28ff]/);
@@ -451,12 +516,24 @@ test.skipIf(!hasImageMagick)("transcodePortrait keeps sparse PNG drawings under 
       expect(Math.max(...lines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
     }
 
-    await expect(transcodePortrait(blankPng)).rejects.toThrow("image produced an empty portrait");
-    await expect(transcodePortrait(nearBlankPng)).rejects.toThrow("image produced an empty portrait");
-    await expect(transcodePortrait(deadPixelPng)).rejects.toThrow("image produced an empty portrait");
-    await expect(transcodePortrait(brightDeadPixelPng)).rejects.toThrow("image produced an empty portrait");
-    await expect(transcodePortrait(twoDotsPng)).rejects.toThrow("image produced an empty portrait");
-    await expect(transcodePortrait(twoAdjacentDotsPng)).rejects.toThrow("image produced an empty portrait");
+    for (const emptyInput of [
+      blankPng,
+      nearBlankPng,
+      deadPixelPng,
+      brightDeadPixelPng,
+      twoDotsPng,
+      twoAdjacentDotsPng,
+      smallDead8Png,
+      smallDead16Png,
+      smallDead32Png,
+      smallBrightDead32Png,
+      smallDead48TwoAdjPng,
+      smallDead52Png,
+      smallDead60TwoAdjPng,
+      smallDead32Jpg,
+    ]) {
+      await expect(transcodePortrait(emptyInput)).rejects.toThrow("image produced an empty portrait");
+    }
   } finally {
     s.cleanup();
   }

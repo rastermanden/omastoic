@@ -330,18 +330,29 @@ export function pgmToBraille(pgm: string): string {
   }
 
   const sorted = [...values].sort((a, b) => a - b);
-  let lo = sorted[Math.floor(sorted.length * 0.02)]!;
-  let hi = sorted[Math.floor(sorted.length * 0.98)]!;
-  let span = hi - lo;
-  let sparseFallback = false;
+  const tail = Math.min(
+    Math.max(2, Math.floor(sorted.length * 0.02)),
+    Math.floor((sorted.length - 1) / 2),
+  );
+  const lo = sorted[tail]!;
+  const hi = sorted[sorted.length - 1 - tail]!;
+  const span = hi - lo;
   if (span < 8) {
-    sparseFallback = true;
     if (sorted.length < SPARSE_MIN_PIXELS * 2) return "";
     const edge = SPARSE_MIN_PIXELS - 1;
-    if (sorted[sorted.length - 1 - edge]! - sorted[edge]! < 16) return "";
-    lo = sorted[0]!;
-    hi = sorted[sorted.length - 1]!;
-    span = hi - lo;
+    const darkGap = lo - sorted[edge]!;
+    const brightGap = sorted[sorted.length - 1 - edge]! - hi;
+    if (Math.max(darkGap, brightGap) < 16) return "";
+    const darkBg = brightGap > darkGap;
+    const threshold = darkBg
+      ? Math.max(hi + 12, Math.round((hi + sorted[sorted.length - 1]!) / 2))
+      : Math.min(lo - 12, Math.round((sorted[0]! + lo) / 2));
+    const bits: string[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      bits[i] = (darkBg ? values[i]! > threshold : values[i]! <= threshold) ? "1" : "0";
+    }
+    if (!hasSparseStroke(bits, width, height)) return "";
+    return pbmToBraille(`P1\n${width} ${height}\n${bits.join("")}`);
   }
 
   const stretched = values.map((v) => Math.max(0, Math.min(255, Math.round(((v - lo) / span) * 255))));
@@ -383,8 +394,6 @@ export function pgmToBraille(pgm: string): string {
     bits[i] = (darkBg ? v > threshold : v <= threshold) ? "1" : "0";
   }
 
-  if (sparseFallback && !hasSparseStroke(bits, width, height)) return "";
-
   return pbmToBraille(`P1\n${width} ${height}\n${bits.join("")}`);
 }
 
@@ -402,6 +411,55 @@ export function detectImageKind(bytes: Uint8Array): "png" | "jpeg" | null {
     bytes[7] === 0x0a
   ) return "png";
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpeg";
+  return null;
+}
+
+function readImageDimensions(
+  bytes: Uint8Array,
+  kind: "png" | "jpeg",
+): { width: number; height: number } | null {
+  if (kind === "png") {
+    if (
+      bytes.length < 24 ||
+      bytes[12] !== 0x49 ||
+      bytes[13] !== 0x48 ||
+      bytes[14] !== 0x44 ||
+      bytes[15] !== 0x52
+    ) {
+      return null;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16, false);
+    const height = view.getUint32(20, false);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  let pos = 2;
+  while (pos + 1 < bytes.length) {
+    if (bytes[pos] !== 0xff) return null;
+    while (pos < bytes.length && bytes[pos] === 0xff) pos += 1;
+    if (pos >= bytes.length) return null;
+    const marker = bytes[pos]!;
+    pos += 1;
+    if (marker === 0xd9 || marker === 0xda) return null;
+    if ((marker >= 0xd0 && marker <= 0xd8) || marker === 0x01) continue;
+    if (pos + 2 > bytes.length) return null;
+    const segLen = (bytes[pos]! << 8) | bytes[pos + 1]!;
+    if (segLen < 2 || pos + segLen > bytes.length) return null;
+    const isSof =
+      marker >= 0xc0 &&
+      marker <= 0xcf &&
+      marker !== 0xc4 &&
+      marker !== 0xc8 &&
+      marker !== 0xcc;
+    if (isSof) {
+      if (segLen < 7) return null;
+      const height = (bytes[pos + 3]! << 8) | bytes[pos + 4]!;
+      const width = (bytes[pos + 5]! << 8) | bytes[pos + 6]!;
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    pos += segLen;
+  }
   return null;
 }
 
@@ -611,6 +669,30 @@ export async function transcodePortrait(
 
     if (imBin) {
       const deadline = Date.now() + timeoutMs;
+      const dims = readImageDimensions(bytes, kind);
+      const smallSource =
+        dims !== null && (dims.width < PORTRAIT_COLS * 2 || dims.height < PORTRAIT_ROWS * 4);
+      if (smallSource) {
+        const result = await runWithTimeout(
+          [
+            imBin,
+            "-background", "white",
+            staged,
+            "-auto-orient",
+            "-alpha", "remove", "-alpha", "off",
+            "-colorspace", "Gray",
+            "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}>`,
+            "-compress", "none",
+            "pgm:-",
+          ],
+          true,
+          Math.max(1, deadline - Date.now()),
+        );
+        if (result.code !== 0 || hasDecodeWarning(result.stderr) || !result.stdout.trim()) {
+          throw new Error(cleanTranscodeError(result.stderr, trimmed));
+        }
+        return validatePortraitArt(fitPortraitToBudget(pgmToBraille(result.stdout)));
+      }
       const runIm = (w: number, h: number) =>
         runWithTimeout(
           [
