@@ -255,6 +255,52 @@ export function otsuThreshold(values: readonly number[]): number {
   return Math.floor((firstBest + lastBest) / 2);
 }
 
+const SPARSE_MIN_PIXELS = 6;
+const SPARSE_MIN_SPAN_RATIO = 0.05;
+
+function hasSparseStroke(bits: readonly string[], width: number, height: number): boolean {
+  const minSpan = Math.max(4, Math.ceil(Math.max(width, height) * SPARSE_MIN_SPAN_RATIO));
+  const seen = new Uint8Array(width * height);
+  for (let i = 0; i < bits.length; i++) {
+    if (bits[i] !== "1" || seen[i]) continue;
+    seen[i] = 1;
+    const stack = [i];
+    let size = 0;
+    let minX = width;
+    let maxX = -1;
+    let minY = height;
+    let maxY = -1;
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      size += 1;
+      const x = cur % width;
+      const y = Math.floor(cur / width);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+          const next = ny * width + nx;
+          if (bits[next] === "1" && !seen[next]) {
+            seen[next] = 1;
+            stack.push(next);
+          }
+        }
+      }
+    }
+    if (size >= SPARSE_MIN_PIXELS && Math.max(maxX - minX + 1, maxY - minY + 1) >= minSpan) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Convert an ASCII PGM (P2) grayscale bitmap into Unicode braille art using
  * percentile auto-contrast, Otsu thresholding, and border-aware background
@@ -287,11 +333,15 @@ export function pgmToBraille(pgm: string): string {
   let lo = sorted[Math.floor(sorted.length * 0.02)]!;
   let hi = sorted[Math.floor(sorted.length * 0.98)]!;
   let span = hi - lo;
+  let sparseFallback = false;
   if (span < 8) {
+    sparseFallback = true;
+    if (sorted.length < SPARSE_MIN_PIXELS * 2) return "";
+    const edge = SPARSE_MIN_PIXELS - 1;
+    if (sorted[sorted.length - 1 - edge]! - sorted[edge]! < 16) return "";
     lo = sorted[0]!;
     hi = sorted[sorted.length - 1]!;
     span = hi - lo;
-    if (span < 16) return "";
   }
 
   const stretched = values.map((v) => Math.max(0, Math.min(255, Math.round(((v - lo) / span) * 255))));
@@ -332,6 +382,8 @@ export function pgmToBraille(pgm: string): string {
     }
     bits[i] = (darkBg ? v > threshold : v <= threshold) ? "1" : "0";
   }
+
+  if (sparseFallback && !hasSparseStroke(bits, width, height)) return "";
 
   return pbmToBraille(`P1\n${width} ${height}\n${bits.join("")}`);
 }
@@ -397,6 +449,9 @@ export function hasDecodeWarning(stderr: string): boolean {
   return decodeWarningLines(stderr).length > 0;
 }
 
+const DIMENSION_LIMIT_ERROR_RE =
+  /width or height exceeds limit|image (?:width|height) exceeds user limit|maximum supported image dimension|maximum pixel limit/i;
+
 const NON_DECODE_ERROR_RE =
   /memory allocation failed|cache resources exhausted|not allowed by the security policy|resource limit|no decode delegate/i;
 
@@ -432,6 +487,12 @@ export function cleanTranscodeError(
   }
   if (/command not found|No such file or directory.*\b(?:magick|convert)\b/i.test(line)) {
     return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
+  }
+  if (
+    DIMENSION_LIMIT_ERROR_RE.test(line) ||
+    (!NON_DECODE_ERROR_RE.test(line) && DIMENSION_LIMIT_ERROR_RE.test(stderr))
+  ) {
+    return `could not convert portrait image: "${original}" dimensions exceed the image converter limit`;
   }
   if (!NON_DECODE_ERROR_RE.test(line)) {
     if (
