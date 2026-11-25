@@ -31,6 +31,7 @@ test("the panel changes settings only through the CLI bridge", () => {
   expect(source).toContain('"panel", "state"');
   expect(source).toContain('"panel", "apply"');
   expect(source).toContain('"panel", "pick-image", "--watch-stdin"');
+  expect(source).toContain('"panel", "preview-portrait"');
   expect(source).toContain("stdinEnabled: true");
 });
 
@@ -48,6 +49,11 @@ test("the settings panel applies changes itself and shows the quote", () => {
   expect(source).toContain("font.pixelSize: root.portraitFont");
   expect(source).toContain("lineHeight: root.portraitLine");
   expect(source).toContain("portraitFont = Number(parsed.portraitFont)");
+  expect(source).toContain("previewPortraitFont = Number(parsed.previewPortraitFont)");
+  expect(source).toContain("font.pixelSize: root.previewPortraitFont");
+  expect(source).toContain("lineHeight: root.previewPortraitLine");
+  expect(source).toContain("id: authorPortraitPreviewBox");
+  expect(source).toContain("id: authorPortraitPreviewText");
   expect(source).not.toContain("preview.portraitFont");
   expect(source).not.toContain("preview.portraitLine");
   expect(source).not.toContain("maximumLineCount: 4");
@@ -1782,6 +1788,233 @@ Item {
       compare(panel.notice, "Saved")
       compare(panel.rotationNotice, "")
     }
+
+    function test_author_form_live_portrait_preview_and_cancel_writes_nothing() {
+      var existingApply = findProcessFor("apply")
+      if (existingApply) existingApply.command = []
+
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        previewPortraitFont: 6,
+        previewPortraitLine: 8.4,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", fullPortrait: "⣿⣿\\n⣿⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. 30–100", custom: true, portrait: "⣿", fullPortrait: "⣶⣶\\n⣶⣶", citation: "VI", text: "Train." },
+        ],
+      })), true)
+      waitForRendering(panel)
+
+      var previewBox = findOne(panel, function(item) { return item.objectName === "authorPortraitPreviewBox" })
+      var previewCaption = findOne(panel, function(item) { return item.objectName === "authorPortraitPreviewCaption" })
+      var previewText = findOne(panel, function(item) { return item.objectName === "authorPortraitPreviewText" })
+      var previewErrorText = findOne(panel, function(item) { return item.objectName === "authorPortraitPreviewErrorText" })
+      verify(previewBox !== null && previewCaption !== null && previewText !== null && previewErrorText !== null)
+
+      // 1. Add form: hidden until an image path is entered, then shows live braille before saving.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      compare(previewBox.visible, false)
+
+      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      verify(imageField !== null)
+      imageField.text = "/tmp/john-locke.jpg"
+      wait(0)
+      compare(previewBox.visible, true)
+      compare(panel.portraitPreviewLoading, true)
+      compare(previewCaption.text, "Rendering preview…")
+      compare(findProcessFor("apply"), null)
+
+      // Trigger debounced preview run and complete it.
+      tryVerify(function() { return panel.activePortraitPreviewProcess !== null })
+      var previewProc = panel.activePortraitPreviewProcess
+      verify(previewProc !== null)
+      compare(previewProc.command[1], "panel")
+      compare(previewProc.command[2], "preview-portrait")
+      compare(JSON.parse(previewProc.command[previewProc.command.length - 1]).image, "/tmp/john-locke.jpg")
+      completeProcess(previewProc, 0, JSON.stringify({
+        portrait: "⣤⣶\\n⣿⡟",
+        cols: 34,
+        rows: 20,
+        fontPx: 6,
+        lineHeight: 8.4,
+      }), "", false)
+      wait(10)
+
+      compare(panel.portraitPreviewLoading, false)
+      compare(previewCaption.text, "Portrait preview")
+      compare(previewText.visible, true)
+      compare(previewText.text, "⣤⣶\\n⣿⡟")
+      compare(previewErrorText.visible, false)
+      compare(panel.error, "")
+      compare(panel.notice, "")
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // 2. Preview error renders inside the preview box without setting panel.error or writing anything.
+      imageField.text = "/tmp/does-not-exist.jpg"
+      tryVerify(function() { return panel.activePortraitPreviewProcess !== null })
+      previewProc = panel.activePortraitPreviewProcess
+      verify(previewProc !== null)
+      completeProcess(previewProc, 1, "", "omastoic: image file not found: /tmp/does-not-exist.jpg\\n", false)
+      wait(10)
+
+      compare(panel.portraitPreviewLoading, false)
+      compare(previewText.visible, false)
+      compare(previewErrorText.visible, true)
+      compare(previewErrorText.text, "Image file not found: /tmp/does-not-exist.jpg")
+      compare(panel.error, "")
+      compare(panel.saving, false)
+
+      // 3. Stale out-of-order preview completion is ignored when path changes mid-flight.
+      imageField.text = "/tmp/first.jpg"
+      panel.runPortraitPreview("/tmp/first.jpg")
+      var staleProc = panel.activePortraitPreviewProcess
+      verify(staleProc !== null)
+      imageField.text = "/tmp/second.jpg"
+      panel.runPortraitPreview("/tmp/second.jpg")
+      var freshProc = panel.activePortraitPreviewProcess
+      verify(freshProc !== null && freshProc !== staleProc)
+
+      completeProcess(staleProc, 0, JSON.stringify({ portrait: "STALE", fontPx: 6, lineHeight: 8.4 }), "", false)
+      wait(10)
+      compare(panel.portraitPreviewLoading, true)
+      verify(panel.portraitPreviewArt !== "STALE")
+
+      completeProcess(freshProc, 0, JSON.stringify({ portrait: "⣀⣤\\n⢿⡿", fontPx: 6, lineHeight: 8.4 }), "", false)
+      wait(10)
+      compare(panel.portraitPreviewLoading, false)
+      compare(previewText.text, "⣀⣤\\n⢿⡿")
+
+      // 4. Cancel clears preview state and issues zero panel apply writes.
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelBtn !== null)
+      panel.reveal(cancelBtn)
+      wait(20)
+      mouseClick(cancelBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+      compare(panel.displayedAuthorPortrait, "")
+      compare(panel.portraitPreviewError, "")
+      compare(findProcessFor("apply"), null)
+
+      // 5. Edit form: shows current portrait immediately, updates live on Choose image, reverts on clear, Cancel writes nothing.
+      var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editBtn !== null)
+      mouseClick(editBtn)
+      waitForRendering(panel)
+      compare(previewBox.visible, true)
+      compare(previewCaption.text, "Current portrait")
+      compare(previewText.visible, true)
+      compare(previewText.text, "⣶⣶\\n⣶⣶")
+
+      var chooseBtn = findOne(panel, function(item) { return item.label === "Choose image" && item.visible })
+      var replaceImageField = findOne(panel, function(item) { return item.placeholderText === "Leave empty to keep current portrait" && item.visible })
+      verify(chooseBtn !== null && replaceImageField !== null)
+      panel.reveal(chooseBtn)
+      waitForRendering(panel)
+      mouseClick(chooseBtn)
+      var pickProc = panel.activePickProcess
+      verify(pickProc !== null)
+      completeProcess(pickProc, 0, "/tmp/david-hume.jpg\\n", "", false)
+
+      // Immediate preview launch on picker acceptance without waiting 250ms debounce.
+      compare(replaceImageField.text, "/tmp/david-hume.jpg")
+      compare(panel.portraitPreviewLoading, true)
+      var editPreviewProc = panel.activePortraitPreviewProcess
+      verify(editPreviewProc !== null)
+      completeProcess(editPreviewProc, 0, JSON.stringify({ portrait: "⠛⠿\\n⠿⠛", fontPx: 6, lineHeight: 8.4 }), "", false)
+      wait(10)
+      compare(previewCaption.text, "New portrait preview")
+      compare(previewText.text, "⠛⠿\\n⠿⠛")
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // Re-picking the same path after a failed preview immediately re-runs preview-portrait, and a tall 20-line portrait reveals cleanly inside scroller.
+      mouseClick(chooseBtn)
+      pickProc = panel.activePickProcess
+      verify(pickProc !== null)
+      completeProcess(pickProc, 0, "/tmp/david-hume.jpg\\n", "", false)
+      compare(panel.portraitPreviewLoading, true)
+      var failedPickPreview = panel.activePortraitPreviewProcess
+      verify(failedPickPreview !== null)
+      completeProcess(failedPickPreview, 1, "", "omastoic: could not read image\\n", false)
+      wait(10)
+      compare(previewErrorText.visible, true)
+
+      mouseClick(chooseBtn)
+      pickProc = panel.activePickProcess
+      verify(pickProc !== null)
+      completeProcess(pickProc, 0, "/tmp/david-hume.jpg\\n", "", false)
+      compare(panel.portraitPreviewLoading, true)
+      var repickPreview = panel.activePortraitPreviewProcess
+      verify(repickPreview !== null)
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(scroller !== null)
+      scroller.contentY = Math.max(0, previewBox.mapToItem(scroller.contentItem, 0, 0).y + previewBox.height - scroller.height)
+      var twentyLines = Array.from({ length: 20 }, function() { return "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿" }).join("\\n")
+      completeProcess(repickPreview, 0, JSON.stringify({ portrait: twentyLines, fontPx: 6, lineHeight: 8.4 }), "", false)
+      wait(20)
+      compare(previewText.visible, true)
+      var boxInView = previewBox.mapToItem(scroller, 0, 0)
+      verify(boxInView.y >= -1 && boxInView.y + previewBox.height <= scroller.height + 1)
+
+      // Clearing the new image path returns cleanly to the author's current portrait.
+      replaceImageField.text = ""
+      wait(10)
+      compare(previewCaption.text, "Current portrait")
+      compare(previewText.text, "⣶⣶\\n⣶⣶")
+
+      // Picking again then pressing Cancel leaves everything unwritten.
+      replaceImageField.text = "/tmp/adam-smith.jpg"
+      panel.runPortraitPreview("/tmp/adam-smith.jpg")
+      var cancelPreviewProc = panel.activePortraitPreviewProcess
+      verify(cancelPreviewProc !== null)
+      completeProcess(cancelPreviewProc, 0, JSON.stringify({ portrait: "⣶⣿\\n⣿⣶", fontPx: 6, lineHeight: 8.4 }), "", false)
+      wait(10)
+      var cancelEditBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelEditBtn !== null)
+      panel.reveal(cancelEditBtn)
+      wait(20)
+      mouseClick(cancelEditBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+      compare(panel.displayedAuthorPortrait, "")
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // 6. Submitting while a preview is still loading hides the empty preview box cleanly instead of leaving a stray caption.
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      var addName = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var addImg = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var addCite = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var addQuote = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
+      verify(addName !== null && addImg !== null && addCite !== null && addQuote !== null)
+      addName.text = "Adam Smith"
+      addImg.text = "/tmp/adam-smith.jpg"
+      addCite.text = "Moral Sentiments"
+      addQuote.text = "Virtue is more to be feared than vice."
+      wait(0)
+      compare(previewBox.visible, true)
+      compare(previewCaption.text, "Rendering preview…")
+      panel.submitAuthor()
+      wait(10)
+      compare(panel.saving, true)
+      compare(previewBox.visible, false)
+      compare(previewCaption.text, "")
+      panel.saving = false
+      panel.addingAuthor = false
+      panel.notice = ""
+      panel.closeAuthorForm()
+    }
   }
 }
 `,
@@ -1797,7 +2030,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("11 passed, 0 failed");
+    expect(combined, combined).toContain("12 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

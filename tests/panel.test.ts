@@ -1,8 +1,9 @@
 import { test, expect } from "bun:test";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { sandbox } from "./sandbox.ts";
-import { headerPortraitLayout } from "../src/portrait.ts";
+import { deflateSync } from "node:zlib";
+import { root, sandbox } from "./sandbox.ts";
+import { headerPortraitLayout, PORTRAIT_COLS, PORTRAIT_ROWS, previewPortraitLayout } from "../src/portrait.ts";
 
 type Sandbox = ReturnType<typeof sandbox>;
 
@@ -339,5 +340,170 @@ test("panel size persists under XDG_STATE_HOME without touching config.json or t
     expect(existsSync(sizePath)).toBe(true);
     expect((await s.cli(["uninstall"])).code).toBe(0);
     expect(existsSync(sizePath)).toBe(false);
+  } finally { s.cleanup(); }
+});
+
+function makeTestGrayscalePng(width: number, height: number, pixel: (x: number, y: number) => number): Buffer {
+  const crcTable = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    crcTable[n] = c >>> 0;
+  }
+  const crc32 = (buf: Uint8Array): number => {
+    let c = 0xffffffff;
+    for (const byte of buf) c = crcTable[(c ^ byte) & 0xff]! ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Uint8Array): Buffer => {
+    const typeBuf = Buffer.from(type, "ascii");
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length, 0);
+    const body = Buffer.concat([typeBuf, data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body), 0);
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 0;
+  const raw = Buffer.alloc((width + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (width + 1)] = 0;
+    for (let x = 0; x < width; x++) raw[y * (width + 1) + 1 + x] = pixel(x, y);
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+test("panel state exposes fullPortrait and panel preview-portrait renders read-only previews and errors cleanly", async () => {
+  const s = sandbox();
+  const photoPng = join(s.home, "photo.png");
+  const drawingPng = join(s.home, "drawing.png");
+  const blankPng = join(s.home, "blank.png");
+  const corruptJpg = join(s.home, "corrupt.jpg");
+  const validText = join(s.home, "fake.png");
+
+  writeFileSync(
+    photoPng,
+    makeTestGrayscalePng(120, 140, (x, y) => {
+      const dx = x - 60;
+      const dy = y - 52;
+      if ((x - 49) ** 2 + (y - 46) ** 2 <= 14 || (x - 71) ** 2 + (y - 46) ** 2 <= 14) return 28;
+      if (Math.abs(dx) <= 9 && Math.abs(y - 68) <= 2) return 40;
+      if ((dx * dx) / (28 * 28) + (dy * dy) / (36 * 36) <= 1) {
+        return Math.max(95, Math.min(225, Math.round(215 - Math.hypot(dx, dy) * 1.9)));
+      }
+      if (y >= 92 && Math.abs(dx) <= 44) return 96;
+      return 24;
+    }),
+  );
+  writeFileSync(
+    drawingPng,
+    makeTestGrayscalePng(68, 80, (x, y) => {
+      const dx = x - 34;
+      const dy = y - 34;
+      return dx * dx + dy * dy < 18 * 18 ? 15 : 252;
+    }),
+  );
+  writeFileSync(blankPng, makeTestGrayscalePng(32, 32, () => 255));
+  writeFileSync(corruptJpg, Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02]));
+  writeFileSync(validText, "not an image\n");
+
+  try {
+    // 1. panel state includes fullPortrait (\u2800-padded, no ASCII spaces) and preview font/line metrics.
+    const state = stateOf(await s.cli(["panel", "state"]));
+    const previewLayout = previewPortraitLayout();
+    expect(state.previewPortraitFont).toBe(previewLayout.fontPx);
+    expect(state.previewPortraitLine).toBe(previewLayout.cellHeight);
+    for (const sample of state.samples) {
+      expect(typeof sample.fullPortrait).toBe("string");
+      expect(sample.fullPortrait).toMatch(/[\u2801-\u28ff]/);
+      expect(sample.fullPortrait).not.toContain(" ");
+      const lines = sample.fullPortrait.split("\n");
+      expect(lines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+      expect(Math.max(...lines.map((l: string) => [...l].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    }
+
+    // 2. panel preview-portrait via argument renders photo and drawing cleanly without writing config/state/systemctl.
+    for (const image of [photoPng, drawingPng]) {
+      const res = await s.cli(["panel", "preview-portrait", JSON.stringify({ image })]);
+      expect(res.code).toBe(0);
+      expect(res.stderr).toBe("");
+      const parsed = JSON.parse(res.stdout);
+      expect(parsed.cols).toBe(PORTRAIT_COLS);
+      expect(parsed.rows).toBe(PORTRAIT_ROWS);
+      expect(parsed.fontPx).toBe(previewLayout.fontPx);
+      expect(parsed.lineHeight).toBe(previewLayout.cellHeight);
+      expect(parsed.portrait).toMatch(/[\u2801-\u28ff]/);
+      expect(parsed.portrait).not.toContain(" ");
+      const lines = parsed.portrait.split("\n");
+      expect(lines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+      expect(Math.max(...lines.map((l: string) => [...l].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    }
+
+    // 3. panel preview-portrait reads JSON from stdin and stays read-only.
+    const child = Bun.spawn([process.execPath, join(root, "src/cli.ts"), "panel", "preview-portrait"], {
+      cwd: root,
+      env: s.env,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    child.stdin.write(JSON.stringify({ image: photoPng }));
+    child.stdin.end();
+    const [stdinOut, stdinErr, stdinCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    expect(stdinCode).toBe(0);
+    expect(stdinErr).toBe("");
+    expect(JSON.parse(stdinOut).portrait).toMatch(/[\u2801-\u28ff]/);
+
+    // 4. Error paths keep exact converter error texts and write nothing.
+    for (const [image, expected] of [
+      [join(s.home, "missing.jpg"), "image file not found"],
+      [validText, "JPEG or PNG"],
+      [corruptJpg, "not a readable JPEG or PNG image"],
+      [blankPng, "image produced an empty portrait"],
+    ] as const) {
+      const bad = await s.cli(["panel", "preview-portrait", JSON.stringify({ image })]);
+      expect(bad.code).toBe(1);
+      expect(bad.stdout).toBe("");
+      expect(bad.stderr.toLowerCase()).toContain(expected.toLowerCase());
+      expect(bad.stderr).not.toContain("omastoic-portrait-");
+    }
+
+    // Dimension-limit converter failure preserves its clean error message.
+    const fakeBin = join(s.home, "fake-limit-bin");
+    mkdirSync(fakeBin, { recursive: true });
+    for (const [name, target] of [["sh", Bun.which("sh")], ["bash", Bun.which("bash")]] as const) {
+      if (target) {
+        s.put(join(fakeBin, name), `#!/bin/sh\nexec "${target}" "$@"\n`);
+        chmodSync(join(fakeBin, name), 0o755);
+      }
+    }
+    s.put(
+      join(fakeBin, "magick"),
+      '#!/bin/sh\necho "magick: width or height exceeds limit \\`/tmp/omastoic-portrait-x/source.png\' @ error/png.c/ReadPNGImage/1." >&2\nexit 1\n',
+    );
+    chmodSync(join(fakeBin, "magick"), 0o755);
+    const limitErr = await s.cli(["panel", "preview-portrait", JSON.stringify({ image: photoPng })], { PATH: fakeBin });
+    expect(limitErr.code).toBe(1);
+    expect(limitErr.stderr).toContain("dimensions exceed the image converter limit");
+    expect(limitErr.stderr).not.toContain("omastoic-portrait-");
+
+    // Nothing was created or written anywhere in config or state.
+    expect(existsSync(settingsPath(s))).toBe(false);
+    expect(existsSync(quotesPath(s))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic"))).toBe(false);
+    expect(existsSync(s.state)).toBe(false);
   } finally { s.cleanup(); }
 });

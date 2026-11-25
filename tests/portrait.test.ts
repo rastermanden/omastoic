@@ -4,11 +4,17 @@ import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import {
   cleanTranscodeError,
+  isPhotographicPgm,
+  panelPreviewPortrait,
+  parsePgm,
   pbmToBraille,
   pgmToBraille,
+  pgmToHalftoneBraille,
   PORTRAIT_COLS,
   PORTRAIT_ROWS,
   portraitDownscale,
+  PREVIEW_FONT_PX,
+  previewPortraitLayout,
   transcodePortrait,
 } from "../src/portrait.ts";
 import { root, sandbox } from "./sandbox.ts";
@@ -250,6 +256,9 @@ test("transcodePortrait JSDoc documents the ImageMagick PGM pipeline and omarchy
   expect(doc).toContain("ImageMagick");
   expect(doc).toContain("PGM");
   expect(doc).toContain("pgmToBraille");
+  expect(doc).toContain("pgmToHalftoneBraille");
+  expect(doc).toContain("isPhotographicPgm");
+  expect(doc).toContain("Atkinson halftone");
   expect(doc).toContain("omarchy-transcode-ascii");
   expect(doc).not.toContain("scripts/transcode.ts");
 });
@@ -808,3 +817,237 @@ test.skipIf(!hasImageMagick)("transcodePortrait handles a ~6 MB 5990x7300 JPEG i
     s.cleanup();
   }
 }, 30000);
+
+test("isPhotographicPgm separates continuous-tone portraits from line drawings, sparse strokes, and extreme strips", () => {
+  // 1. Dark-background chiaroscuro portrait -> photographic.
+  const darkPhoto = makePgm(120, 140, (x, y) => {
+    const dx = x - 60;
+    const dy = y - 52;
+    if ((x - 49) ** 2 + (y - 46) ** 2 <= 12 || (x - 71) ** 2 + (y - 46) ** 2 <= 12) return 26;
+    if ((dx * dx) / (28 * 28) + (dy * dy) / (36 * 36) <= 1) {
+      return Math.max(90, Math.min(225, Math.round(215 - Math.hypot(dx, dy) * 2)));
+    }
+    if (y >= 92 && Math.abs(dx) <= 44) return 90;
+    return 24 + ((x + y) % 6);
+  });
+  expect(isPhotographicPgm(darkPhoto)).toBe(true);
+
+  // 2. Light-background shaded portrait -> photographic.
+  const lightPhoto = makePgm(120, 140, (x, y) => {
+    const dx = x - 60;
+    const dy = y - 52;
+    if ((x - 49) ** 2 + (y - 46) ** 2 <= 12 || (x - 71) ** 2 + (y - 46) ** 2 <= 12) return 25;
+    if ((dx * dx) / (28 * 28) + (dy * dy) / (36 * 36) <= 1) {
+      return Math.max(70, Math.min(205, Math.round(190 - Math.hypot(dx, dy) * 2.2)));
+    }
+    if (y >= 92 && Math.abs(dx) <= 44) return 60;
+    return 240 - Math.round((y / 140) * 14);
+  });
+  expect(isPhotographicPgm(lightPhoto)).toBe(true);
+
+  // 3. Flat line drawing, sparse cross, dead pixel, extreme-aspect strip, small canvas, blank -> non-photographic.
+  const drawing = makePgm(68, 80, (x, y) => ((x - 34) ** 2 + (y - 34) ** 2 < 20 ** 2 ? 20 : 250));
+  const sparse = makePgm(68, 80, (x, y) => ((x === 34 && y >= 30 && y < 46) || (y === 38 && x >= 29 && x < 40) ? 15 : 255));
+  const deadPixel = makePgm(68, 80, (x, y) => (x === 34 && y === 40 ? 0 : 255));
+  const extremeWide = makePgm(136, 14, (x, y) => ((x - 20) ** 2 + (y - 7) ** 2 < 25 ? 20 : Math.round(150 + (x / 136) * 95)));
+  const tiny = makePgm(32, 32, (x, y) => Math.round((x / 32) * 200));
+  const blank = makePgm(68, 80, () => 255);
+
+  expect(isPhotographicPgm(drawing)).toBe(false);
+  expect(isPhotographicPgm(sparse)).toBe(false);
+  expect(isPhotographicPgm(deadPixel)).toBe(false);
+  expect(isPhotographicPgm(extremeWide)).toBe(false);
+  expect(isPhotographicPgm(tiny)).toBe(false);
+  expect(isPhotographicPgm(blank)).toBe(false);
+
+  // 4. Cutout portrait on uniform white backdrop and full-figure composition still classify as photographic.
+  const cutoutPhoto = makePgm(136, 160, (x, y) => {
+    const dx = x - 68;
+    const dy = y - 55;
+    if ((dx * dx) / (22 * 22) + (dy * dy) / (28 * 28) <= 1) {
+      if ((x - 60) ** 2 + (y - 50) ** 2 <= 9 || (x - 76) ** 2 + (y - 50) ** 2 <= 9) return 30;
+      return Math.max(85, Math.min(215, Math.round(205 - Math.hypot(dx, dy) * 2.5)));
+    }
+    if (y >= 84 && y <= 135 && Math.abs(dx) <= 32) return 110;
+    return 255;
+  });
+  const fullFigurePgm = makePgm(136, 160, (x, y) => {
+    const dx = x - 88;
+    const dy = y - 28;
+    if ((dx * dx) / (18 * 18) + (dy * dy) / (22 * 22) <= 1) {
+      if ((x - 81) ** 2 + (y - 25) ** 2 <= 9 || (x - 95) ** 2 + (y - 25) ** 2 <= 9) return 20;
+      return Math.max(100, Math.min(220, Math.round(210 - Math.hypot(dx, dy) * 3)));
+    }
+    if (y >= 54 && y <= 148 && Math.abs(dx) <= 28) return 80;
+    return 20;
+  });
+  expect(isPhotographicPgm(cutoutPhoto)).toBe(true);
+  expect(isPhotographicPgm(fullFigurePgm)).toBe(true);
+
+  const parsed = parsePgm(darkPhoto);
+  expect(parsed.width).toBe(120);
+  expect(parsed.height).toBe(140);
+  expect(isPhotographicPgm(parsed)).toBe(true);
+  expect(() => isPhotographicPgm({ width: 48, height: 48, values: new Uint8Array(10) })).toThrow("incomplete PGM pixel data");
+  expect(() => isPhotographicPgm({ width: 0, height: 48, values: new Uint8Array(0) })).toThrow("invalid PGM header");
+});
+
+test("pgmToHalftoneBraille handles dark and light backgrounds, keeps facial cutouts, frames full figures, and rejects flat PGMs", () => {
+  // 1. Dark-background portrait with bright highlight touching one corner keeps top corners blank and keeps eye cutouts.
+  const darkPgm = makePgm(136, 160, (x, y) => {
+    if (x < 6 && y < 6) return 210; // bright corner artifact on a mostly dark border
+    const dx = x - 68;
+    const dy = y - 58;
+    const leftEye = (x - 54) ** 2 + (y - 52) ** 2 <= 22;
+    const rightEye = (x - 82) ** 2 + (y - 52) ** 2 <= 22;
+    const mouth = Math.abs(dx) <= 12 && Math.abs(y - 76) <= 3;
+    if (leftEye || rightEye || mouth) return 22;
+    if ((dx * dx) / (32 * 32) + (dy * dy) / (40 * 40) <= 1) {
+      return Math.max(95, Math.min(230, Math.round(220 - Math.hypot(dx, dy) * 1.8)));
+    }
+    if (y >= 104 && Math.abs(dx) <= 50) return 96;
+    return 24;
+  });
+  const darkArt = pgmToHalftoneBraille(darkPgm);
+  const darkLines = darkArt.split("\n");
+  expect(darkLines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+  expect(Math.max(...darkLines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+  expect(darkLines[0]!.startsWith("⣿")).toBe(false);
+  // Eye/mouth cutouts keep the upper face region from collapsing into a solid silhouette of ⣿ cells.
+  const upperFace = darkLines.slice(3, 10).join("");
+  const solidCells = [...upperFace].filter((ch) => ch === "⣿").length;
+  const activeCells = [...upperFace].filter((ch) => (ch.codePointAt(0) ?? 0) >= 0x2801).length;
+  expect(activeCells).toBeGreaterThan(10);
+  expect(solidCells).toBeLessThan(activeCells * 0.7);
+
+  // 2. Light-background photo keeps corners blank and renders subject strokes.
+  const lightPgm = makePgm(136, 160, (x, y) => {
+    const dx = x - 68;
+    const dy = y - 58;
+    if ((x - 54) ** 2 + (y - 52) ** 2 <= 18 || (x - 82) ** 2 + (y - 52) ** 2 <= 18) return 25;
+    if ((dx * dx) / (30 * 30) + (dy * dy) / (38 * 38) <= 1) {
+      return Math.max(70, Math.min(210, Math.round(190 - Math.hypot(dx, dy) * 2.0)));
+    }
+    if (y >= 104 && Math.abs(dx) <= 46) return 60;
+    return 242;
+  });
+  const lightArt = pgmToHalftoneBraille(lightPgm);
+  const lightLines = lightArt.split("\n");
+  expect(lightArt).toMatch(/[\u2801-\u28ff]/);
+  expect(lightLines[0]!.startsWith("⣿")).toBe(false);
+
+  // 3. Wide/full-figure composition crops to head-and-shoulders so the face stays wide enough to read.
+  const fullFigure = makePgm(136, 160, (x, y) => {
+    const dx = x - 88;
+    const dy = y - 28;
+    if ((dx * dx) / (18 * 18) + (dy * dy) / (22 * 22) <= 1) {
+      if ((x - 81) ** 2 + (y - 25) ** 2 <= 9 || (x - 95) ** 2 + (y - 25) ** 2 <= 9) return 20;
+      return Math.max(100, Math.min(220, Math.round(210 - Math.hypot(dx, dy) * 3)));
+    }
+    if (y >= 54 && y <= 148 && Math.abs(dx) <= 28) return 80;
+    return 20;
+  });
+  const framedArt = pgmToHalftoneBraille(fullFigure);
+  const framedLines = framedArt.split("\n");
+  const headRowSpan = [...framedLines[4]!].filter((ch) => (ch.codePointAt(0) ?? 0) >= 0x2801).length;
+  expect(headRowSpan).toBeGreaterThanOrEqual(8);
+
+  // 4. Mid-grey studio wall with bright face and dark jacket keeps upper head visible and unwashed.
+  const midGreyJacket = makePgm(136, 160, (x, y) => {
+    const dx = x - 68;
+    const dy = y - 50;
+    if ((x - 59) ** 2 + (y - 45) ** 2 <= 9 || (x - 77) ** 2 + (y - 45) ** 2 <= 9) return 110;
+    if ((dx * dx) / (18 * 18) + (dy * dy) / (24 * 24) <= 1) return Math.round(182 - Math.hypot(dx, dy) * 0.4);
+    if (y >= 95 && Math.abs(dx) <= 32) return 20;
+    return 120 + (y < 80 ? (x % 2) * 20 : 10);
+  });
+  const jacketArt = pgmToHalftoneBraille(midGreyJacket);
+  const jacketLines = jacketArt.split("\n");
+  expect(jacketLines.length).toBeGreaterThanOrEqual(10);
+  const upperHeadInk = jacketLines
+    .slice(0, 8)
+    .join("")
+    .match(/[\u2801-\u28ff]/gu)?.length ?? 0;
+  expect(upperHeadInk).toBeGreaterThan(25);
+
+  // 5. Bright collar/shirt in lower half on dark backdrop does not crop off a subtler upper head.
+  const darkCollar = makePgm(136, 160, (x, y) => {
+    const dx = x - 68;
+    const dy = y - 50;
+    if ((x - 59) ** 2 + (y - 45) ** 2 <= 9 || (x - 77) ** 2 + (y - 45) ** 2 <= 9) return 22;
+    if ((dx * dx) / (18 * 18) + (dy * dy) / (24 * 24) <= 1) return Math.round(92 - Math.hypot(dx, dy) * 0.8);
+    if (y >= 92 && Math.abs(dx) <= 36) return 245;
+    return 20 + ((x + y) % 4);
+  });
+  const collarArt = pgmToHalftoneBraille(darkCollar);
+  const collarLines = collarArt.split("\n");
+  expect(collarLines.length).toBeGreaterThanOrEqual(10);
+  const collarHeadInk = collarLines
+    .slice(2, 10)
+    .join("")
+    .match(/[\u2801-\u28ff]/gu)?.length ?? 0;
+  expect(collarHeadInk).toBeGreaterThan(20);
+
+  // 6. Flat uniform PGM returns empty instead of all dots on.
+  expect(pgmToHalftoneBraille(makePgm(136, 160, () => 255))).toBe("");
+  expect(pgmToHalftoneBraille(makePgm(136, 160, () => 0))).toBe("");
+});
+
+test.skipIf(!hasImageMagick)("transcodePortrait routes photo PNGs through halftone and formats panel previews cleanly", async () => {
+  const s = sandbox();
+  const darkPhotoPng = join(s.home, "dark-chiaroscuro.png");
+  const lineDrawingPng = join(s.home, "line-drawing.png");
+  writeFileSync(
+    darkPhotoPng,
+    makePng(160, 200, (x, y) => {
+      const dx = x - 80;
+      const dy = y - 72;
+      if ((x - 66) ** 2 + (y - 64) ** 2 <= 24 || (x - 94) ** 2 + (y - 64) ** 2 <= 24) return 24;
+      if (Math.abs(dx) <= 14 && Math.abs(y - 94) <= 3) return 32;
+      if ((dx * dx) / (38 * 38) + (dy * dy) / (46 * 46) <= 1) {
+        return Math.max(90, Math.min(225, Math.round(218 - Math.hypot(dx, dy) * 1.8)));
+      }
+      if (y >= 122 && Math.abs(dx) <= 58) return 92;
+      return 22;
+    }),
+  );
+  writeFileSync(
+    lineDrawingPng,
+    makePng(100, 120, (x, y) => {
+      const dist = Math.hypot(x - 50, y - 50);
+      return Math.abs(dist - 28) <= 2 ? 15 : 252;
+    }),
+  );
+
+  try {
+    const photoArt = await transcodePortrait(darkPhotoPng);
+    const photoLines = photoArt.replace(/\n+$/, "").split("\n");
+    expect(photoLines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+    expect(Math.max(...photoLines.map((l) => [...l].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    expect(photoLines[0]!.startsWith("⣿")).toBe(false);
+    // Halftoned photo keeps subtle tone cells rather than solid silhouette blocks.
+    const nonSolid = [...photoArt.replace(/\n/g, "")].filter((ch) => {
+      const cp = ch.codePointAt(0) ?? 0;
+      return cp >= 0x2801 && cp < 0x28ff;
+    }).length;
+    expect(nonSolid).toBeGreaterThan(20);
+
+    const drawingArt = await transcodePortrait(lineDrawingPng);
+    expect(drawingArt).toMatch(/[\u2801-\u28ff]/);
+
+    // Panel preview helpers align with U+2800 (no ASCII spaces), trim leading blank rows, and preserve square dot pitch.
+    const formatted = panelPreviewPortrait(photoArt);
+    expect(formatted).not.toContain(" ");
+    expect(formatted).toContain("\u2800");
+    const fmtLines = formatted.split("\n");
+    expect(new Set(fmtLines.map((l) => [...l].length)).size).toBe(1);
+    expect(panelPreviewPortrait(`\n\u2800\u2800\n${photoArt}`)).toBe(formatted);
+    const layout = previewPortraitLayout();
+    expect(layout.fontPx).toBe(PREVIEW_FONT_PX);
+    expect(layout.cols).toBe(PORTRAIT_COLS);
+    expect(layout.rows).toBe(PORTRAIT_ROWS);
+    expect(layout.cellHeight).toBeCloseTo(layout.cellWidth * 2);
+  } finally {
+    s.cleanup();
+  }
+}, 20000);

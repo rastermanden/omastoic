@@ -28,6 +28,8 @@ Item {
   property var samples: []
   property int portraitFont: 8
   property real portraitLine: 11.2
+  property int previewPortraitFont: 6
+  property real previewPortraitLine: 8.4
   property var custom: []
   property bool intervalApplied: true
   property bool adopting: false
@@ -42,6 +44,13 @@ Item {
   property bool pickingImage: false
   property int pickRequestId: 0
   property var activePickProcess: null
+  property string editingAuthorPortrait: ""
+  property string portraitPreviewArt: ""
+  property string portraitPreviewError: ""
+  property bool portraitPreviewLoading: false
+  property int portraitPreviewRequestId: 0
+  property var activePortraitPreviewProcess: null
+  property string portraitPreviewSource: ""
   readonly property string pickerUnavailableNotice: "Could not open the file picker. Type a path instead."
   readonly property string pickerUnsupportedNotice: "Choose a JPEG or PNG saved on this computer."
   property string pendingRemove: ""
@@ -110,6 +119,23 @@ Item {
     return null
   }
   readonly property bool hasPortrait: preview !== null && /[^\s\u2800]/.test(String(preview.portrait || ""))
+  readonly property string displayedAuthorPortrait: newAuthorImage.trim() !== ""
+    ? portraitPreviewArt
+    : (editingAuthorSlug !== "" ? editingAuthorPortrait : "")
+  readonly property bool hasDisplayedAuthorPortrait: /[^\s\u2800]/.test(displayedAuthorPortrait)
+  readonly property bool showAuthorPortraitPreview: authorOpen && (
+    (newAuthorImage.trim() !== "" && (portraitPreviewLoading || hasDisplayedAuthorPortrait || portraitPreviewError !== "")) ||
+    (editingAuthorSlug !== "" && newAuthorImage.trim() === "" && /[^\s\u2800]/.test(editingAuthorPortrait))
+  )
+  readonly property string authorPortraitCaption: {
+    if (newAuthorImage.trim() !== "") {
+      if (portraitPreviewLoading) return "Rendering preview…"
+      if (portraitPreviewError !== "") return ""
+      if (hasDisplayedAuthorPortrait) return editingAuthorSlug !== "" ? "New portrait preview" : "Portrait preview"
+      return ""
+    }
+    return "Current portrait"
+  }
   readonly property color ink: Commons.Color.popups.text
   // 0.88 clears 4.5:1 for small text on Tokyo Night and Catppuccin Latte.
   // Placeholders stay lower so they read as hints, not as typed text.
@@ -122,6 +148,7 @@ Item {
 
   function open(payloadJson) {
     cancelImagePick()
+    clearPortraitPreview()
     opened = true
     hasLocalSize = sizeProcess.running || pendingSizePayload !== ""
     resizing = false
@@ -140,6 +167,7 @@ Item {
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
+    editingAuthorPortrait = ""
     pendingReplaceAuthor = null
     pendingRemoveAuthor = ""
     confirmRemoveAuthor = ""
@@ -157,6 +185,7 @@ Item {
 
   function close() {
     cancelImagePick()
+    clearPortraitPreview()
     clearPickerNotice()
     clearRotationNotice()
     pendingApplyNotice = ""
@@ -167,6 +196,7 @@ Item {
     errorScope = ""
     authorListHint = ""
     confirmRemoveAuthor = ""
+    editingAuthorPortrait = ""
   }
 
   function captureFormReturnY() {
@@ -238,6 +268,120 @@ Item {
     proc.running = true
   }
 
+  function cancelPortraitPreview() {
+    portraitPreviewTimer.stop()
+    portraitPreviewRequestId++
+    portraitPreviewLoading = false
+    let proc = activePortraitPreviewProcess
+    activePortraitPreviewProcess = null
+    if (proc) {
+      proc.cancelled = true
+      proc.running = false
+    }
+  }
+
+  function clearPortraitPreview() {
+    cancelPortraitPreview()
+    portraitPreviewSource = ""
+    portraitPreviewArt = ""
+    portraitPreviewError = ""
+  }
+
+  function stopPendingPortraitPreview() {
+    if (portraitPreviewArt === "" && portraitPreviewError === "") clearPortraitPreview()
+    else cancelPortraitPreview()
+  }
+
+  function schedulePortraitPreview(path, immediate) {
+    let trimmed = String(path || "").trim()
+    if (!root.opened || !root.authorOpen || trimmed === "") {
+      clearPortraitPreview()
+      return
+    }
+    if (trimmed === portraitPreviewSource) {
+      if (portraitPreviewLoading) {
+        if (immediate && portraitPreviewTimer.running) {
+          portraitPreviewTimer.stop()
+          runPortraitPreview(trimmed)
+        }
+        return
+      }
+      if (!immediate && (portraitPreviewArt !== "" || portraitPreviewError !== "")) {
+        return
+      }
+    }
+    cancelPortraitPreview()
+    portraitPreviewSource = trimmed
+    portraitPreviewArt = ""
+    portraitPreviewError = ""
+    portraitPreviewLoading = true
+    if (immediate) runPortraitPreview(trimmed)
+    else portraitPreviewTimer.restart()
+  }
+
+  function runPortraitPreview(path) {
+    portraitPreviewTimer.stop()
+    let trimmed = String(path || "").trim()
+    if (!root.opened || !root.authorOpen || trimmed === "") {
+      clearPortraitPreview()
+      return
+    }
+    if (activePortraitPreviewProcess) {
+      let prev = activePortraitPreviewProcess
+      activePortraitPreviewProcess = null
+      prev.cancelled = true
+      prev.running = false
+    }
+    portraitPreviewRequestId++
+    let reqId = portraitPreviewRequestId
+    portraitPreviewSource = trimmed
+    portraitPreviewError = ""
+    portraitPreviewLoading = true
+    let proc = portraitPreviewProcessComponent.createObject(root, {
+      requestId: reqId,
+      command: [command, "panel", "preview-portrait", JSON.stringify({ image: trimmed })],
+    })
+    if (!proc) {
+      portraitPreviewLoading = false
+      portraitPreviewArt = ""
+      portraitPreviewError = "Could not render portrait preview."
+      return
+    }
+    activePortraitPreviewProcess = proc
+    proc.running = true
+  }
+
+  function settlePortraitPreviewProcess(proc) {
+    if (!proc || proc.settled) return
+    if (!proc.processExited || proc.streamsLeft > 0) return
+    proc.settled = true
+    if (activePortraitPreviewProcess === proc) activePortraitPreviewProcess = null
+    let isCurrent = proc.requestId === portraitPreviewRequestId
+    let exitStatus = proc.exitStatus
+    let stdoutText = proc.stdoutText
+    let stderrText = proc.stderrText
+    proc.destroy()
+    if (!isCurrent) return
+    portraitPreviewLoading = false
+    if (!root.opened || !root.authorOpen || root.newAuthorImage.trim() === "") return
+    if (exitStatus === 0) {
+      let parsed
+      try { parsed = JSON.parse(String(stdoutText || "")) }
+      catch (failure) { parsed = null }
+      if (parsed && typeof parsed.portrait === "string" && /[^\s\u2800]/.test(parsed.portrait)) {
+        if (Number(parsed.fontPx) > 0) previewPortraitFont = Number(parsed.fontPx)
+        if (Number(parsed.lineHeight) > 0) previewPortraitLine = Number(parsed.lineHeight)
+        portraitPreviewArt = parsed.portrait
+        portraitPreviewError = ""
+        root.revealAfterLayout(authorForm, authorPortraitPreviewBox, null)
+        return
+      }
+    }
+    portraitPreviewArt = ""
+    portraitPreviewError = plainError(stderrText, "Could not render portrait preview.")
+    root.revealAfterLayout(authorForm, authorPortraitPreviewBox, null)
+  }
+
   function settlePickProcess(proc) {
     if (!proc || proc.settled) return
     if (!proc.processExited || proc.streamsLeft > 0) return
@@ -257,6 +401,7 @@ Item {
         error = ""
         errorScope = ""
         clearPickerNotice()
+        schedulePortraitPreview(chosen, true)
         Qt.callLater(function() {
           if (root.opened && root.authorOpen && !root.pickingImage) {
             root.reveal(authorImageField)
@@ -307,7 +452,9 @@ Item {
     var seq = formScrollSeq
     var syncAndReveal = function() {
       if (seq !== root.formScrollSeq) return
+      if (form === authorForm && (!root.opened || !root.authorOpen)) return
       if (form === quoteForm) authorGrid.forceLayout()
+      if (form === authorForm && authorPortraitPreviewBox.visible) previewBoxColumn.forceLayout()
       if (form && typeof form.forceLayout === "function") form.forceLayout()
       content.forceLayout()
       if (first) root.reveal(first)
@@ -442,6 +589,8 @@ Item {
     samples = parsed.samples instanceof Array ? parsed.samples : []
     portraitFont = Number(parsed.portraitFont) || 8
     portraitLine = Number(parsed.portraitLine) || 11.2
+    previewPortraitFont = Number(parsed.previewPortraitFont) || 6
+    previewPortraitLine = Number(parsed.previewPortraitLine) || 8.4
     custom = parsed.custom instanceof Array ? parsed.custom : []
     intervalApplied = parsed.intervalApplied !== false
     interval = Number(settings.interval) || 60
@@ -463,12 +612,14 @@ Item {
       if (closingQuote) restoreFormReturnY()
     }
     if (addingAuthor || replacingAuthor) {
+      clearPortraitPreview()
       authorOpen = false
       authorAdvancedOpen = false
       authorSlugEdited = false
       editingAuthorSlug = ""
       editingAuthorOrigName = ""
       editingAuthorOrigDates = ""
+      editingAuthorPortrait = ""
       authorNameField.text = ""
       authorSlugField.text = ""
       authorDatesField.text = ""
@@ -601,11 +752,13 @@ Item {
     }
     captureFormReturnY()
     cancelImagePick()
+    clearPortraitPreview()
     clearPickerNotice()
     authorOpen = false
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
+    editingAuthorPortrait = ""
     quoteOpen = true
     root.revealAfterLayout(quoteForm, quoteForm, citationField)
   }
@@ -632,6 +785,7 @@ Item {
 
   function openAddAuthor() {
     cancelImagePick()
+    clearPortraitPreview()
     clearPickerNotice()
     clearRotationNotice()
     confirmRemoveAuthor = ""
@@ -647,6 +801,7 @@ Item {
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
+    editingAuthorPortrait = ""
     authorSlugEdited = false
     authorAdvancedOpen = false
     authorNameField.text = ""
@@ -661,6 +816,7 @@ Item {
 
   function startEditAuthor(author) {
     cancelImagePick()
+    clearPortraitPreview()
     clearPickerNotice()
     clearRotationNotice()
     confirmRemoveAuthor = ""
@@ -676,6 +832,7 @@ Item {
     editingAuthorSlug = author.slug
     editingAuthorOrigName = author.name
     editingAuthorOrigDates = author.dates
+    editingAuthorPortrait = String(author.fullPortrait || "")
     authorSlugEdited = true
     authorAdvancedOpen = false
     authorNameField.text = author.name
@@ -690,6 +847,7 @@ Item {
 
   function closeAuthorForm() {
     cancelImagePick()
+    clearPortraitPreview()
     clearPickerNotice()
     authorOpen = false
     authorAdvancedOpen = false
@@ -698,6 +856,7 @@ Item {
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
+    editingAuthorPortrait = ""
     keyCatcher.forceActiveFocus()
     restoreFormReturnY()
   }
@@ -751,6 +910,7 @@ Item {
         root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
         return
       }
+      stopPendingPortraitPreview()
       applyTimer.stop()
       pendingReplaceAuthor = patch
       applyNow()
@@ -766,6 +926,7 @@ Item {
       root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
       return
     }
+    stopPendingPortraitPreview()
     applyTimer.stop()
     pendingAuthor = {
       slug: newAuthorSlug.trim(),
@@ -1004,6 +1165,11 @@ Item {
 
   Timer { id: applyTimer; interval: 300; onTriggered: root.applyNow() }
   Timer {
+    id: portraitPreviewTimer
+    interval: 250
+    onTriggered: root.runPortraitPreview(root.newAuthorImage)
+  }
+  Timer {
     id: savedTimer
     interval: 2200
     onTriggered: { if (root.notice === "Saved") root.notice = "" }
@@ -1011,6 +1177,58 @@ Item {
 
   QtObject { id: stateRun; property bool exited: false; property int exitCode: 0; property string stdout: ""; property string stderr: ""; property int streamsLeft: 0 }
   QtObject { id: applyRun; property bool exited: false; property int exitCode: 0; property string stdout: ""; property string stderr: ""; property int streamsLeft: 0 }
+
+  Component {
+    id: portraitPreviewProcessComponent
+    Process {
+      id: previewProc
+      property int requestId: 0
+      property bool cancelled: false
+      property bool processExited: false
+      property bool settled: false
+      property int exitStatus: 0
+      property string stdoutText: ""
+      property string stderrText: ""
+      property int streamsLeft: 2
+      stdout: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          previewProc.stdoutText = String(text || "")
+          previewProc.streamsLeft--
+          root.settlePortraitPreviewProcess(previewProc)
+        }
+      }
+      stderr: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          previewProc.stderrText = String(text || "")
+          previewProc.streamsLeft--
+          root.settlePortraitPreviewProcess(previewProc)
+        }
+      }
+      onExited: function(code) {
+        previewProc.exitStatus = code
+        previewProc.processExited = true
+        root.settlePortraitPreviewProcess(previewProc)
+      }
+      onRunningChanged: {
+        if (previewProc.cancelled && previewProc.running) {
+          previewProc.running = false
+          return
+        }
+        if (!previewProc.running && !previewProc.processExited && !previewProc.settled) {
+          Qt.callLater(function() {
+            if (previewProc && !previewProc.running && !previewProc.processExited && !previewProc.settled) {
+              previewProc.processExited = true
+              previewProc.exitStatus = 2
+              previewProc.streamsLeft = 0
+              root.settlePortraitPreviewProcess(previewProc)
+            }
+          })
+        }
+      }
+    }
+  }
 
   Component {
     id: pickImageProcessComponent
@@ -1902,6 +2120,7 @@ Item {
                         root.clearPickerNotice()
                         if (activeFocus) root.reveal(authorImageField)
                       }
+                      root.schedulePortraitPreview(text, false)
                     }
                     onActiveFocusChanged: if (activeFocus) root.reveal(authorImageField)
                   }
@@ -1921,6 +2140,67 @@ Item {
                   label: "Choose image"
                   available: !root.busy && !root.pickingImage
                   onActivated: root.chooseAuthorImage()
+                }
+              }
+              Rectangle {
+                id: authorPortraitPreviewBox
+                objectName: "authorPortraitPreviewBox"
+                width: parent.width
+                visible: root.showAuthorPortraitPreview
+                implicitHeight: visible ? (previewBoxColumn.implicitHeight + Style.space(16)) : 0
+                radius: Style.cornerRadius
+                color: Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.04)
+                border.width: Math.max(1, Style.space(1))
+                border.color: root.portraitPreviewError !== ""
+                  ? Commons.Color.urgent
+                  : Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.22)
+
+                Column {
+                  id: previewBoxColumn
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.margins: Style.space(8)
+                  spacing: Style.space(6)
+
+                  Text {
+                    id: authorPortraitPreviewCaption
+                    objectName: "authorPortraitPreviewCaption"
+                    width: parent.width
+                    visible: root.authorPortraitCaption !== ""
+                    text: root.authorPortraitCaption
+                    color: root.quiet
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    id: authorPortraitPreviewText
+                    objectName: "authorPortraitPreviewText"
+                    visible: root.hasDisplayedAuthorPortrait
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: root.displayedAuthorPortrait
+                    opacity: root.portraitPreviewLoading ? 0.45 : 1
+                    color: root.ink
+                    font.family: Style.font.family
+                    font.pixelSize: root.previewPortraitFont
+                    lineHeightMode: Text.FixedHeight
+                    lineHeight: root.previewPortraitLine
+                    wrapMode: Text.NoWrap
+                  }
+
+                  Text {
+                    id: authorPortraitPreviewErrorText
+                    objectName: "authorPortraitPreviewErrorText"
+                    width: parent.width
+                    visible: root.portraitPreviewError !== "" && !root.portraitPreviewLoading
+                    text: root.portraitPreviewError
+                    color: Commons.Color.urgent
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WordWrap
+                  }
                 }
               }
               Text {
