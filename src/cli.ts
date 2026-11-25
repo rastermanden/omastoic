@@ -3221,6 +3221,10 @@ function commandUsage(rawCommand: string, styled = false): string | null {
           ["--list", "List bundled and custom quote ids"],
           ["--plain", "Use numbered prompts instead of key navigation"],
         ], 26),
+        "",
+        "Pass single-value options only once: --authors, --interval, --name,",
+        "--dates, --image, --citation, --text, --add-author, --replace-author,",
+        "and --remove-author. You can repeat --quotes and --add.",
       ].join("\n");
     case "ui":
       return [
