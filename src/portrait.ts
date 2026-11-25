@@ -255,6 +255,52 @@ export function otsuThreshold(values: readonly number[]): number {
   return Math.floor((firstBest + lastBest) / 2);
 }
 
+const SPARSE_MIN_PIXELS = 6;
+const SPARSE_MIN_SPAN_RATIO = 0.05;
+
+function hasSparseStroke(bits: readonly string[], width: number, height: number): boolean {
+  const minSpan = Math.max(4, Math.ceil(Math.max(width, height) * SPARSE_MIN_SPAN_RATIO));
+  const seen = new Uint8Array(width * height);
+  for (let i = 0; i < bits.length; i++) {
+    if (bits[i] !== "1" || seen[i]) continue;
+    seen[i] = 1;
+    const stack = [i];
+    let size = 0;
+    let minX = width;
+    let maxX = -1;
+    let minY = height;
+    let maxY = -1;
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      size += 1;
+      const x = cur % width;
+      const y = Math.floor(cur / width);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+          const next = ny * width + nx;
+          if (bits[next] === "1" && !seen[next]) {
+            seen[next] = 1;
+            stack.push(next);
+          }
+        }
+      }
+    }
+    if (size >= SPARSE_MIN_PIXELS && Math.max(maxX - minX + 1, maxY - minY + 1) >= minSpan) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Convert an ASCII PGM (P2) grayscale bitmap into Unicode braille art using
  * percentile auto-contrast, Otsu thresholding, and border-aware background
@@ -284,14 +330,29 @@ export function pgmToBraille(pgm: string): string {
   }
 
   const sorted = [...values].sort((a, b) => a - b);
-  let lo = sorted[Math.floor(sorted.length * 0.02)]!;
-  let hi = sorted[Math.floor(sorted.length * 0.98)]!;
-  let span = hi - lo;
+  const tail = Math.min(
+    Math.max(2, Math.floor(sorted.length * 0.02)),
+    Math.floor((sorted.length - 1) / 2),
+  );
+  const lo = sorted[tail]!;
+  const hi = sorted[sorted.length - 1 - tail]!;
+  const span = hi - lo;
   if (span < 8) {
-    lo = sorted[0]!;
-    hi = sorted[sorted.length - 1]!;
-    span = hi - lo;
-    if (span < 16) return "";
+    if (sorted.length < SPARSE_MIN_PIXELS * 2) return "";
+    const edge = SPARSE_MIN_PIXELS - 1;
+    const darkGap = lo - sorted[edge]!;
+    const brightGap = sorted[sorted.length - 1 - edge]! - hi;
+    if (Math.max(darkGap, brightGap) < 16) return "";
+    const darkBg = brightGap > darkGap;
+    const threshold = darkBg
+      ? Math.max(hi + 12, Math.round((hi + sorted[sorted.length - 1]!) / 2))
+      : Math.min(lo - 12, Math.round((sorted[0]! + lo) / 2));
+    const bits: string[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      bits[i] = (darkBg ? values[i]! > threshold : values[i]! <= threshold) ? "1" : "0";
+    }
+    if (!hasSparseStroke(bits, width, height)) return "";
+    return pbmToBraille(`P1\n${width} ${height}\n${bits.join("")}`);
   }
 
   const stretched = values.map((v) => Math.max(0, Math.min(255, Math.round(((v - lo) / span) * 255))));
@@ -353,6 +414,55 @@ export function detectImageKind(bytes: Uint8Array): "png" | "jpeg" | null {
   return null;
 }
 
+function readImageDimensions(
+  bytes: Uint8Array,
+  kind: "png" | "jpeg",
+): { width: number; height: number } | null {
+  if (kind === "png") {
+    if (
+      bytes.length < 24 ||
+      bytes[12] !== 0x49 ||
+      bytes[13] !== 0x48 ||
+      bytes[14] !== 0x44 ||
+      bytes[15] !== 0x52
+    ) {
+      return null;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16, false);
+    const height = view.getUint32(20, false);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  let pos = 2;
+  while (pos + 1 < bytes.length) {
+    if (bytes[pos] !== 0xff) return null;
+    while (pos < bytes.length && bytes[pos] === 0xff) pos += 1;
+    if (pos >= bytes.length) return null;
+    const marker = bytes[pos]!;
+    pos += 1;
+    if (marker === 0xd9 || marker === 0xda) return null;
+    if ((marker >= 0xd0 && marker <= 0xd8) || marker === 0x01) continue;
+    if (pos + 2 > bytes.length) return null;
+    const segLen = (bytes[pos]! << 8) | bytes[pos + 1]!;
+    if (segLen < 2 || pos + segLen > bytes.length) return null;
+    const isSof =
+      marker >= 0xc0 &&
+      marker <= 0xcf &&
+      marker !== 0xc4 &&
+      marker !== 0xc8 &&
+      marker !== 0xcc;
+    if (isSof) {
+      if (segLen < 7) return null;
+      const height = (bytes[pos + 3]! << 8) | bytes[pos + 4]!;
+      const width = (bytes[pos + 5]! << 8) | bytes[pos + 6]!;
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    pos += segLen;
+  }
+  return null;
+}
+
 /** Validate converted braille art fits the 34x20 portrait budget and has ink. */
 export function validatePortraitArt(raw: string, cols = PORTRAIT_COLS, rows = PORTRAIT_ROWS): string {
   const normalized = raw.replace(/\r\n/g, "\n");
@@ -397,6 +507,9 @@ export function hasDecodeWarning(stderr: string): boolean {
   return decodeWarningLines(stderr).length > 0;
 }
 
+const DIMENSION_LIMIT_ERROR_RE =
+  /width or height exceeds limit|image (?:width|height) exceeds user limit|maximum supported image dimension|maximum pixel limit/i;
+
 const NON_DECODE_ERROR_RE =
   /memory allocation failed|cache resources exhausted|not allowed by the security policy|resource limit|no decode delegate/i;
 
@@ -432,6 +545,12 @@ export function cleanTranscodeError(
   }
   if (/command not found|No such file or directory.*\b(?:magick|convert)\b/i.test(line)) {
     return "could not convert portrait image: ImageMagick (magick or convert) is not installed";
+  }
+  if (
+    DIMENSION_LIMIT_ERROR_RE.test(line) ||
+    (!NON_DECODE_ERROR_RE.test(line) && DIMENSION_LIMIT_ERROR_RE.test(stderr))
+  ) {
+    return `could not convert portrait image: "${original}" dimensions exceed the image converter limit`;
   }
   if (!NON_DECODE_ERROR_RE.test(line)) {
     if (
@@ -550,6 +669,30 @@ export async function transcodePortrait(
 
     if (imBin) {
       const deadline = Date.now() + timeoutMs;
+      const dims = readImageDimensions(bytes, kind);
+      const smallSource =
+        dims !== null && (dims.width < PORTRAIT_COLS * 2 || dims.height < PORTRAIT_ROWS * 4);
+      if (smallSource) {
+        const result = await runWithTimeout(
+          [
+            imBin,
+            "-background", "white",
+            staged,
+            "-auto-orient",
+            "-alpha", "remove", "-alpha", "off",
+            "-colorspace", "Gray",
+            "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}>`,
+            "-compress", "none",
+            "pgm:-",
+          ],
+          true,
+          Math.max(1, deadline - Date.now()),
+        );
+        if (result.code !== 0 || hasDecodeWarning(result.stderr) || !result.stdout.trim()) {
+          throw new Error(cleanTranscodeError(result.stderr, trimmed));
+        }
+        return validatePortraitArt(fitPortraitToBudget(pgmToBraille(result.stdout)));
+      }
       const runIm = (w: number, h: number) =>
         runWithTimeout(
           [

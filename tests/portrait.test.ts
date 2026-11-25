@@ -311,6 +311,42 @@ test("cleanTranscodeError limits the unreadable JPEG/PNG wording to decode failu
   expect(oomErr).toBe('could not convert portrait image: Memory allocation failed "huge.png"');
   expect(oomErr).not.toContain("not a readable JPEG or PNG");
 
+  // Dimension/pixel limit failures report a dimension-limit message even from jpeg.c/png.c.
+  const jpegLimitErr = cleanTranscodeError(
+    "magick: width or height exceeds limit `/tmp/omastoic-portrait-abc/source.jpg' @ error/jpeg.c/ReadJPEGImage/1124.\n",
+    "huge.jpg",
+  );
+  expect(jpegLimitErr).toBe('could not convert portrait image: "huge.jpg" dimensions exceed the image converter limit');
+  expect(jpegLimitErr).not.toContain("not a readable JPEG or PNG");
+  expect(jpegLimitErr).not.toContain("omastoic-portrait-");
+  expect(jpegLimitErr).not.toContain("@ error/");
+
+  const pngLimitErr = cleanTranscodeError(
+    "magick: width or height exceeds limit `/tmp/omastoic-portrait-abc/source.png' @ error/png.c/ReadPNGImage/3962.\n",
+    "huge.png",
+  );
+  expect(pngLimitErr).toBe('could not convert portrait image: "huge.png" dimensions exceed the image converter limit');
+
+  const cacheLimitErr = cleanTranscodeError(
+    "magick: width or height exceeds limit `/tmp/omastoic-portrait-abc/source.jpg' (576x864) > (10x36028797018963968) @ error/cache.c/OpenPixelCache/3813.\n",
+    "huge.jpg",
+  );
+  expect(cacheLimitErr).toBe('could not convert portrait image: "huge.jpg" dimensions exceed the image converter limit');
+
+  const pngIhdrLimitErr = cleanTranscodeError(
+    "magick: Image width exceeds user limit in IHDR `/tmp/omastoic-portrait-abc/source.png' @ warning/png.c/MagickPNGWarningHandler/1534.\n" +
+      "magick: Invalid IHDR data `/tmp/omastoic-portrait-abc/source.png' @ error/png.c/MagickPNGError/1308.\n",
+    "huge.png",
+  );
+  expect(pngIhdrLimitErr).toBe('could not convert portrait image: "huge.png" dimensions exceed the image converter limit');
+  expect(pngIhdrLimitErr).not.toContain("not a readable JPEG or PNG");
+
+  const jpegMaxDimErr = cleanTranscodeError(
+    "magick: Maximum supported image dimension is 65500 pixels `/tmp/omastoic-portrait-abc/source.jpg' @ error/jpeg.c/JPEGErrorHandler/615.\n",
+    "huge.jpg",
+  );
+  expect(jpegMaxDimErr).toBe('could not convert portrait image: "huge.jpg" dimensions exceed the image converter limit');
+
   const emptyStderr = cleanTranscodeError("", "photo.png");
   expect(emptyStderr).toBe("could not convert portrait image: image converter failed");
   expect(emptyStderr).not.toContain("not a readable JPEG or PNG");
@@ -346,36 +382,158 @@ test("pgmToBraille keeps sparse drawings under 2% ink and rejects blank or near-
   expect(darkArt).toMatch(/[\u2801-\u28ff]/);
   expect(darkArt.split("\n")[0]!.startsWith("⣿")).toBe(false);
 
-  // Blank and low-contrast near-blank images stay empty.
+  // Genuine thin strokes (vertical and diagonal) under 2% ink still convert.
+  const thinVertical = makePgm(w, h, (x, y) => (x === 34 && y >= 32 && y < 44 ? 15 : 255));
+  expect(pgmToBraille(thinVertical)).toMatch(/[\u2801-\u28ff]/);
+  const thinDiagonal = makePgm(w, h, (x, y) => (x === y && x >= 28 && x < 40 ? 15 : 255));
+  expect(pgmToBraille(thinDiagonal)).toMatch(/[\u2801-\u28ff]/);
+
+  // Blank, near-blank, and isolated dead-pixel outlier images stay empty.
   expect(pgmToBraille(makePgm(w, h, () => 255))).toBe("");
   expect(pgmToBraille(makePgm(w, h, () => 0))).toBe("");
   expect(pgmToBraille(makePgm(w, h, (x, y) => 248 + ((x * 7 + y * 13) % 8)))).toBe("");
   expect(pgmToBraille(makePgm(w, h, (x, y) => (x === 34 && y >= 30 && y < 46 ? 245 : 255)))).toBe("");
+  expect(pgmToBraille(makePgm(w, h, (x, y) => (x === 34 && y === 40 ? 0 : 255)))).toBe("");
+  expect(pgmToBraille(makePgm(w, h, (x, y) => (x === 34 && y === 40 ? 255 : 0)))).toBe("");
+  expect(pgmToBraille(makePgm(w, h, (x, y) => ((x === 20 && y === 20) || (x === 50 && y === 60) ? 0 : 255)))).toBe("");
+  expect(pgmToBraille(makePgm(w, h, (x, y) => ((x === 34 || x === 35) && y === 40 ? 0 : 255)))).toBe("");
+  expect(
+    pgmToBraille(
+      makePgm(w, h, (x, y) => (x % 14 === 5 && y % 20 === 10 ? 0 : 255)),
+    ),
+  ).toBe("");
+  expect(
+    pgmToBraille(
+      makePgm(w, h, (x, y) => (x === 34 && y === 40 ? 235 : 248 + ((x * 7 + y * 13) % 8))),
+    ),
+  ).toBe("");
+  // Near-blank 6-level gradient with 6 isolated bright specks stays empty instead of amplifying shading.
+  const hotSpecks = new Set(["5,5", "20,10", "50,12", "12,60", "60,70", "35,75"]);
+  expect(
+    pgmToBraille(
+      makePgm(w, h, (x, y) => (hotSpecks.has(`${x},${y}`) ? 255 : (y < 40 ? 232 : 238))),
+    ),
+  ).toBe("");
+  // A genuine sparse bright cross on that same gentle gradient still converts cleanly.
+  expect(
+    pgmToBraille(
+      makePgm(w, h, (x, y) =>
+        (x === 34 && y >= 30 && y < 46) || (y === 38 && x >= 29 && x < 40)
+          ? 255
+          : (y < 40 ? 232 : 238),
+      ),
+    ),
+  ).toMatch(/[\u2801-\u28ff]/);
+
+  // Small PGMs and symmetric percentile tails reject 1-2 isolated dark or bright pixels alike.
+  expect(pgmToBraille(makePgm(7, 7, (x, y) => (x === 3 && y === 3 ? 0 : 255)))).toBe("");
+  expect(pgmToBraille(makePgm(7, 7, (x, y) => (x === 3 && y === 3 ? 255 : 0)))).toBe("");
+  expect(pgmToBraille(makePgm(5, 10, (x, y) => (x === 2 && y === 5 ? 0 : 255)))).toBe("");
+  expect(pgmToBraille(makePgm(5, 10, (x, y) => (x === 2 && y === 5 ? 255 : 0)))).toBe("");
+  expect(
+    pgmToBraille(makePgm(10, 10, (x, y) => ((x === 2 && y === 2) || (x === 7 && y === 7) ? 0 : 255))),
+  ).toBe("");
+  expect(
+    pgmToBraille(makePgm(10, 10, (x, y) => ((x === 2 && y === 2) || (x === 7 && y === 7) ? 255 : 0))),
+  ).toBe("");
 });
 
-test.skipIf(!hasImageMagick)("transcodePortrait keeps a sparse PNG drawing under 2% ink and rejects blank PNGs", async () => {
+test.skipIf(!hasImageMagick)("transcodePortrait keeps sparse PNG drawings under 2% ink and rejects blank or dead-pixel images", async () => {
+  const imBin = (Bun.which("magick") ?? Bun.which("convert"))!;
   const s = sandbox();
   const sparsePng = join(s.home, "sparse.png");
+  const sparseDarkPng = join(s.home, "sparse-dark.png");
+  const thinStrokePng = join(s.home, "thin-stroke.png");
+  const smallSparsePng = join(s.home, "small-sparse-32.png");
   const blankPng = join(s.home, "blank.png");
   const nearBlankPng = join(s.home, "near-blank.png");
+  const deadPixelPng = join(s.home, "dead-pixel.png");
+  const brightDeadPixelPng = join(s.home, "bright-dead-pixel.png");
+  const twoDotsPng = join(s.home, "two-dots.png");
+  const twoAdjacentDotsPng = join(s.home, "two-adjacent-dots.png");
+  const smallDead8Png = join(s.home, "dead-8.png");
+  const smallDead16Png = join(s.home, "dead-16.png");
+  const smallDead32Png = join(s.home, "dead-32.png");
+  const smallBrightDead32Png = join(s.home, "bright-dead-32.png");
+  const smallDead48TwoAdjPng = join(s.home, "dead-48-2adj.png");
+  const smallDead52Png = join(s.home, "dead-52.png");
+  const smallDead60TwoAdjPng = join(s.home, "dead-60-2adj.png");
+  const smallDead32Jpg = join(s.home, "dead-32.jpg");
   writeFileSync(
     sparsePng,
     makePng(68, 80, (x, y) =>
       (x === 34 && y >= 30 && y < 45) || (y === 37 && x >= 29 && x < 40) ? 0 : 255,
     ),
   );
+  writeFileSync(
+    sparseDarkPng,
+    makePng(68, 80, (x, y) =>
+      (x === 34 && y >= 30 && y < 45) || (y === 37 && x >= 29 && x < 40) ? 255 : 0,
+    ),
+  );
+  writeFileSync(
+    thinStrokePng,
+    makePng(68, 80, (x, y) => (x === 34 && y >= 30 && y < 42 ? 0 : 255)),
+  );
+  writeFileSync(
+    smallSparsePng,
+    makePng(32, 32, (x, y) => (x === 16 && y >= 11 && y < 21 ? 0 : 255)),
+  );
   writeFileSync(blankPng, makePng(68, 80, () => 255));
   writeFileSync(nearBlankPng, makePng(68, 80, (x, y) => 248 + ((x * 7 + y * 13) % 8)));
+  writeFileSync(deadPixelPng, makePng(68, 80, (x, y) => (x === 34 && y === 40 ? 0 : 255)));
+  writeFileSync(brightDeadPixelPng, makePng(68, 80, (x, y) => (x === 34 && y === 40 ? 255 : 0)));
+  writeFileSync(
+    twoDotsPng,
+    makePng(68, 80, (x, y) => ((x === 20 && y === 20) || (x === 50 && y === 60) ? 0 : 255)),
+  );
+  writeFileSync(
+    twoAdjacentDotsPng,
+    makePng(68, 80, (x, y) => ((x === 34 || x === 35) && y === 40 ? 0 : 255)),
+  );
+  writeFileSync(smallDead8Png, makePng(8, 8, (x, y) => (x === 4 && y === 4 ? 0 : 255)));
+  writeFileSync(smallDead16Png, makePng(16, 16, (x, y) => (x === 8 && y === 8 ? 0 : 255)));
+  writeFileSync(smallDead32Png, makePng(32, 32, (x, y) => (x === 16 && y === 16 ? 0 : 255)));
+  writeFileSync(smallBrightDead32Png, makePng(32, 32, (x, y) => (x === 16 && y === 16 ? 255 : 0)));
+  writeFileSync(
+    smallDead48TwoAdjPng,
+    makePng(48, 48, (x, y) => ((x === 24 || x === 25) && y === 24 ? 0 : 255)),
+  );
+  writeFileSync(smallDead52Png, makePng(52, 52, (x, y) => (x === 26 && y === 26 ? 0 : 255)));
+  writeFileSync(
+    smallDead60TwoAdjPng,
+    makePng(60, 60, (x, y) => ((x === 30 || x === 31) && y === 30 ? 0 : 255)),
+  );
+  const jpgGen = Bun.spawnSync([imBin, smallDead32Png, "-quality", "92", smallDead32Jpg]);
+  expect(jpgGen.exitCode).toBe(0);
   try {
-    const art = await transcodePortrait(sparsePng);
-    const lines = art.replace(/\n+$/, "").split("\n");
-    expect(art).toMatch(/[\u2801-\u28ff]/);
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
-    expect(Math.max(...lines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    for (const drawing of [sparsePng, sparseDarkPng, thinStrokePng, smallSparsePng]) {
+      const art = await transcodePortrait(drawing);
+      const lines = art.replace(/\n+$/, "").split("\n");
+      expect(art).toMatch(/[\u2801-\u28ff]/);
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+      expect(Math.max(...lines.map((line) => [...line].length))).toBeLessThanOrEqual(PORTRAIT_COLS);
+    }
 
-    await expect(transcodePortrait(blankPng)).rejects.toThrow("empty portrait");
-    await expect(transcodePortrait(nearBlankPng)).rejects.toThrow("empty portrait");
+    for (const emptyInput of [
+      blankPng,
+      nearBlankPng,
+      deadPixelPng,
+      brightDeadPixelPng,
+      twoDotsPng,
+      twoAdjacentDotsPng,
+      smallDead8Png,
+      smallDead16Png,
+      smallDead32Png,
+      smallBrightDead32Png,
+      smallDead48TwoAdjPng,
+      smallDead52Png,
+      smallDead60TwoAdjPng,
+      smallDead32Jpg,
+    ]) {
+      await expect(transcodePortrait(emptyInput)).rejects.toThrow("image produced an empty portrait");
+    }
   } finally {
     s.cleanup();
   }
@@ -422,6 +580,25 @@ test("non-decode converter failures report a faithful reason instead of blaming 
     expect(cacheErr.stderr).not.toContain("not a readable JPEG or PNG");
     expect(cacheErr.stderr).not.toContain("omastoic-portrait-");
     expect(cacheErr.stderr).not.toContain("@ error/");
+
+    // 1b. ImageMagick dimension-limit failure emitted from jpeg.c reports a dimension limit error.
+    s.put(
+      join(isolatedBin, "magick"),
+      '#!/bin/sh\nprintf "magick: width or height exceeds limit \\`%s\' @ error/jpeg.c/ReadJPEGImage/1124.\\n" "$3" >&2\nexit 1\n',
+    );
+    chmodSync(join(isolatedBin, "magick"), 0o755);
+    const limitErr = await s.cli(
+      [
+        "config", "--add-author", "hecaton", "--name", "Hecaton of Rhodes",
+        "--image", validPng, "--citation", "On Duties", "--text", "Cease to hope and you will cease to fear.",
+      ],
+      { PATH: isolatedBin },
+    );
+    expect(limitErr.code).toBe(1);
+    expect(limitErr.stderr).toContain("dimensions exceed the image converter limit");
+    expect(limitErr.stderr).not.toContain("not a readable JPEG or PNG");
+    expect(limitErr.stderr).not.toContain("omastoic-portrait-");
+    expect(limitErr.stderr).not.toContain("@ error/");
 
     // 2. Non-decode omarchy-transcode-ascii failure when ImageMagick is absent.
     const fallbackBin = join(s.home, "fallback-bin");
