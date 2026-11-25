@@ -20,10 +20,26 @@ export function sandbox() {
   stub("systemctl", `echo "$*" >> "$HOME/systemctl.log"
 if [[ -n \${SYSTEMCTL_FAIL:-} && "$*" == *"$SYSTEMCTL_FAIL"* ]]; then echo "mock systemctl failure" >&2; exit 1; fi
 unit=\${!#}
-if [[ "$*" == *disable* || "$*" == *stop* ]]; then rm -f "$HOME/$unit.active"; fi
-if [[ "$*" == *disable* ]]; then rm -f "$HOME/$unit.enabled"; fi
-if [[ "$*" == *enable* ]]; then touch "$HOME/$unit.enabled"; fi
-if [[ "$*" == *--now* && "$*" == *enable* || "$*" == *restart* || "$*" == *start* ]]; then touch "$HOME/$unit.active"; fi
+if [[ " $* " == *" is-active "* ]]; then
+  if [[ -f "$HOME/$unit.active" ]]; then
+    [[ " $* " == *" --quiet "* || " $* " == *" -q "* ]] || echo "active"
+    exit 0
+  fi
+  [[ " $* " == *" --quiet "* || " $* " == *" -q "* ]] || echo "inactive"
+  exit 3
+fi
+if [[ " $* " == *" is-enabled "* ]]; then
+  if [[ -f "$HOME/$unit.enabled" ]]; then
+    [[ " $* " == *" --quiet "* || " $* " == *" -q "* ]] || echo "enabled"
+    exit 0
+  fi
+  [[ " $* " == *" --quiet "* || " $* " == *" -q "* ]] || echo "disabled"
+  exit 1
+fi
+if [[ " $* " == *" disable "* || " $* " == *" stop "* ]]; then rm -f "$HOME/$unit.active"; fi
+if [[ " $* " == *" disable "* ]]; then rm -f "$HOME/$unit.enabled"; fi
+if [[ " $* " == *" enable "* ]]; then touch "$HOME/$unit.enabled"; fi
+if [[ " $* " == *" --now "* && " $* " == *" enable "* || " $* " == *" restart "* || " $* " == *" start "* ]]; then touch "$HOME/$unit.active"; fi
 exit 0`);
   stub("omarchy-toggle-enabled", '[[ -f "$HOME/toggle" ]]');
   stub("omarchy-toggle", 'if [[ $2 == on ]]; then touch "$HOME/toggle"; else rm -f "$HOME/toggle"; fi');
