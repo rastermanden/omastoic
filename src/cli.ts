@@ -22,7 +22,7 @@ import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { createBrandingSlot, ownsBranding as slotOwnsBranding, preserveDisplaced as slotPreserveDisplaced, rememberWrite as slotRememberWrite, restoreSlot as slotRestoreSlot, standAside as slotStandAside, writeSlot } from "./branding.ts";
 import { dirname, join } from "node:path";
 import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
-import { headerPortraitLayout, padPortrait, portraitDownscale, transcodePortrait } from "./portrait.ts";
+import { headerPortraitLayout, padPortrait, panelPreviewPortrait, PORTRAIT_COLS, PORTRAIT_ROWS, portraitDownscale, previewPortraitLayout, transcodePortrait } from "./portrait.ts";
 import { pickPortraitImage, PORTRAIT_PICKER_EXIT } from "./file-picker.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
 import {
@@ -2549,6 +2549,7 @@ async function panelState(notice = ""): Promise<string> {
   const selected = settings.authors?.length ? settings.authors : [...roster.keys()];
   const backend = await installedBackend();
   const header = headerPortraitLayout();
+  const previewLayout = previewPortraitLayout();
   const samples = [];
   for (const author of roster.values()) {
     const authored = bundled.filter((row) => row.author === author.slug);
@@ -2566,6 +2567,7 @@ async function panelState(notice = ""): Promise<string> {
       citation: quote?.citation ?? "",
       text: quote?.text ?? "",
       portrait: padPortrait(portraitDownscale(block, header.rows, header.cols), header.rows, header.cols),
+      fullPortrait: panelPreviewPortrait(block),
     });
   }
   return JSON.stringify(
@@ -2588,6 +2590,8 @@ async function panelState(notice = ""): Promise<string> {
       portraitLine: header.cellHeight,
       portraitWidth: header.width,
       portraitHeight: header.height,
+      previewPortraitFont: previewLayout.fontPx,
+      previewPortraitLine: previewLayout.cellHeight,
       customQuotes: custom.quotes.length,
       custom: custom.quotes.map((quote) => ({
         id: quote.id,
@@ -2605,6 +2609,43 @@ async function panelState(notice = ""): Promise<string> {
     null,
     2,
   );
+}
+
+/** Read-only braille portrait preview for the panel Add and Edit forms. */
+async function panelPreviewPortraitCommand(raw: string): Promise<number> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    payload = null;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    console.error("omastoic: panel preview-portrait expects a JSON object with an image path");
+    return 1;
+  }
+  const image = (payload as Record<string, unknown>).image;
+  if (typeof image !== "string" || image.trim() === "") {
+    console.error("omastoic: panel preview-portrait expects a JSON object with an image path");
+    return 1;
+  }
+  let art: string;
+  try {
+    art = await transcodePortrait(image);
+  } catch (error) {
+    console.error(`omastoic: ${(error as Error).message}`);
+    return 1;
+  }
+  const layout = previewPortraitLayout();
+  console.log(
+    JSON.stringify({
+      portrait: panelPreviewPortrait(art),
+      cols: PORTRAIT_COLS,
+      rows: PORTRAIT_ROWS,
+      fontPx: layout.fontPx,
+      lineHeight: layout.cellHeight,
+    }),
+  );
+  return 0;
 }
 
 /** Drop one custom row and renumber the ids that settings still name. */
@@ -3331,10 +3372,11 @@ function commandUsage(rawCommand: string, styled = false): string | null {
       ].join("\n");
     case "panel":
       return [
-        heading("omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>' | omastoic panel pick-image"),
+        heading("omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>' | omastoic panel pick-image | omastoic panel preview-portrait '<json>'"),
         "",
-        "Read or update settings, save panel size, or pick a portrait image for the",
-        "Quickshell settings panel. Reads JSON from the argument or stdin on apply or size.",
+        "Read or update settings, save panel size, pick an image, or render a",
+        "read-only portrait preview for the Quickshell settings panel. Reads JSON",
+        "from the argument or stdin on apply, size, or preview-portrait.",
       ].join("\n");
     case "render-png":
       return [
@@ -3500,6 +3542,14 @@ async function main(): Promise<number> {
         console.log(JSON.stringify(parsed.size));
         return 0;
       }
+      if (action === "preview-portrait") {
+        const raw = rest[1] ?? (process.stdin.isTTY ? "" : await Bun.stdin.text());
+        if (!raw.trim()) {
+          console.error("omastoic: panel preview-portrait expects a JSON object as an argument or on stdin");
+          return 1;
+        }
+        return panelPreviewPortraitCommand(raw);
+      }
       if (action === "pick-image") {
         const picked = await pickPortraitImage({
           home: HOME,
@@ -3519,7 +3569,7 @@ async function main(): Promise<number> {
         console.error(`omastoic: ${picked.reason}`);
         return PORTRAIT_PICKER_EXIT.UNAVAILABLE;
       }
-      console.error("usage: omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>' | omastoic panel pick-image");
+      console.error("usage: omastoic panel state | omastoic panel apply '<json>' | omastoic panel size '<json>' | omastoic panel pick-image | omastoic panel preview-portrait '<json>'");
       return 1;
     }
     case "ui": {
