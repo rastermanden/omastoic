@@ -128,3 +128,37 @@ test("status leads with a summary line, moves internals to --verbose, and styles
     expect(single.stdout).not.toContain("1 quotes:");
   } finally { s.cleanup(); }
 });
+
+test("config --help documents single-use and repeatable flags", async () => {
+  const s = sandbox();
+  try {
+    const result = await s.cli(["config", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).not.toMatch(ANSI_ESCAPE);
+
+    const sections = result.stdout.trimEnd().split("\n\n");
+    const note = sections[sections.length - 1]!;
+    for (const line of note.split("\n")) {
+      expect(line.length, line).toBeLessThanOrEqual(72);
+    }
+
+    const collapsed = note.replace(/\s+/g, " ");
+    expect(collapsed).toMatch(/only once/i);
+    for (const flag of [
+      "--authors",
+      "--interval",
+      "--name",
+      "--dates",
+      "--image",
+      "--citation",
+      "--text",
+      "--add-author",
+      "--replace-author",
+      "--remove-author",
+    ]) {
+      expect(collapsed).toContain(flag);
+    }
+    expect(collapsed).toMatch(/repeat.*--quotes.*--add/i);
+  } finally { s.cleanup(); }
+});

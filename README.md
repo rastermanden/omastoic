@@ -130,6 +130,10 @@ omastoic config --quotes marcus=q01,q02
 omastoic config --quotes marcus=all
 ```
 
+You can pass `--authors` and `--interval` only once per command. If you pass
+either flag more than once, the command exits with an error. You can repeat
+`--quotes` to filter several authors in one command.
+
 In a terminal the pickers are checklists. Space, `x`, or Tab toggles the
 focused row. `1`–`9` toggle the numbered row on screen. Arrows or `j`/`k`
 move. `/` filters quotes. `a` selects the rows on screen, `n` clears them,
@@ -197,7 +201,11 @@ author's quotes from `quotes.tsv`, deletes `art/<slug>.txt`, and drops the slug
 from `config.json` without touching bundled files or other custom authors.
 Bundled Stoics have no edit or remove buttons and are rejected by both
 commands. Passing an existing custom slug to `--add-author` fails and points to
-`--replace-author`, and passing `--image` more than once is rejected.
+`--replace-author`. Each single-value `config` flag can be passed only once:
+`--authors`, `--interval`, `--name`, `--dates`, `--image`, `--citation`,
+`--text`, `--add-author`, `--replace-author`, and `--remove-author`. If you
+repeat any of them, the command exits with an error. You can repeat `--quotes`
+and `--add`.
 
 ### On screen
 
