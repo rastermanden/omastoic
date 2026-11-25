@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { cpSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+import { transcodePortrait } from "../src/portrait.ts";
 import {
   isSystemBinaryPath,
   isTruthyEnv,
@@ -32,7 +33,9 @@ function pngChunk(type: string, data: Uint8Array): Uint8Array {
   return out;
 }
 
-function writeTestPng(path: string, shade: number): void {
+type TestPortraitShape = "box" | "cross";
+
+function writeTestPng(path: string, shade: number, shape: TestPortraitShape = "box"): void {
   const w = 16;
   const h = 16;
   const raw = new Uint8Array((1 + w * 3) * h);
@@ -40,7 +43,11 @@ function writeTestPng(path: string, shade: number): void {
     const row = y * (1 + w * 3);
     raw[row] = 0;
     for (let x = 0; x < w; x++) {
-      const bright = x >= 4 && x < 12 && y >= 3 && y < 13 ? shade : 10;
+      const inside =
+        shape === "cross"
+          ? (x >= 6 && x < 10 && y >= 2 && y < 14) || (x >= 2 && x < 14 && y >= 6 && y < 10)
+          : x >= 4 && x < 12 && y >= 3 && y < 13;
+      const bright = inside ? shade : 10;
       raw[row + 1 + x * 3] = bright;
       raw[row + 1 + x * 3 + 1] = bright;
       raw[row + 1 + x * 3 + 2] = bright;
@@ -68,9 +75,10 @@ test("unselected author and quote changes and no-ops do not restart omastoic.ser
   const s = sandbox();
   const pngA = join(s.home, "a.png");
   const pngB = join(s.home, "b.png");
-  writeTestPng(pngA, 220);
-  writeTestPng(pngB, 140);
+  writeTestPng(pngA, 220, "box");
+  writeTestPng(pngB, 220, "cross");
   try {
+    expect(await transcodePortrait(pngA)).not.toBe(await transcodePortrait(pngB));
     expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
     expect((await s.cli(["config", "--authors", "marcus"])).code).toBe(0);
     expect(existsSync(join(s.home, "omastoic.service.active"))).toBe(true);
@@ -174,10 +182,17 @@ test("unselected author and quote changes and no-ops do not restart omastoic.ser
 test("changing interval or active rotation restarts an active omastoic.service", async () => {
   const s = sandbox();
   const pngA = join(s.home, "a.png");
+  const pngSameBraille = join(s.home, "same-braille.png");
   const pngB = join(s.home, "b.png");
-  writeTestPng(pngA, 220);
-  writeTestPng(pngB, 140);
+  writeTestPng(pngA, 220, "box");
+  writeTestPng(pngSameBraille, 140, "box");
+  writeTestPng(pngB, 220, "cross");
   try {
+    const portraitA = await transcodePortrait(pngA);
+    const portraitSame = await transcodePortrait(pngSameBraille);
+    const portraitB = await transcodePortrait(pngB);
+    expect(portraitSame).toBe(portraitA);
+    expect(portraitB).not.toBe(portraitA);
     expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
     expect((await s.cli(["config", "--authors", "marcus"])).code).toBe(0);
 
@@ -220,6 +235,12 @@ test("changing interval or active rotation restarts an active omastoic.service",
         ])
       ).code,
     ).toBe(0);
+    // Replacing a selected author's image with one that converts to identical braille is a no-op.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["panel", "apply", JSON.stringify({ replaceAuthor: { slug: "musonius", image: pngSameBraille } })])).code).toBe(0);
+    expect(s.log()).not.toContain("restart omastoic.service");
+
+    // Replacing it with an image that produces different braille restarts active service.
     s.put(join(s.home, "systemctl.log"), "");
     expect((await s.cli(["panel", "apply", JSON.stringify({ replaceAuthor: { slug: "musonius", image: pngB } })])).code).toBe(0);
     expect(s.log()).toContain("restart omastoic.service");
