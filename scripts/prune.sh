@@ -54,8 +54,65 @@ PRUNE_UNIT="$CONFIG/systemd/user/omastoic-prune.service"
 BRANDING="$CONFIG/omarchy/branding/screensaver.txt"
 BACKUP="$BRANDING.pre-omastoic"
 
+is_truthy_env() {
+  case "${1:-}" in
+    ""|0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+is_system_binary() {
+  case "$1" in
+    /usr/*|/bin/*|/sbin/*|/run/current-system/*|/nix/store/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+passwd_home() {
+  local uid line="" home=""
+  uid=$(id -u)
+  if command -v getent >/dev/null 2>&1; then
+    line=$(getent passwd "$uid" 2>/dev/null || true)
+    if [[ -n $line ]]; then
+      IFS=: read -r _ _ _ _ _ home _ <<< "$line" || true
+    fi
+  fi
+  if [[ -z $home && -r /etc/passwd ]]; then
+    home=$(awk -F: -v u="$uid" '$3 == u { print $6; exit }' /etc/passwd 2>/dev/null || true)
+  fi
+  printf '%s' "$home"
+}
+
+canonical_path() {
+  local p="$1"
+  readlink -f -- "$p" 2>/dev/null || { [[ $p == "/" ]] && printf '/' || printf '%s' "${p%/}"; }
+}
+
+should_skip_systemctl() {
+  if is_truthy_env "${OMASTOIC_NO_SYSTEMCTL:-}"; then return 0; fi
+  local bin resolved
+  bin=$(command -v systemctl 2>/dev/null || true)
+  [[ -n $bin ]] || return 0
+  resolved=$(canonical_path "$bin")
+  if ! is_system_binary "$resolved"; then return 1; fi
+  case "${NODE_ENV:-}" in [Tt][Ee][Ss][Tt]) return 0 ;; esac
+  case "${BUN_ENV:-}" in [Tt][Ee][Ss][Tt]) return 0 ;; esac
+  [[ -n ${HOME:-} ]] || return 0
+  local pw_home
+  pw_home=$(passwd_home)
+  if [[ -n $pw_home && $(canonical_path "$HOME") != "$(canonical_path "$pw_home")" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+run_systemctl() {
+  if should_skip_systemctl; then return 0; fi
+  systemctl "$@"
+}
+
 # Fail loudly and retain units/records if systemd cannot stop the service.
-if owns unit "$UNIT"; then systemctl --user disable --now omastoic.service; fi
+if owns unit "$UNIT"; then run_systemctl --user disable --now omastoic.service; fi
 if command -v omarchy-toggle >/dev/null 2>&1; then omarchy-toggle omastoic off; fi
 
 still_ours() {
@@ -195,7 +252,7 @@ fi
 # Disable keeps plumbing for re-enable; remove tears it down entirely.
 if installed; then exit 0; fi
 
-if owns prune-path "$PRUNE_PATH"; then systemctl --user disable --now omastoic-prune.path; fi
+if owns prune-path "$PRUNE_PATH"; then run_systemctl --user disable --now omastoic-prune.path; fi
 MENU="$CONFIG/omarchy/extensions/omarchy-menu.jsonc"
 if [[ -f $MENU ]]; then
   # jq is already a host dependency. Python preserves comments/whitespace and
@@ -236,4 +293,4 @@ rm -f "$STATE/installed" "$STATE/launcher.target"
 if [[ -d $STATE ]]; then
   find "$STATE" -mindepth 1 -maxdepth 1 ! -name transaction.flock -exec rm -rf -- {} +
 fi
-systemctl --user daemon-reload
+run_systemctl --user daemon-reload

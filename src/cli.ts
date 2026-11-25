@@ -42,6 +42,14 @@ import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./plugin-id.ts";
 import { renderCanvasPng, themeForeground } from "./png.ts";
 import { parsePanelSizeCommand, readPanelSize, writePanelSize } from "./panel-size.ts";
 import {
+  checkedSystemctl,
+  isTruthyEnv,
+  isUnitActive,
+  isUnitEnabled,
+  querySystemctl,
+  runSystemctl,
+} from "./systemctl.ts";
+import {
   applyQuoteFlags,
   authorsAfterRemoval,
   compactSettings,
@@ -170,9 +178,31 @@ async function saveSettings(
   atomicWrite(SETTINGS_FILE, `${JSON.stringify(next, null, 2)}\n`);
 }
 
+async function daemonRotationDigest(bundled: BundledQuote[]): Promise<string> {
+  const settings = await config();
+  const custom = await indexedCustom();
+  const activeQuotes = inRotation(bundled, custom.quotes, settings).quotes;
+  const roster = await authors();
+  const activeSlugs = [...new Set(activeQuotes.map((quote) => quote.author))].sort();
+  const activeAuthors = await Promise.all(
+    activeSlugs.map(async (slug) => {
+      const meta = roster.get(slug);
+      const art = await loadPortrait(slug);
+      return [slug, meta?.name ?? "", meta?.dates ?? "", art ? digest(art.join("\n")) : ""];
+    }),
+  );
+  return digest(
+    JSON.stringify({
+      interval: settings.interval ?? DEFAULT_INTERVAL,
+      quotes: activeQuotes.map((quote) => [quote.author, quote.citation, quote.text]),
+      authors: activeAuthors,
+    }),
+  );
+}
+
 async function restartDaemon(): Promise<void> {
-  if (enabled() && (await Bun.file(UNIT).exists())) {
-    await checked(["systemctl", "--user", "restart", "omastoic.service"]);
+  if (enabled() && (await Bun.file(UNIT).exists()) && isUnitActive("omastoic.service")) {
+    await checkedSystemctl(["restart", "omastoic.service"]);
   }
 }
 
@@ -263,10 +293,6 @@ async function recent(): Promise<number[]> {
 
 const run = (cmd: string[]) => Bun.spawn(cmd, { stdout: "inherit", stderr: "inherit" }).exited;
 const quiet = (cmd: string[]) => Bun.spawnSync(cmd, { stdout: "ignore", stderr: "ignore" });
-async function checked(cmd: string[]): Promise<void> {
-  const code = await run(cmd);
-  if (code !== 0) throw new Error(`${cmd.join(" ")} failed (exit ${code}); check the user session bus and journalctl --user -u omastoic.service, then retry setup`);
-}
 
 const keepLauncherLines = (text: string) =>
   text
@@ -424,7 +450,7 @@ async function writeBranding(takeSlot = false, forced?: Quote): Promise<Quote | 
 }
 
 async function stopDaemon(): Promise<void> {
-  if (owned.owns("unit", UNIT)) await checked(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
+  if (owned.owns("unit", UNIT)) await checkedSystemctl(["disable", "--now", "omastoic.service"]);
 }
 
 async function activate(forced?: Quote): Promise<{ code: number; quote: Quote | null }> {
@@ -437,7 +463,7 @@ async function activate(forced?: Quote): Promise<{ code: number; quote: Quote | 
     setEnabled(true);
     quote = await writeBranding(true, forced);
     if (!quote) throw new Error("could not activate the Stoics");
-    if (owned.owns("unit", UNIT)) await checked(["systemctl", "--user", "enable", "--now", "omastoic.service"]);
+    if (owned.owns("unit", UNIT)) await checkedSystemctl(["enable", "--now", "omastoic.service"]);
     else console.log("→ not installed as a service yet; run: omastoic setup");
   } catch (error) {
     setEnabled(wasEnabled);
@@ -585,11 +611,11 @@ WantedBy=default.target
 }
 
 async function removePrune(): Promise<void> {
-  if (owned.owns("prune-path", PRUNE_PATH)) await checked(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
+  if (owned.owns("prune-path", PRUNE_PATH)) await checkedSystemctl(["disable", "--now", "omastoic-prune.path"]);
   owned.remove("prune-path", PRUNE_PATH);
   owned.remove("prune-unit", PRUNE_UNIT);
   owned.remove("prune-script", PRUNE_SCRIPT);
-  await checked(["systemctl", "--user", "daemon-reload"]);
+  await checkedSystemctl(["daemon-reload"]);
 }
 
 async function requireOmarchy(): Promise<number> {
@@ -597,7 +623,9 @@ async function requireOmarchy(): Promise<number> {
     console.error("omastoic: omarchy is not on PATH");
     return 1;
   }
-  for (const command of ["systemctl", "jq", "python3", "flock", "omarchy-toggle", "omarchy-toggle-enabled", "omarchy-launch-screensaver"]) {
+  const required = ["jq", "python3", "flock", "omarchy-toggle", "omarchy-toggle-enabled", "omarchy-launch-screensaver"];
+  if (!isTruthyEnv(process.env.OMASTOIC_NO_SYSTEMCTL)) required.unshift("systemctl");
+  for (const command of required) {
     if (!Bun.which(command)) { console.error(`omastoic: required command missing: ${command}`); return 1; }
   }
   const backend = await installedBackend();
@@ -643,26 +671,33 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
   try {
     linkLauncher();
     let changed = false;
-    for (const [id, path, body, legacy] of artifacts) changed = owned.write(id, path, body, legacy) || changed;
+    let unitChanged = false;
+    for (const [id, path, body, legacy] of artifacts) {
+      const wrote = owned.write(id, path, body, legacy);
+      changed = wrote || changed;
+      if (id === "unit" && wrote) unitChanged = true;
+    }
     chmodSync(PRUNE_SCRIPT, 0o755);
     await addMenuRows(opts.quiet);
-    if (changed) await checked(["systemctl", "--user", "daemon-reload"]);
-    await checked(["systemctl", "--user", "enable", "--now", "omastoic-prune.path"]);
+    if (changed) await checkedSystemctl(["daemon-reload"]);
+    await checkedSystemctl(["enable", "--now", "omastoic-prune.path"]);
     if (opts.onFirst && first) {
       const code = await on();
       if (code) throw new Error("could not activate the Stoics");
     } else if (enabled()) {
-      await checked(["systemctl", "--user", "enable", "omastoic.service"]);
-      if (previous !== marker || changed) await checked(["systemctl", "--user", "restart", "omastoic.service"]);
-      else await checked(["systemctl", "--user", "start", "omastoic.service"]);
-    } else {
+      const needsRestart = previous !== marker || unitChanged;
+      const active = isUnitActive("omastoic.service");
+      if (!isUnitEnabled("omastoic.service")) await checkedSystemctl(["enable", "omastoic.service"]);
+      if (needsRestart && active) await checkedSystemctl(["restart", "omastoic.service"]);
+      else if (!active) await checkedSystemctl(["start", "omastoic.service"]);
+    } else if (isUnitActive("omastoic.service") || isUnitEnabled("omastoic.service")) {
       await stopDaemon();
     }
     atomicWrite(INSTALLED, marker); // Only successful setup is an installation.
   } catch (error) {
     // Leave owned plumbing available for retry/uninstall, but fail closed.
-    await run(["systemctl", "--user", "disable", "--now", "omastoic.service"]);
-    await run(["systemctl", "--user", "disable", "--now", "omastoic-prune.path"]);
+    await runSystemctl(["disable", "--now", "omastoic.service"]);
+    await runSystemctl(["disable", "--now", "omastoic-prune.path"]);
     if (existsSync(WRITTEN) && ownsBranding()) await restoreSlot();
     setEnabled(false);
     throw error;
@@ -687,7 +722,7 @@ async function uninstall(opts: { purge?: boolean } = {}): Promise<number> {
   await off();
 
   owned.remove("unit", UNIT);
-  await checked(["systemctl", "--user", "daemon-reload"]);
+  await checkedSystemctl(["daemon-reload"]);
   await removeMenuRows();
   unlinkLauncher();
   for (const [id, path] of completionFiles()) owned.remove(id, path);
@@ -2253,6 +2288,7 @@ async function configure(rest: string[]): Promise<number> {
       console.error(`omastoic: ${(error as Error).message}`);
       return 1;
     }
+    const beforeRotation = await daemonRotationDigest(bundled);
 
     let next: Settings = { ...current };
     let quoteLines: string[] | null = null;
@@ -2476,13 +2512,15 @@ async function configure(rest: string[]): Promise<number> {
     }
     if (quoteFailure != null) {
       if (settingsTouched || selectionTouched || authorChanged) {
-        await restartDaemon();
+        if ((await daemonRotationDigest(bundled)) !== beforeRotation) await restartDaemon();
         printSettings(await config(), roster, catalog);
       }
       return quoteFailure;
     }
     if (!settingsTouched && !selectionTouched && !quoteLines && !authorChanged && !list) return 0;
-    if (settingsTouched || selectionTouched || quoteLines || authorChanged) await restartDaemon();
+    if ((settingsTouched || selectionTouched || quoteLines || authorChanged) && (await daemonRotationDigest(bundled)) !== beforeRotation) {
+      await restartDaemon();
+    }
     const saved = await config();
     printSettings(saved, roster, catalog);
     const custom = (quoteLines || authorChanged) && quoteFailure == null ? indexCustom(await customQuotes()) : customBook.quotes;
@@ -2834,6 +2872,7 @@ async function panelApply(raw: string): Promise<number> {
       console.error(`omastoic: ${(error as Error).message}`);
       return 1;
     }
+    const beforeRotation = await daemonRotationDigest(bundled);
     const savedBefore = compactSettings(next, slugs, catalog, custom.readable);
 
     if (Object.hasOwn(value, "interval")) {
@@ -3010,7 +3049,9 @@ async function panelApply(raw: string): Promise<number> {
       }
     }
     if (pendingQuoteFile) atomicWrite(pendingQuoteFile.path, pendingQuoteFile.body);
-    if (settingsChanged || added || authorMutated || removedId) await restartDaemon();
+    if ((settingsChanged || added || authorMutated || removedId) && (await daemonRotationDigest(bundled)) !== beforeRotation) {
+      await restartDaemon();
+    }
     console.log(await panelState(panelNotice));
     return 0;
   });
@@ -3047,7 +3088,7 @@ async function status(opts: { verbose?: boolean } = {}): Promise<number> {
   const catalog = [...choicesOf(await bundledBook()), ...choicesOf((await indexedCustom()).quotes)];
   const summarySettings = describeSettings(cfg, names, catalog);
 
-  const unit = Bun.spawnSync(["systemctl", "--user", "is-active", "omastoic.service"]);
+  const unit = querySystemctl(["is-active", "omastoic.service"]);
   const on = enabled();
   const ours = on && ownsBranding();
   const stateLabel = on ? (ours ? "on" : "stood aside") : "off";
@@ -3065,7 +3106,7 @@ async function status(opts: { verbose?: boolean } = {}): Promise<number> {
   const metaLines = [
     field("version:", manifestVersion()),
     field("backend:", backendLine),
-    field("service:", unit.stdout.toString().trim() || "not installed"),
+    field("service:", unit.stdout.trim() || "not installed"),
   ];
   if (verbose) {
     const size = await screensaverSize();
