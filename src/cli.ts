@@ -21,7 +21,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { createBrandingSlot, ownsBranding as slotOwnsBranding, preserveDisplaced as slotPreserveDisplaced, rememberWrite as slotRememberWrite, restoreSlot as slotRestoreSlot, standAside as slotStandAside, writeSlot } from "./branding.ts";
 import { dirname, join } from "node:path";
-import { AUTHOR_SLUG, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, type Author, type BundledQuote, type Quote } from "./canvas.ts";
+import { AUTHOR_SLUG, cellWidth, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, wrap, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { headerPortraitLayout, padPortrait, panelPreviewPortrait, PORTRAIT_COLS, PORTRAIT_ROWS, portraitDownscale, previewPortraitLayout, transcodePortrait } from "./portrait.ts";
 import { pickPortraitImage, PORTRAIT_PICKER_EXIT } from "./file-picker.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
@@ -3113,6 +3113,40 @@ function styleDim(text: string, styled: boolean): string {
   return styled ? `\x1b[2m${text}\x1b[0m` : text;
 }
 
+const MIN_STATUS_NAME_WIDTH = 18;
+const MAX_STATUS_NAME_WIDTH = 40;
+
+function padCells(text: string, width: number): string {
+  return text + " ".repeat(Math.max(0, width - cellWidth(text)));
+}
+
+function formatStatusBook(
+  entries: ReadonlyArray<{ name: string; count: number; art: string }>,
+  styled: boolean,
+): string[] {
+  const rows = entries.map((entry) => ({
+    ...entry,
+    lines: cellWidth(entry.name) <= MAX_STATUS_NAME_WIDTH
+      ? [entry.name]
+      : wrap(entry.name, MAX_STATUS_NAME_WIDTH - 2),
+  }));
+  const nameWidth = Math.max(
+    MIN_STATUS_NAME_WIDTH,
+    ...rows.flatMap((row) =>
+      row.lines.map((line, index) => cellWidth(line) + (index === 0 ? 0 : 2)),
+    ),
+  );
+  const countWidth = Math.max(3, ...rows.map((row) => String(row.count).length));
+  const out: string[] = [];
+  for (const { lines, count, art } of rows) {
+    out.push(`  ${padCells(lines[0] ?? "", nameWidth)} ${String(count).padStart(countWidth)}  ${styleDim(art, styled)}`);
+    for (const continuation of lines.slice(1)) {
+      out.push(`    ${continuation}`);
+    }
+  }
+  return out;
+}
+
 function formatTwoColumn(rows: ReadonlyArray<readonly [string, string]>, colWidth: number): string[] {
   return rows.map(([left, right]) => `  ${left.padEnd(colWidth)}${right}`);
 }
@@ -3156,11 +3190,16 @@ async function status(opts: { verbose?: boolean } = {}): Promise<number> {
   }
 
   const quoteLabel = quotes.length === 1 ? "1 quote:" : `${quotes.length} quotes:`;
-  const bookLines = [styleDim(quoteLabel, styled)];
-  for (const [slug, count] of [...byAuthor].sort((a, b) => b[1] - a[1])) {
-    const art = (await loadPortrait(slug)) ? "portrait" : "no portrait";
-    bookLines.push(`  ${(names.get(slug)?.name ?? slug).padEnd(18)} ${String(count).padStart(3)}  ${styleDim(art, styled)}`);
-  }
+  const entries = await Promise.all(
+    [...byAuthor]
+      .sort((a, b) => b[1] - a[1])
+      .map(async ([slug, count]) => ({
+        name: names.get(slug)?.name ?? slug,
+        count,
+        art: (await loadPortrait(slug)) ? "portrait" : "no portrait",
+      })),
+  );
+  const bookLines = [styleDim(quoteLabel, styled), ...formatStatusBook(entries, styled)];
 
   console.log([styleBold(summaryLine, styled), "", ...metaLines, "", ...bookLines].join("\n"));
   return 0;
