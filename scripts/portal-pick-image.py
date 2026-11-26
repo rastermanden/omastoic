@@ -265,8 +265,14 @@ def main() -> int:
         print("selected file path is not supported", file=sys.stderr)
         return EXIT_UNSUPPORTED
 
-    sys.stdout.write(f"{path}\n")
-    sys.stdout.flush()
+    try:
+        encoded_path = f"{path}\n".encode("utf-8")
+    except UnicodeEncodeError:
+        print("selected file path is not supported", file=sys.stderr)
+        return EXIT_UNSUPPORTED
+
+    sys.stdout.buffer.write(encoded_path)
+    sys.stdout.buffer.flush()
     return EXIT_PICKED
 
 

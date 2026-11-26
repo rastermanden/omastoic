@@ -1343,15 +1343,23 @@ Item {
       proc.running = false
       if (exitFirst) {
         proc.exited(exitCode)
-        proc.stdout.text = stdoutText
-        proc.stdout.streamFinished()
-        proc.stderr.text = stderrText
-        proc.stderr.streamFinished()
+        if (proc.stdout) {
+          proc.stdout.text = stdoutText
+          proc.stdout.streamFinished()
+        }
+        if (proc.stderr) {
+          proc.stderr.text = stderrText
+          proc.stderr.streamFinished()
+        }
       } else {
-        proc.stdout.text = stdoutText
-        proc.stdout.streamFinished()
-        proc.stderr.text = stderrText
-        proc.stderr.streamFinished()
+        if (proc.stdout) {
+          proc.stdout.text = stdoutText
+          proc.stdout.streamFinished()
+        }
+        if (proc.stderr) {
+          proc.stderr.text = stderrText
+          proc.stderr.streamFinished()
+        }
         proc.exited(exitCode)
       }
     }
@@ -1421,6 +1429,8 @@ Item {
       verify(pickProc !== null)
       compare(pickProc.running, true)
       compare(pickProc.stdinEnabled, true)
+      compare(pickProc.stderr, null)
+      compare(pickProc.hasOwnProperty("stderrText"), false)
       compare(pickProc.command[pickProc.command.length - 3], "panel")
       compare(pickProc.command[pickProc.command.length - 2], "pick-image")
       compare(pickProc.command[pickProc.command.length - 1], "--watch-stdin")

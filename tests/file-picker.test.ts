@@ -581,11 +581,12 @@ test("panel pick-image speaks xdg-desktop-portal FileChooser over D-Bus, filters
     expect(legacy.child.code).toBe(PORTRAIT_PICKER_EXIT.PICKED);
     expect(legacy.child.stdout).toBe(`${portraitFile}\n`);
 
-    // 7. Non-local and unsupported URIs (https://, remote file://, embedded newline) exit 3 (UNSUPPORTED), not 2 (UNAVAILABLE).
+    // 7. Non-local and unsupported URIs (https://, remote file://, embedded newline, non-UTF-8 bytes) exit 3 (UNSUPPORTED), not 2 (UNAVAILABLE).
     for (const remoteUri of [
       "https://example.com/portrait.png",
       "file://other-host/share/portrait.png",
       "file:///tmp/bad%0Aname.png",
+      "file:///tmp/bad%FFname.png",
     ]) {
       const remote = await runWithMockPortal(s, { responseCode: 0, uris: [remoteUri] });
       expect(remote.child.code, remoteUri).toBe(PORTRAIT_PICKER_EXIT.UNSUPPORTED);
