@@ -1229,6 +1229,23 @@ test("panel state and panel apply replace and remove custom authors while protec
     expect(stateAfterOnly.notice).toBe("Removed Hierocles. Rotation is now Marcus Aurelius.");
     expect(stateAfterOnly.authors.filter((entry: { selected: boolean }) => entry.selected).map((entry: { slug: string }) => entry.slug)).toEqual(["marcus"]);
     expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toEqual(["marcus"]);
+
+    // Adding an author through the panel while only a subset is selected keeps the new author checked in rotation.
+    const addedSelected = await s.cli(["panel", "apply", JSON.stringify({
+      authors: ["marcus", "hume"],
+      addAuthor: {
+        slug: "hume",
+        name: "David Hume",
+        image: pngA,
+        citation: "Treatise",
+        text: "Reason is, and ought only to be the slave of the passions.",
+      },
+    })]);
+    expectOk(addedSelected, "panel apply addAuthor with default selection");
+    const stateAfterHume = JSON.parse(addedSelected.stdout);
+    expect(stateAfterHume.settings.authors).toEqual(["marcus", "hume"]);
+    expect(stateAfterHume.authors.find((entry: { slug: string }) => entry.slug === "hume")?.selected).toBe(true);
+    expectOk(await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: "hume" })]), "remove hume after subset check");
     const statusAfterPanel = await s.cli(["status"]);
     expectOk(statusAfterPanel, "status after panel remove sole author");
     expect(statusAfterPanel.stdout).toContain("Marcus Aurelius");

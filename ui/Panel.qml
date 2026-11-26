@@ -771,7 +771,14 @@ Item {
     var payload = {}
     if (pendingAuthor) {
       payload.addAuthor = pendingAuthor
-      if (selectedAuthors.join(",") !== committedAuthors.join(",")) payload.authors = selectedAuthors
+      let hadExplicitAuthors = settings.authors instanceof Array && settings.authors.length > 0
+      let selectionChanged = selectedAuthors.join(",") !== committedAuthors.join(",")
+      let partialSelection = selectedAuthors.length < samples.length
+      if (hadExplicitAuthors || selectionChanged || partialSelection) {
+        let nextAuthors = selectedAuthors.slice()
+        if (nextAuthors.indexOf(pendingAuthor.slug) === -1) nextAuthors.push(pendingAuthor.slug)
+        payload.authors = nextAuthors
+      }
       if (intervalApplied && interval !== committedInterval) payload.interval = interval
       pendingAuthor = null
       addingAuthor = true

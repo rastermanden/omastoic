@@ -2268,6 +2268,117 @@ Item {
       mouseClick(cancelBtn)
       wait(20)
     }
+
+    function test_new_author_is_checked_by_default_for_subset_and_all() {
+      // Case A: Only a subset is selected; adding a new author sends its slug in payload.authors and shows it checked.
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+        ],
+      })), true)
+      wait(20)
+
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var citationField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var quoteField = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(nameField && imageField && citationField && quoteField && submitBtn)
+
+      nameField.text = "David Hume"
+      imageField.text = "/tmp/hume.png"
+      citationField.text = "Treatise"
+      quoteField.text = "Custom is the great guide of human life."
+      mouseClick(submitBtn)
+      wait(10)
+
+      var applyProc = findProcessFor("apply")
+      verify(applyProc !== null)
+      var subsetPayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(subsetPayload.addAuthor.slug, "david-hume")
+      compare(subsetPayload.authors.join(","), "marcus,david-hume")
+
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: { authors: ["marcus", "david-hume"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "david-hume", name: "David Hume", dates: "", custom: true, portrait: "⣿", citation: "Treatise", text: "Custom is the great guide of human life." },
+        ],
+      }), "", false)
+      wait(20)
+      compare(panel.selectedAuthors.join(","), "marcus,david-hume")
+      var humeRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "David Hume" })
+      verify(humeRow !== null)
+      var humeCheck = findOne(humeRow, function(item) { return item.text === "✓" })
+      verify(humeCheck !== null)
+      compare(humeCheck.visible, true)
+
+      // Case B: All authors selected (default settings = {}); payload.authors stays omitted and new author comes back checked.
+      compare(panel.adoptState(JSON.stringify({
+        settings: {},
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+        ],
+      })), true)
+      wait(20)
+      applyProc.command = []
+
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      nameField.text = "John Locke"
+      imageField.text = "/tmp/locke.png"
+      citationField.text = "Essay"
+      quoteField.text = "Reading furnishes the mind."
+      mouseClick(submitBtn)
+      wait(10)
+
+      applyProc = findProcessFor("apply")
+      verify(applyProc !== null)
+      var allPayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(allPayload.addAuthor.slug, "john-locke")
+      compare(allPayload.authors, undefined)
+
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: {},
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿", citation: "Letters 1", text: "Claim yourself." },
+          { slug: "john-locke", name: "John Locke", dates: "", custom: true, portrait: "⣿", citation: "Essay", text: "Reading furnishes the mind." },
+        ],
+      }), "", false)
+      wait(20)
+      compare(panel.selectedAuthors.join(","), "marcus,seneca,john-locke")
+      var lockeRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "John Locke" })
+      verify(lockeRow !== null)
+      var lockeCheck = findOne(lockeRow, function(item) { return item.text === "✓" })
+      verify(lockeCheck !== null)
+      compare(lockeCheck.visible, true)
+    }
   }
 }
 `,
@@ -2283,7 +2394,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("15 passed, 0 failed");
+    expect(combined, combined).toContain("16 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
