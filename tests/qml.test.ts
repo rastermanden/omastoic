@@ -778,18 +778,19 @@ Item {
       compare(panel.errorScope, "author")
       compare(panel.statusText, "")
 
-      // Error renders inside the author form, directly above the submit button, and is visible.
+      // Error renders inside the pinned author footer, directly above the submit button, and stays visible inside the card.
+      var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
+      var footer = findOne(panel, function(item) { return item.objectName === "authorFooter" && item.visible })
       var authorErr = findOne(panel, function(item) {
         return item.text === panel.error && item.visible
       })
       var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
-      verify(authorErr !== null)
-      verify(submitBtn !== null)
-      var errTop = authorErr.mapToItem(scroller.contentItem, 0, 0).y
-      var submitTop = submitBtn.mapToItem(scroller.contentItem, 0, 0).y
-      verify(errTop < submitTop)
-      verify(errTop >= scroller.contentY - 1)
-      verify(errTop + authorErr.height <= scroller.contentY + scroller.height + 1)
+      verify(card !== null && footer !== null && authorErr !== null && submitBtn !== null)
+      var errInCard = authorErr.mapToItem(card, 0, 0)
+      var submitInCard = submitBtn.mapToItem(card, 0, 0)
+      verify(errInCard.y < submitInCard.y)
+      verify(errInCard.y >= scroller.y + scroller.height - 1)
+      verify(submitInCard.y + submitBtn.height <= card.height + 1)
 
       // Cancel the form: no error remains; opening Edit on another author shows no error.
       var cancelAddBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
@@ -1136,23 +1137,21 @@ Item {
       var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" && item.visible })
       verify(slugField !== null)
 
-      // #114 (author form): Triggering an author form error with the submit button at the bottom edge keeps BOTH error and submit button inside the viewport.
+      // #114 (author form): Triggering an author form error keeps BOTH error and submit button inside the pinned footer within panelCard.
+      var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
       var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
-      verify(submitBtn !== null)
+      verify(card !== null && submitBtn !== null)
       panel.error = ""
       panel.errorScope = ""
-      wait(20)
-      var submitBottom = submitBtn.mapToItem(scroller.contentItem, 0, 0).y + submitBtn.height
-      scroller.contentY = Math.max(0, submitBottom - scroller.height)
       wait(20)
       panel.submitAuthor()
       wait(20)
       var authorErr = findOne(panel, function(item) { return item.text === panel.error && item.visible })
       verify(authorErr !== null)
-      var errInView = authorErr.mapToItem(scroller, 0, 0)
-      var submitInView = submitBtn.mapToItem(scroller, 0, 0)
-      verify(errInView.y >= -1 && errInView.y + authorErr.height <= scroller.height + 1)
-      verify(submitInView.y >= -1 && submitInView.y + submitBtn.height <= scroller.height + 1)
+      var errInCard = authorErr.mapToItem(card, 0, 0)
+      var submitInCard = submitBtn.mapToItem(card, 0, 0)
+      verify(errInCard.y >= scroller.y + scroller.height - 1 && errInCard.y + authorErr.height <= card.height + 1)
+      verify(submitInCard.y >= scroller.y + scroller.height - 1 && submitInCard.y + submitBtn.height <= card.height + 1)
 
       panel.closeAuthorForm()
       wait(20)
@@ -2015,6 +2014,76 @@ Item {
       panel.notice = ""
       panel.closeAuthorForm()
     }
+
+    function test_author_footer_stays_visible_with_live_portrait_preview() {
+      var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      verify(card !== null && scroller !== null)
+
+      var assertFooterVisible = function(submitLabel) {
+        var submitBtn = findOne(panel, function(item) { return item.label === submitLabel && item.visible })
+        var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+        verify(submitBtn !== null && cancelBtn !== null)
+        var submitPt = submitBtn.mapToItem(card, 0, 0)
+        var cancelPt = cancelBtn.mapToItem(card, 0, 0)
+        verify(submitPt.y >= scroller.y + scroller.height - 1 && submitPt.y + submitBtn.height <= card.height + 1)
+        verify(cancelPt.y >= scroller.y + scroller.height - 1 && cancelPt.y + cancelBtn.height <= card.height + 1)
+        return { submitBtn: submitBtn, cancelBtn: cancelBtn }
+      }
+
+      // 1. Add form with a tall 20-line live portrait preview: Add author and Cancel remain visible without scrolling.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      verify(imageField !== null)
+      imageField.text = "/tmp/tall-preview.png"
+      panel.runPortraitPreview("/tmp/tall-preview.png")
+      var previewProc = panel.activePortraitPreviewProcess
+      verify(previewProc !== null)
+      var twentyLines = Array.from({ length: 20 }, function() { return "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿" }).join("\\n")
+      completeProcess(previewProc, 0, JSON.stringify({ portrait: twentyLines, fontPx: 6, lineHeight: 8.4 }), "", false)
+      waitForRendering(panel)
+      scroller.contentY = 0
+      wait(0)
+      var addBtns = assertFooterVisible("Add author")
+
+      // 2. Compact user-resized height with 20-line preview still keeps Add author and Cancel pinned inside panelCard.
+      panel.userHeight = 440
+      waitForRendering(panel)
+      verify(scroller.contentHeight > scroller.height)
+      scroller.contentY = 0
+      wait(0)
+      addBtns = assertFooterVisible("Add author")
+      mouseClick(addBtns.cancelBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+      panel.userHeight = 0
+      waitForRendering(panel)
+
+      // 3. Edit form with 20-line current portrait keeps Save changes and Cancel visible without scrolling.
+      var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editBtn !== null)
+      mouseClick(editBtn)
+      waitForRendering(panel)
+      var replaceImg = findOne(panel, function(item) { return item.placeholderText === "Leave empty to keep current portrait" && item.visible })
+      verify(replaceImg !== null)
+      replaceImg.text = "/tmp/tall-edit.png"
+      panel.runPortraitPreview("/tmp/tall-edit.png")
+      var editPreviewProc = panel.activePortraitPreviewProcess
+      verify(editPreviewProc !== null)
+      completeProcess(editPreviewProc, 0, JSON.stringify({ portrait: twentyLines, fontPx: 6, lineHeight: 8.4 }), "", false)
+      waitForRendering(panel)
+      scroller.contentY = 0
+      wait(0)
+      var editBtns = assertFooterVisible("Save changes")
+      mouseClick(editBtns.cancelBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+    }
   }
 }
 `,
@@ -2030,7 +2099,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("12 passed, 0 failed");
+    expect(combined, combined).toContain("13 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

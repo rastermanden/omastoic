@@ -438,8 +438,17 @@ Item {
     })
   }
 
+  function isInsideScroller(item) {
+    var cur = item
+    while (cur) {
+      if (cur === scroller.contentItem) return true
+      cur = cur.parent
+    }
+    return false
+  }
+
   function reveal(item) {
-    if (!item) return
+    if (!item || !isInsideScroller(item)) return
     var pos = item.mapToItem(scroller.contentItem, 0, 0)
     var top = pos.y
     var bottom = pos.y + item.height
@@ -456,6 +465,7 @@ Item {
       if (form === quoteForm) authorGrid.forceLayout()
       if (form === authorForm && authorPortraitPreviewBox.visible) previewBoxColumn.forceLayout()
       if (form && typeof form.forceLayout === "function") form.forceLayout()
+      if (form === authorForm && authorFooter.visible) authorFooter.forceLayout()
       content.forceLayout()
       if (first) root.reveal(first)
       if (second) root.reveal(second)
@@ -1548,7 +1558,12 @@ Item {
         width: root.clampedCardWidth(root.userWidth > 0 ? root.userWidth : Style.space(520), keyCatcher.width)
         height: root.userHeight > 0
           ? root.clampedCardHeight(root.userHeight, keyCatcher.height)
-          : Math.min(content.implicitHeight + Style.spacing.popupPadding * 2, root.maxCardHeight(keyCatcher.height))
+          : Math.min(
+              content.implicitHeight
+                + (authorFooter.visible ? authorFooter.implicitHeight + Style.space(8) : 0)
+                + Style.spacing.popupPadding * 2,
+              root.maxCardHeight(keyCatcher.height)
+            )
         radius: Style.cornerRadius
         color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
@@ -1557,8 +1572,14 @@ Item {
 
         Flickable {
           id: scroller
-          anchors.fill: parent
-          anchors.margins: Style.spacing.popupPadding
+          anchors.top: parent.top
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: authorFooter.visible ? authorFooter.top : parent.bottom
+          anchors.topMargin: Style.spacing.popupPadding
+          anchors.leftMargin: Style.spacing.popupPadding
+          anchors.rightMargin: Style.spacing.popupPadding
+          anchors.bottomMargin: authorFooter.visible ? Style.space(8) : Style.spacing.popupPadding
           contentWidth: width
           contentHeight: content.implicitHeight
           clip: true
@@ -2318,29 +2339,6 @@ Item {
                   }
                 }
               }
-              Text {
-                id: authorErrorText
-                width: parent.width
-                visible: root.error !== "" && root.errorScope === "author"
-                text: root.error
-                color: Commons.Color.urgent
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
-              Row {
-                id: authorSubmitRow
-                spacing: Style.space(8)
-                RingButton {
-                  label: root.editingAuthorSlug !== "" ? "Save changes" : "Add author"
-                  available: root.authorReady && !root.busy
-                  onActivated: root.submitAuthor()
-                }
-                RingButton {
-                  label: "Cancel"
-                  onActivated: root.closeAuthorForm()
-                }
-              }
             }
 
             Rectangle {
@@ -2420,6 +2418,47 @@ Item {
                 maximumLineCount: 2
                 elide: Text.ElideRight
               }
+            }
+          }
+        }
+
+        Column {
+          id: authorFooter
+          objectName: "authorFooter"
+          visible: root.authorOpen
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.margins: Style.spacing.popupPadding
+          spacing: Style.space(8)
+
+          PanelSeparator { foreground: root.ink }
+
+          Text {
+            id: authorErrorText
+            objectName: "authorErrorText"
+            width: parent.width
+            visible: root.error !== "" && root.errorScope === "author"
+            text: root.error
+            color: Commons.Color.urgent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Row {
+            id: authorSubmitRow
+            objectName: "authorSubmitRow"
+            spacing: Style.space(8)
+            RingButton {
+              id: authorSubmitButton
+              label: root.editingAuthorSlug !== "" ? "Save changes" : "Add author"
+              available: root.authorReady && !root.busy
+              onActivated: root.submitAuthor()
+            }
+            RingButton {
+              label: "Cancel"
+              onActivated: root.closeAuthorForm()
             }
           }
         }
