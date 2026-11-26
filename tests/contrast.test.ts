@@ -45,6 +45,7 @@ test("small panel text stays at 4.5:1, dates hold over the selected-row wash, an
   // Dates sit over the tint, so they read stronger than the other quiet text
   // but still quieter than the author's name. Placeholders stay the faintest.
   expect(hint).toBeGreaterThan(0);
+  expect(hint).toBeLessThanOrEqual(0.5);
   expect(quiet).toBeGreaterThan(hint);
   expect(dates).toBeGreaterThan(quiet);
   expect(dates).toBeLessThan(1);

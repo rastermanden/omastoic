@@ -672,13 +672,15 @@ Item {
 
       mouseClick(musoniusRemove)
       compare(panel.confirmRemoveAuthor, "musonius")
-      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
       verify(nameField !== null)
       mouseClick(nameField)
       compare(panel.confirmRemoveAuthor, "")
 
       mouseClick(musoniusRemove)
       compare(panel.confirmRemoveAuthor, "musonius")
+      panel.notice = "Saving…"
+      wait(0)
       var disabledAddAuthor = findOne(panel, function(item) { return item.label === "Add author" && item.visible && !item.available })
       verify(disabledAddAuthor !== null)
       panel.reveal(disabledAddAuthor)
@@ -686,6 +688,8 @@ Item {
       mouseClick(disabledAddAuthor)
       compare(panel.opened, true)
       compare(panel.confirmRemoveAuthor, "")
+      panel.notice = ""
+      wait(0)
 
       var cancelAddBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
       verify(cancelAddBtn !== null)
@@ -1008,14 +1012,14 @@ Item {
       verify(findOne(panel, function(item) { return item.label === "Cancel" && item.visible }) !== null)
 
       // Author id field is hidden until Advanced is opened.
-      var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" })
+      var slugField = findOne(panel, function(item) { return item.objectName === "authorSlugField" })
       verify(slugField !== null)
       compare(slugField.visible, false)
 
       // Fill Name, Image, Citation, and a 300-character Quote without opening Advanced.
-      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
-      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
-      var citationField = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var citationField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
       var quoteArea = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
       verify(nameField !== null && imageField !== null && citationField !== null && quoteArea !== null)
 
@@ -1118,7 +1122,7 @@ Item {
       panel.openAddAuthor()
       wait(20)
       compare(panel.authorAdvancedOpen, false)
-      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
       verify(nameField !== null)
       nameField.text = "Seneca"
       compare(panel.newAuthorSlug, "seneca")
@@ -1134,7 +1138,7 @@ Item {
       wait(20)
       compare(panel.error, 'Author "seneca" is already a bundled author')
       compare(panel.authorAdvancedOpen, true)
-      var slugField = findOne(panel, function(item) { return item.placeholderText === "musonius" && item.visible })
+      var slugField = findOne(panel, function(item) { return item.objectName === "authorSlugField" && item.visible })
       verify(slugField !== null)
 
       // #114 (author form): Triggering an author form error keeps BOTH error and submit button inside the pinned footer within panelCard.
@@ -1191,9 +1195,9 @@ Item {
       panel.closeQuoteForm()
       panel.openAddAuthor()
       wait(20)
-      var nonAsciiName = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
-      var nonAsciiImage = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
-      var nonAsciiCitation = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var nonAsciiName = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var nonAsciiImage = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var nonAsciiCitation = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
       var nonAsciiQuote = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
       verify(nonAsciiName !== null && nonAsciiImage !== null && nonAsciiCitation !== null && nonAsciiQuote !== null)
       nonAsciiName.text = "Ἐπίκτητος"
@@ -1262,7 +1266,7 @@ Item {
         mouseClick(addAuthorBtn)
         wait(30)
         compare(panel.authorOpen, true)
-        var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
+        var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
         verify(nameField !== null)
         var namePos = nameField.mapToItem(scroller, 0, 0)
         verify(namePos.y >= -1 && namePos.y + nameField.height <= scroller.height + 1)
@@ -1279,7 +1283,7 @@ Item {
         mouseClick(addQuoteBtn)
         wait(30)
         compare(panel.quoteOpen, true)
-        var citeField = findOne(panel, function(item) { return item.placeholderText === "Meditations IV.17" && item.visible })
+        var citeField = findOne(panel, function(item) { return item.objectName === "quoteCitationField" && item.visible })
         verify(citeField !== null)
         var citePos = citeField.mapToItem(scroller, 0, 0)
         verify(citePos.y >= -1 && citePos.y + citeField.height <= scroller.height + 1)
@@ -1406,7 +1410,7 @@ Item {
       verify(chooseBtn !== null)
       compare(chooseBtn.available, true)
 
-      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
       verify(imageField !== null)
       verify(chooseBtn.x >= imageField.x + imageField.width)
 
@@ -1438,9 +1442,9 @@ Item {
       compare(imageField.activeFocus, true)
 
       // Fill remaining Add author fields and verify the picked path flows into panel apply addAuthor.
-      var nameField = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
-      var citeField = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
-      var quoteField = findOne(panel, function(item) { return item.placeholderText === "The line itself" && item.visible })
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var citeField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var quoteField = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
       verify(nameField !== null && citeField !== null && quoteField !== null)
       nameField.text = "Posidonius"
       citeField.text = "Fragments 1"
@@ -1463,7 +1467,7 @@ Item {
       addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
       mouseClick(addAuthorBtn)
       waitForRendering(panel)
-      imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
       chooseBtn = findOne(panel, function(item) { return item.label === "Choose image" && item.visible })
 
       // 2a. Empty field cancel
@@ -1592,7 +1596,7 @@ Item {
       addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
       mouseClick(addAuthorBtn)
       waitForRendering(panel)
-      imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
       chooseBtn = findOne(panel, function(item) { return item.label === "Choose image" && item.visible })
       panel.reveal(chooseBtn)
       waitForRendering(panel)
@@ -1820,7 +1824,7 @@ Item {
       waitForRendering(panel)
       compare(previewBox.visible, false)
 
-      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
       verify(imageField !== null)
       imageField.text = "/tmp/john-locke.jpg"
       wait(0)
@@ -1992,9 +1996,9 @@ Item {
       // 6. Submitting while a preview is still loading hides the empty preview box cleanly instead of leaving a stray caption.
       mouseClick(addAuthorBtn)
       waitForRendering(panel)
-      var addName = findOne(panel, function(item) { return item.placeholderText === "Musonius Rufus" && item.visible })
-      var addImg = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
-      var addCite = findOne(panel, function(item) { return item.placeholderText === "Lectures VI" && item.visible })
+      var addName = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var addImg = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var addCite = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
       var addQuote = findOne(panel, function(item) { return item.hasOwnProperty("viewportHeight") && item.visible })
       verify(addName !== null && addImg !== null && addCite !== null && addQuote !== null)
       addName.text = "Adam Smith"
@@ -2038,7 +2042,7 @@ Item {
       verify(addAuthorBtn !== null)
       mouseClick(addAuthorBtn)
       waitForRendering(panel)
-      var imageField = findOne(panel, function(item) { return item.placeholderText === "/path/to/portrait.png" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
       verify(imageField !== null)
       imageField.text = "/tmp/tall-preview.png"
       panel.runPortraitPreview("/tmp/tall-preview.png")
@@ -2084,6 +2088,127 @@ Item {
       wait(20)
       compare(panel.authorOpen, false)
     }
+
+    function test_empty_submit_explains_missing_fields_and_placeholders_look_distinct() {
+      var existingApply = findProcessFor("apply")
+      if (existingApply) existingApply.command = []
+      var borderFor = function(field) {
+        return findOne(field.parent, function(item) { return item.hasOwnProperty("border") && item.enabled === false })
+      }
+
+      // 1. Add author: clicking Add author while fields are empty explains every missing field, highlights them, and focuses the first.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var datesField = findOne(panel, function(item) { return item.objectName === "authorDatesField" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var citationField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var quoteField = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(nameField && datesField && imageField && citationField && quoteField && submitBtn)
+
+      // Placeholders look like prompts/examples and render italic while empty.
+      compare(nameField.placeholderText, "Example: Musonius Rufus")
+      compare(datesField.placeholderText, "Example: c. AD 30 – 100")
+      compare(imageField.placeholderText, "Choose or type an image path")
+      compare(citationField.placeholderText, "Example: Lectures VI")
+      compare(quoteField.placeholderText, "Type the quote")
+      compare(nameField.font.italic, true)
+      compare(citationField.font.italic, true)
+
+      compare(submitBtn.available, true)
+      mouseClick(submitBtn)
+      wait(20)
+      compare(panel.errorScope, "author")
+      compare(panel.error, "Fill in Name, Portrait image, Citation, and Quote.")
+      compare(panel.missingAuthorFields.join(","), "name,image,citation,text")
+      compare(findProcessFor("apply"), null)
+      compare(nameField.activeFocus, true)
+      compare(quoteField.invalid, true)
+      compare(String(borderFor(nameField).border.color), String(Commons.Color.urgent))
+      compare(String(borderFor(imageField).border.color), String(Commons.Color.urgent))
+      compare(String(borderFor(citationField).border.color), String(Commons.Color.urgent))
+
+      // Typing into Name removes its urgent highlight and italic styling while keeping remaining missing fields flagged.
+      nameField.text = "David Hume"
+      compare(nameField.font.italic, false)
+      compare(panel.missingAuthorFields.join(","), "image,citation,text")
+      imageField.text = "/tmp/hume.png"
+      quoteField.text = "Reason is, and ought only to be the slave of the passions."
+      wait(10)
+      compare(panel.missingAuthorFields.join(","), "citation")
+
+      // Submitting with only Citation missing names only Citation, focuses it, and typing Citation clears the error.
+      mouseClick(submitBtn)
+      wait(20)
+      compare(panel.error, "Fill in Citation.")
+      compare(panel.missingAuthorFields.join(","), "citation")
+      compare(citationField.activeFocus, true)
+      citationField.text = "Treatise II.3.3"
+      wait(10)
+      compare(panel.missingAuthorFields.length, 0)
+      compare(panel.error, "")
+
+      var cancelAuthorBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(cancelAuthorBtn !== null)
+      mouseClick(cancelAuthorBtn)
+      wait(20)
+
+      // 2. Edit author: entering Citation without Quote highlights Quote and explains the pairing; clearing Citation clears the error.
+      var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editBtn !== null)
+      mouseClick(editBtn)
+      waitForRendering(panel)
+      var editCite = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var editQuote = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      var saveBtn = findOne(panel, function(item) { return item.label === "Save changes" && item.visible })
+      verify(editCite && editQuote && saveBtn)
+      editCite.text = "Lectures IX"
+      mouseClick(saveBtn)
+      wait(20)
+      compare(panel.error, "Fill in Quote to match the citation.")
+      compare(panel.missingAuthorFields.join(","), "text")
+      compare(editQuote.invalid, true)
+      editCite.text = ""
+      wait(10)
+      compare(panel.error, "")
+      compare(editQuote.invalid, false)
+      var cancelEditBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      mouseClick(cancelEditBtn)
+      wait(20)
+
+      // 3. Add quote: clicking Add quote while Quote is missing explains it, highlights QuoteArea, and clears when typed.
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      verify(addQuoteBtn !== null)
+      mouseClick(addQuoteBtn)
+      waitForRendering(panel)
+      var qCite = findOne(panel, function(item) { return item.objectName === "quoteCitationField" && item.visible })
+      var qText = findOne(panel, function(item) { return item.objectName === "quoteTextField" && item.visible })
+      var qSubmit = findOne(panel, function(item) { return item.label === "Add quote" && item.visible })
+      verify(qCite && qText && qSubmit)
+      compare(qCite.placeholderText, "Example: Meditations IV.17")
+      compare(qText.placeholderText, "Type the quote")
+      compare(qCite.font.italic, true)
+      qCite.text = "Meditations IV.1"
+      compare(qCite.font.italic, false)
+      mouseClick(qSubmit)
+      wait(20)
+      compare(panel.errorScope, "quote")
+      compare(panel.error, "Fill in Quote.")
+      compare(panel.missingQuoteFields.join(","), "text")
+      compare(qText.invalid, true)
+      compare(qText.editFocused, true)
+      qText.text = "Our inward power turns obstacles into fuel."
+      wait(10)
+      compare(panel.error, "")
+      compare(qText.invalid, false)
+      var cancelQuoteBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      mouseClick(cancelQuoteBtn)
+      wait(20)
+    }
   }
 }
 `,
@@ -2099,7 +2224,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("13 passed, 0 failed");
+    expect(combined, combined).toContain("14 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
