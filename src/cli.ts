@@ -2763,7 +2763,7 @@ function panelReplaceAuthor(raw: unknown): { input: ReplaceAuthorInput } | { err
     (Object.hasOwn(row, "text") && row.text !== undefined)
   ) {
     if (typeof row.citation !== "string" || typeof row.text !== "string") {
-      return { error: "panel replaceAuthor citation and text must be given together" };
+      return { error: "A quote needs a citation and the words." };
     }
     quotes = [{ citation: row.citation, text: row.text }];
   }

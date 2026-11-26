@@ -1219,6 +1219,16 @@ test("panel state and panel apply replace and remove custom authors while protec
     expect(emptyPanelReplace.stderr).not.toContain("--image");
     expect(emptyPanelReplace.stderr).not.toContain("--name");
 
+    for (const partial of [
+      { slug: "hierocles", citation: "Only citation" },
+      { slug: "hierocles", text: "Only text" },
+    ]) {
+      const partialReplace = await s.cli(["panel", "apply", JSON.stringify({ replaceAuthor: partial })]);
+      expect(partialReplace.code).toBe(1);
+      expect(partialReplace.stderr).toContain("A quote needs a citation and the words.");
+      expect(partialReplace.stderr).not.toContain("panel replaceAuthor");
+    }
+
     // Removing the only selected custom author via panel apply switches explicitly to Marcus Aurelius and returns a clear notice.
     expectOk(await s.cli(["panel", "apply", JSON.stringify({ authors: ["hierocles"] })]), "select only hierocles via panel");
     const removedOnlyPanel = await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: "hierocles" })]);
