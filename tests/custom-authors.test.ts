@@ -1830,3 +1830,259 @@ test("custom author date ranges normalize on add, replace, panel, and read witho
     expect(reject129.stderr).toContain("at most 128 characters");
   } finally { s.cleanup(); }
 });
+
+test("config --add-author and --replace-author accept repeated paired --citation/--text flags and reject mismatches", async () => {
+  const s = sandbox();
+  const pngA = join(s.home, "a.png");
+  const pngB = join(s.home, "b.png");
+  writePortraitPng(pngA);
+  writePhotoPng(pngB);
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  const authorsPath = join(s.config, "omastoic/authors.tsv");
+  const configPath = join(s.config, "omastoic/config.json");
+
+  try {
+    // Unpaired / unequal / empty --citation and --text on --add-author fail cleanly and write nothing.
+    const badAddCases: Array<{ label: string; args: string[]; error: string }> = [
+      {
+        label: "lone --citation",
+        args: ["config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA, "--citation", "Lectures VI"],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "lone --text",
+        args: ["config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA, "--text", "Only text."],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "two --citation, one --text",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--citation", "Lectures VII",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "one --citation, two --text",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--text", "Second line.",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "empty second --citation",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--citation", "", "--text", "Second line.",
+        ],
+        error: "--citation and --text cannot be empty",
+      },
+      {
+        label: "missing value before --text",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--citation", "--text", "Second line.",
+        ],
+        error: "--citation and --text cannot be empty",
+      },
+    ];
+    for (const c of badAddCases) {
+      const res = await s.cli(c.args);
+      expect(res.code, c.label).toBe(1);
+      expect(res.stderr, c.label).toContain(c.error);
+    }
+    expect(existsSync(authorsPath)).toBe(false);
+    expect(existsSync(quotesPath)).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
+
+    // --add-author accepts repeated paired --citation/--text flags in order.
+    const addedMulti = await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", pngA,
+      "--citation", "Lectures VI", "--text", "First line.",
+      "--citation", "Lectures VII", "--text", "Second line.",
+    ]);
+    expectOk(addedMulti, "add-author with two citation/text pairs");
+    expect(addedMulti.stdout).toContain("2 quotes");
+    expect(readFileSync(quotesPath, "utf8")).toBe(
+      "# author-slug <TAB> citation <TAB> text\n" +
+      "musonius\tLectures VI\tFirst line.\n" +
+      "musonius\tLectures VII\tSecond line.\n",
+    );
+
+    // --add-author also combines repeated --citation/--text pairs with repeated --add lines in order
+    // (citation/text pairs first, then --add lines).
+    const addedMixed = await s.cli([
+      "config",
+      "--add-author", "hierocles",
+      "--name", "Hierocles",
+      "--image", pngA,
+      "--citation", "Elements I", "--text", "Pair one.",
+      "--citation", "Elements II", "--text", "Pair two.",
+      "--add", "hierocles\tElements III\tTsv one.",
+      "--add", "hierocles\tElements IV\tTsv two.",
+    ]);
+    expectOk(addedMixed, "add-author combining paired citation/text and --add");
+    expect(addedMixed.stdout).toContain("4 quotes");
+
+    expectOk(await s.cli(["config", "--add", "seneca\tDesk note\tSeneca custom line."]), "add seneca custom quote");
+    // musonius has 2 (c01, c02), hierocles has 4 (c03..c06), seneca has 1 (c07).
+    expectOk(await s.cli(["config", "--quotes", "seneca=q19,c07"]), "select seneca custom quote");
+
+    // --replace-author replaces musonius's quotes with two --citation/--text pairs in order,
+    // leaving hierocles's and seneca's quotes untouched.
+    const replacedTwo = await s.cli([
+      "config",
+      "--replace-author", "musonius",
+      "--citation", "Lectures XI", "--text", "Replaced first.",
+      "--citation", "Lectures XII", "--text", "Replaced second.",
+    ]);
+    expectOk(replacedTwo, "replace-author with two citation/text pairs");
+    expect(readFileSync(quotesPath, "utf8")).toBe(
+      "# author-slug <TAB> citation <TAB> text\n" +
+      "musonius\tLectures XI\tReplaced first.\n" +
+      "musonius\tLectures XII\tReplaced second.\n" +
+      "hierocles\tElements I\tPair one.\n" +
+      "hierocles\tElements II\tPair two.\n" +
+      "hierocles\tElements III\tTsv one.\n" +
+      "hierocles\tElements IV\tTsv two.\n" +
+      "seneca\tDesk note\tSeneca custom line.\n",
+    );
+
+    // --replace-author combines repeated --citation/--text pairs with --add lines (pairs first, then --add)
+    // and remaps other authors' custom quote ids when quote count changes.
+    const replacedMixed = await s.cli([
+      "config",
+      "--replace-author", "musonius",
+      "--citation", "Lectures XIII", "--text", "Mixed pair one.",
+      "--citation", "Lectures XIV", "--text", "Mixed pair two.",
+      "--add", "musonius\tLectures XV\tMixed tsv three.",
+    ]);
+    expectOk(replacedMixed, "replace-author combining citation/text pairs and --add");
+    const quotesAfterMixed = readFileSync(quotesPath, "utf8");
+    expect(quotesAfterMixed).toBe(
+      "# author-slug <TAB> citation <TAB> text\n" +
+      "musonius\tLectures XIII\tMixed pair one.\n" +
+      "musonius\tLectures XIV\tMixed pair two.\n" +
+      "musonius\tLectures XV\tMixed tsv three.\n" +
+      "hierocles\tElements I\tPair one.\n" +
+      "hierocles\tElements II\tPair two.\n" +
+      "hierocles\tElements III\tTsv one.\n" +
+      "hierocles\tElements IV\tTsv two.\n" +
+      "seneca\tDesk note\tSeneca custom line.\n",
+    );
+    // musonius grew from 2 to 3 quotes, shifting seneca's custom quote from c07 to c08.
+    expect(JSON.parse(readFileSync(configPath, "utf8")).quotes.seneca).toEqual(["q19", "c08"]);
+
+    // Unpaired, unequal, empty, duplicate, and repeated single-value flags on --replace-author fail and write nothing.
+    const authorsBeforeFail = readFileSync(authorsPath, "utf8");
+    const artBeforeFail = readFileSync(join(s.config, "omastoic/art/musonius.txt"), "utf8");
+    const configBeforeFail = readFileSync(configPath, "utf8");
+
+    const badReplaceCases: Array<{ label: string; args: string[]; error: string }> = [
+      {
+        label: "replace lone --citation",
+        args: ["config", "--replace-author", "musonius", "--citation", "Only cite"],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace lone --text",
+        args: ["config", "--replace-author", "musonius", "--text", "Only text."],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace unequal 2 citations 1 text",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "A", "--text", "a",
+          "--citation", "B",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace unequal 1 citation 2 texts",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "A", "--text", "a",
+          "--text", "b",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace empty second --text",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "A", "--text", "a",
+          "--citation", "B", "--text", "",
+        ],
+        error: "--citation and --text cannot be empty",
+      },
+      {
+        label: "replace duplicate pair",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "Same", "--text", "Same line.",
+          "--citation", "Same", "--text", "Same line.",
+        ],
+        error: "duplicate quote",
+      },
+      {
+        label: "repeated --name",
+        args: ["config", "--replace-author", "musonius", "--name", "One", "--name", "Two"],
+        error: "--name can only be passed once",
+      },
+      {
+        label: "repeated --dates",
+        args: ["config", "--replace-author", "musonius", "--dates", "30 – 100", "--dates", "25 – 95"],
+        error: "--dates can only be passed once",
+      },
+      {
+        label: "repeated --image",
+        args: ["config", "--replace-author", "musonius", "--image", pngA, "--image", pngB],
+        error: "--image can only be passed once",
+      },
+      {
+        label: "repeated --authors",
+        args: ["config", "--authors", "marcus", "--authors", "seneca"],
+        error: "--authors can only be passed once",
+      },
+      {
+        label: "repeated --interval",
+        args: ["config", "--interval", "30", "--interval", "60"],
+        error: "--interval can only be passed once",
+      },
+      {
+        label: "repeated --add-author",
+        args: ["config", "--add-author", "a", "--add-author", "b"],
+        error: "--add-author accepts one author at a time",
+      },
+      {
+        label: "repeated --replace-author",
+        args: ["config", "--replace-author", "musonius", "--replace-author", "hierocles", "--name", "Both"],
+        error: "--replace-author accepts one author at a time",
+      },
+      {
+        label: "repeated --remove-author",
+        args: ["config", "--remove-author", "musonius", "--remove-author", "hierocles"],
+        error: "--remove-author accepts one author at a time",
+      },
+    ];
+    for (const c of badReplaceCases) {
+      const res = await s.cli(c.args);
+      expect(res.code, c.label).toBe(1);
+      expect(res.stderr, c.label).toContain(c.error);
+    }
+
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesAfterMixed);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBeforeFail);
+    expect(readFileSync(join(s.config, "omastoic/art/musonius.txt"), "utf8")).toBe(artBeforeFail);
+    expect(readFileSync(configPath, "utf8")).toBe(configBeforeFail);
+  } finally { s.cleanup(); }
+}, 30000);
