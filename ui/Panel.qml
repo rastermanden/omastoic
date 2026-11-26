@@ -126,12 +126,12 @@ Item {
     return null
   }
   readonly property var duplicateAuthorNames: {
-    let counts = {}
+    let counts = Object.create(null)
     for (let i = 0; i < samples.length; i++) {
       let key = String(samples[i].name || "").trim().toLowerCase()
       if (key !== "") counts[key] = (counts[key] || 0) + 1
     }
-    let dups = {}
+    let dups = Object.create(null)
     for (let k in counts) {
       if (counts[k] > 1) dups[k] = true
     }
@@ -229,6 +229,13 @@ Item {
     confirmRemoveAuthor = ""
     editingAuthorPortrait = ""
     customAuthorSlug = ""
+  }
+
+  function clearValidationState() {
+    missingAuthorFields = []
+    missingQuoteFields = []
+    authorValidationError = false
+    quoteValidationError = false
   }
 
   function isAuthorFieldMissing(key) {
@@ -778,6 +785,7 @@ Item {
     if (!next.length) {
       error = ""
       errorScope = ""
+      clearValidationState()
       authorListHint = "Pick at least one author."
       root.reveal(rotationHeaderRow)
       return
@@ -797,6 +805,7 @@ Item {
     if (adopting || !opened) return
     error = ""
     errorScope = ""
+    clearValidationState()
     applyTimer.restart()
   }
 
@@ -806,6 +815,7 @@ Item {
     if (!selectedAuthors.length) {
       error = ""
       errorScope = ""
+      clearValidationState()
       authorListHint = "Pick at least one author."
       root.reveal(rotationHeaderRow)
       return
@@ -867,6 +877,7 @@ Item {
     saving = true
     error = ""
     errorScope = ""
+    clearValidationState()
     notice = "Saving…"
     resetRun(applyRun)
     applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
@@ -1868,6 +1879,7 @@ Item {
                       root.clearRotationNotice()
                       root.error = ""
                       root.errorScope = ""
+                      root.clearValidationState()
                       root.authorListHint = ""
                       root.notice = "Opening preview…"
                       previewProcess.command = root.preview && root.preview.id
