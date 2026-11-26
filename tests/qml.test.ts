@@ -2379,6 +2379,58 @@ Item {
       verify(lockeCheck !== null)
       compare(lockeCheck.visible, true)
     }
+
+    function test_duplicate_author_names_are_distinguishable_and_unique_names_stay_plain() {
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "david-hume", "hume-panel"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [
+          { id: "c01", author: "hume-panel", name: "David Hume", citation: "Enquiry", text: "Custom line." },
+        ],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "david-hume", name: "David Hume", dates: "1711 – 1776", custom: true, portrait: "⣿", citation: "Treatise", text: "Custom is the guide." },
+          { slug: "hume-panel", name: "David Hume", dates: "", custom: true, portrait: "⣿", citation: "Enquiry", text: "Custom line." },
+        ],
+      })), true)
+      waitForRendering(panel)
+
+      // Unique author name stays plain without showing slug.
+      var marcusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Marcus Aurelius" })
+      verify(marcusRow !== null)
+      compare(findOne(marcusRow, function(item) { return item.text === "marcus" || (item.text && item.text.indexOf("marcus") !== -1) }), null)
+
+      // Duplicate author names include their id in Accessible.name and visible secondary text.
+      var humeOneRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "David Hume (david-hume)" })
+      var humeTwoRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "David Hume (hume-panel)" })
+      verify(humeOneRow !== null && humeTwoRow !== null)
+      verify(findOne(humeOneRow, function(item) { return item.text === "david-hume · 1711 – 1776" && item.visible }) !== null)
+      verify(findOne(humeTwoRow, function(item) { return item.text === "hume-panel" && item.visible }) !== null)
+
+      // Edit form heading identifies which duplicate author is being edited.
+      var humeTwoEdit = findOne(humeTwoRow, function(item) { return item.label === "Edit" && item.visible })
+      verify(humeTwoEdit !== null)
+      mouseClick(humeTwoEdit)
+      waitForRendering(panel)
+      verify(findOne(panel, function(item) { return item.text === "Edit David Hume (hume-panel)" && item.visible }) !== null)
+      var cancelEdit = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      mouseClick(cancelEdit)
+      wait(20)
+
+      // Add quote author chips also distinguish duplicate author names while keeping unique names plain.
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      verify(addQuoteBtn !== null)
+      mouseClick(addQuoteBtn)
+      waitForRendering(panel)
+      verify(findOne(panel, function(item) { return item.label === "Marcus Aurelius" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "David Hume (david-hume)" && item.visible }) !== null)
+      verify(findOne(panel, function(item) { return item.label === "David Hume (hume-panel)" && item.visible }) !== null)
+      var cancelQuote = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      mouseClick(cancelQuote)
+      wait(20)
+    }
   }
 }
 `,
@@ -2394,7 +2446,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("16 passed, 0 failed");
+    expect(combined, combined).toContain("17 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

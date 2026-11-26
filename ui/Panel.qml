@@ -125,6 +125,21 @@ Item {
     }
     return null
   }
+  readonly property var duplicateAuthorNames: {
+    let counts = {}
+    for (let i = 0; i < samples.length; i++) {
+      let key = String(samples[i].name || "").trim().toLowerCase()
+      if (key !== "") counts[key] = (counts[key] || 0) + 1
+    }
+    let dups = {}
+    for (let k in counts) {
+      if (counts[k] > 1) dups[k] = true
+    }
+    return dups
+  }
+  readonly property string editingAuthorHeading: hasDuplicateAuthorName(editingAuthorOrigName)
+    ? (editingAuthorOrigName + " (" + editingAuthorSlug + ")")
+    : editingAuthorOrigName
   readonly property bool hasPortrait: preview !== null && /[^\s\u2800]/.test(String(preview.portrait || ""))
   readonly property string displayedAuthorPortrait: newAuthorImage.trim() !== ""
     ? portraitPreviewArt
@@ -257,6 +272,35 @@ Item {
     if (!field) return
     if (typeof field.takeFocus === "function") field.takeFocus()
     else field.forceActiveFocus()
+  }
+
+  function hasDuplicateAuthorName(name) {
+    var key = String(name || "").trim().toLowerCase()
+    return key !== "" && duplicateAuthorNames[key] === true
+  }
+
+  function authorDisplayName(author) {
+    if (!author) return ""
+    var name = String(author.name || "")
+    var slug = String(author.slug || "")
+    return (slug !== "" && hasDuplicateAuthorName(name)) ? (name + " (" + slug + ")") : name
+  }
+
+  function authorDisplayNameBySlug(slug, fallbackName) {
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].slug === slug) return authorDisplayName(samples[i])
+    }
+    return String(fallbackName || slug || "")
+  }
+
+  function authorRowMeta(author) {
+    if (!author) return ""
+    var dates = String(author.dates || "")
+    var slug = String(author.slug || "")
+    if (slug !== "" && hasDuplicateAuthorName(author.name)) {
+      return dates !== "" ? (slug + " · " + dates) : slug
+    }
+    return dates
   }
 
   function captureFormReturnY() {
@@ -1863,7 +1907,7 @@ Item {
                     id: citationPreviewText
                     width: parent.width
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.preview ? (root.preview.citation !== "" ? (root.preview.name + ", " + root.preview.citation) : root.preview.name) : ""
+                    text: root.preview ? (root.preview.citation !== "" ? (root.authorDisplayName(root.preview) + ", " + root.preview.citation) : root.authorDisplayName(root.preview)) : ""
                     color: root.quiet
                     font.family: Style.font.family
                     font.pixelSize: Style.font.bodySmall
@@ -1927,7 +1971,7 @@ Item {
                 border.width: activeFocus ? Math.max(2, Style.space(2)) : (rowPress.containsMouse ? Math.max(1, Style.space(1)) : 0)
                 border.color: activeFocus ? Commons.Color.accent : root.ink
                 activeFocusOnTab: true
-                Accessible.name: modelData.name
+                Accessible.name: root.authorDisplayName(authorRow.modelData)
                 Accessible.role: Accessible.CheckBox
 
                 MouseArea {
@@ -1977,8 +2021,8 @@ Item {
                     Text {
                       width: parent.width
                       elide: Text.ElideRight
-                      visible: authorRow.modelData.dates !== ""
-                      text: authorRow.modelData.dates
+                      visible: authorRow.modelData.dates !== "" || root.hasDuplicateAuthorName(authorRow.modelData.name)
+                      text: root.authorRowMeta(authorRow.modelData)
                       color: root.dates
                       font.family: Style.font.family
                       font.pixelSize: Style.font.bodySmall
@@ -2095,7 +2139,7 @@ Item {
                     required property int index
                     property int chipIndex: index
                     width: Math.floor((authorGrid.width - Style.space(12)) / 3)
-                    label: modelData.name
+                    label: root.authorDisplayName(modelData)
                     picked: root.newAuthor === modelData.slug
                     onActivated: root.newAuthor = modelData.slug
                     Keys.onPressed: function(event) {
@@ -2174,7 +2218,7 @@ Item {
                 text: {
                   var who = ""
                   for (let i = 0; i < root.samples.length; i++) {
-                    if (root.samples[i].slug === root.newAuthor) who = root.samples[i].name
+                    if (root.samples[i].slug === root.newAuthor) who = root.authorDisplayName(root.samples[i])
                   }
                   var cite = root.newCitation.trim()
                   var line = root.newText.replace(/[\r\n]+/g, " ").trim()
@@ -2219,7 +2263,7 @@ Item {
 
               Text {
                 visible: root.editingAuthorSlug !== ""
-                text: "Edit " + root.editingAuthorOrigName
+                text: "Edit " + root.editingAuthorHeading
                 color: root.ink
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
@@ -2587,7 +2631,7 @@ Item {
                   spacing: Style.space(8)
                   Text {
                     width: parent.width - Style.space(96)
-                    text: customRow.modelData.name + ", " + customRow.modelData.citation
+                    text: root.authorDisplayNameBySlug(customRow.modelData.author, customRow.modelData.name) + ", " + customRow.modelData.citation
                     color: root.ink
                     font.family: Style.font.family
                     font.pixelSize: Style.font.bodySmall
