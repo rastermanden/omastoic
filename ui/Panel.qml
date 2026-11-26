@@ -85,8 +85,11 @@ Item {
   property string newCitation: ""
   property string newText: ""
   property string newAuthorName: ""
-  property string newAuthorSlug: ""
-  property bool authorSlugEdited: false
+  readonly property string derivedAuthorSlug: slugFromName(newAuthorName)
+  property string customAuthorSlug: ""
+  readonly property string newAuthorSlug: editingAuthorSlug !== ""
+    ? editingAuthorSlug
+    : (customAuthorSlug.trim() !== "" ? customAuthorSlug.trim() : derivedAuthorSlug)
   property bool authorAdvancedOpen: false
   property string newAuthorDates: ""
   property string newAuthorImage: ""
@@ -110,7 +113,7 @@ Item {
         )
       )
     : (
-        (newAuthorSlug.trim() !== "" || !authorAdvancedOpen) &&
+        newAuthorSlug.trim() !== "" &&
         newAuthorName.trim() !== "" &&
         newAuthorImage.trim() !== "" &&
         newAuthorCitation.trim() !== "" &&
@@ -176,6 +179,7 @@ Item {
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
+    customAuthorSlug = ""
     pendingReplaceAuthor = null
     pendingRemoveAuthor = ""
     confirmRemoveAuthor = ""
@@ -209,6 +213,7 @@ Item {
     quoteValidationError = false
     confirmRemoveAuthor = ""
     editingAuthorPortrait = ""
+    customAuthorSlug = ""
   }
 
   function isAuthorFieldMissing(key) {
@@ -690,7 +695,7 @@ Item {
       clearPortraitPreview()
       authorOpen = false
       authorAdvancedOpen = false
-      authorSlugEdited = false
+      customAuthorSlug = ""
       missingAuthorFields = []
       authorValidationError = false
       editingAuthorSlug = ""
@@ -915,7 +920,7 @@ Item {
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
-    authorSlugEdited = false
+    customAuthorSlug = ""
     authorAdvancedOpen = false
     authorNameField.text = ""
     authorSlugField.text = ""
@@ -950,10 +955,10 @@ Item {
     editingAuthorOrigName = author.name
     editingAuthorOrigDates = author.dates
     editingAuthorPortrait = String(author.fullPortrait || "")
-    authorSlugEdited = true
+    customAuthorSlug = ""
     authorAdvancedOpen = false
     authorNameField.text = author.name
-    authorSlugField.text = author.slug
+    authorSlugField.text = ""
     authorDatesField.text = author.dates
     authorImageField.text = ""
     authorCitationField.text = ""
@@ -976,6 +981,7 @@ Item {
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
+    customAuthorSlug = ""
     keyCatcher.forceActiveFocus()
     restoreFormReturnY()
   }
@@ -2232,13 +2238,11 @@ Item {
                   onTextChanged: {
                     root.newAuthorName = text
                     if (text.trim() !== "") root.clearMissingAuthorField("name")
-                    if (!root.authorSlugEdited) {
-                      let suggested = root.slugFromName(text)
-                      root.newAuthorSlug = suggested
-                      if (authorSlugField.text !== suggested) authorSlugField.text = suggested
-                      if (root.editingAuthorSlug === "" && text.trim() !== "" && suggested === "") {
-                        root.authorAdvancedOpen = true
-                      }
+                    if (root.derivedAuthorSlug !== "" || root.customAuthorSlug.trim() !== "") {
+                      root.clearMissingAuthorField("slug")
+                    }
+                    if (root.editingAuthorSlug === "" && text.trim() !== "" && root.derivedAuthorSlug === "" && root.customAuthorSlug.trim() === "") {
+                      root.authorAdvancedOpen = true
                     }
                   }
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorNameField)
@@ -2504,13 +2508,12 @@ Item {
                     id: authorSlugField
                     objectName: "authorSlugField"
                     width: parent.width
-                    placeholderText: "Example: musonius"
+                    placeholderText: root.derivedAuthorSlug !== "" ? ("From name: " + root.derivedAuthorSlug) : "Example: musonius"
                     placeholderTextColor: root.hint
                     font.italic: text === ""
                     foreground: root.ink
                     onTextChanged: {
-                      root.newAuthorSlug = text
-                      if (activeFocus) root.authorSlugEdited = text.trim() !== ""
+                      root.customAuthorSlug = text
                       if (text.trim() !== "") root.clearMissingAuthorField("slug")
                     }
                     onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField)

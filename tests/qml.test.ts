@@ -1065,7 +1065,9 @@ Item {
       wait(20)
       compare(panel.authorAdvancedOpen, true)
       compare(slugField.visible, true)
-      compare(slugField.text, "john-locke")
+      compare(panel.newAuthorSlug, "john-locke")
+      compare(slugField.text, "")
+      compare(slugField.placeholderText, "From name: john-locke")
     }
 
     function test_review_fixes_cancel_mid_save_scrolled_hint_error_reveal_and_id_collision() {
@@ -2209,6 +2211,63 @@ Item {
       mouseClick(cancelQuoteBtn)
       wait(20)
     }
+
+    function test_author_id_replaces_never_appends_and_preserves_manual_edit() {
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var slugField = findOne(panel, function(item) { return item.objectName === "authorSlugField" })
+      var advToggle = findOne(panel, function(item) { return item.text === "▸ Advanced" && item.visible })
+      verify(nameField && slugField && advToggle)
+
+      // Typing and changing Name always recomputes and replaces derived id, never appending to previous text.
+      nameField.text = "David"
+      compare(panel.newAuthorSlug, "david")
+      nameField.text = "David Hume"
+      compare(panel.newAuthorSlug, "david-hume")
+      nameField.text = "Adam Smith"
+      compare(panel.newAuthorSlug, "adam-smith")
+      nameField.text = "David Hume"
+      compare(panel.newAuthorSlug, "david-hume")
+      compare(slugField.text, "")
+
+      // Opening Advanced and typing a custom id sets only the user's id (never "david-humehume-panel").
+      panel.reveal(advToggle)
+      waitForRendering(panel)
+      mouseClick(advToggle)
+      waitForRendering(panel)
+      compare(slugField.visible, true)
+      compare(slugField.placeholderText, "From name: david-hume")
+      panel.reveal(slugField)
+      waitForRendering(panel)
+      mouseClick(slugField)
+      wait(10)
+      compare(slugField.activeFocus, true)
+      var manual = "hume-panel"
+      for (var k = 0; k < manual.length; k++) keyClick(manual.charAt(k))
+      wait(10)
+      compare(slugField.text, "hume-panel")
+      compare(panel.newAuthorSlug, "hume-panel")
+
+      // Editing Name further never overwrites the manually entered Author id.
+      nameField.text = "David Hume Jr"
+      wait(10)
+      compare(slugField.text, "hume-panel")
+      compare(panel.newAuthorSlug, "hume-panel")
+
+      // Clearing the manual Author id returns to the recomputed id from Name.
+      slugField.text = ""
+      wait(10)
+      compare(panel.newAuthorSlug, "david-hume-jr")
+      compare(slugField.placeholderText, "From name: david-hume-jr")
+
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      mouseClick(cancelBtn)
+      wait(20)
+    }
   }
 }
 `,
@@ -2224,7 +2283,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("14 passed, 0 failed");
+    expect(combined, combined).toContain("15 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
