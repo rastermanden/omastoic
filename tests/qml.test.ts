@@ -2169,15 +2169,37 @@ Item {
       mouseClick(cancelAuthorBtn)
       wait(20)
 
-      // 2. Edit author: entering Citation without Quote highlights Quote and explains the pairing; clearing Citation clears the error.
+      // 2. Edit author: submitting with no changes shows guidance and clears on any edit; unpaired Citation highlights Quote.
       var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
       verify(editBtn !== null)
       mouseClick(editBtn)
       waitForRendering(panel)
+      var editName = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var editDates = findOne(panel, function(item) { return item.objectName === "authorDatesField" && item.visible })
       var editCite = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
       var editQuote = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
       var saveBtn = findOne(panel, function(item) { return item.label === "Save changes" && item.visible })
-      verify(editCite && editQuote && saveBtn)
+      verify(editName && editDates && editCite && editQuote && saveBtn)
+
+      mouseClick(saveBtn)
+      wait(20)
+      compare(panel.error, "Change the portrait, name, dates, or quote first.")
+      compare(panel.errorScope, "author")
+      editDates.text = "c. 30–101"
+      wait(10)
+      compare(panel.error, "")
+      compare(panel.errorScope, "")
+
+      editDates.text = "c. 30–100"
+      mouseClick(saveBtn)
+      wait(20)
+      compare(panel.error, "Change the portrait, name, dates, or quote first.")
+      editName.text = "Musonius Rufus II"
+      wait(10)
+      compare(panel.error, "")
+      compare(panel.errorScope, "")
+      editName.text = "Musonius Rufus"
+
       editCite.text = "Lectures IX"
       mouseClick(saveBtn)
       wait(20)

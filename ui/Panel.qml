@@ -53,6 +53,7 @@ Item {
   property string portraitPreviewSource: ""
   readonly property string pickerUnavailableNotice: "Could not open the file picker. Type a path instead."
   readonly property string pickerUnsupportedNotice: "Choose a JPEG or PNG saved on this computer."
+  readonly property string noAuthorChangesError: "Change the portrait, name, dates, or quote first."
   property string pendingRemove: ""
   property string pendingRemoveAuthor: ""
   property string confirmRemoveAuthor: ""
@@ -236,6 +237,14 @@ Item {
     missingQuoteFields = []
     authorValidationError = false
     quoteValidationError = false
+  }
+
+  function clearNoChangeAuthorError() {
+    if (errorScope === "author" && error === noAuthorChangesError) {
+      error = ""
+      errorScope = ""
+      authorValidationError = false
+    }
   }
 
   function isAuthorFieldMissing(key) {
@@ -1107,7 +1116,7 @@ Item {
         notice = ""
         missingAuthorFields = []
         authorValidationError = false
-        error = "Change the portrait, name, dates, or quote first."
+        error = noAuthorChangesError
         errorScope = "author"
         return
       }
@@ -2309,6 +2318,7 @@ Item {
                   foreground: root.ink
                   onTextChanged: {
                     root.newAuthorName = text
+                    root.clearNoChangeAuthorError()
                     if (text.trim() !== "") root.clearMissingAuthorField("name")
                     if (root.derivedAuthorSlug !== "" || root.customAuthorSlug.trim() !== "") {
                       root.clearMissingAuthorField("slug")
@@ -2346,7 +2356,10 @@ Item {
                   placeholderTextColor: root.hint
                   font.italic: text === ""
                   foreground: root.ink
-                  onTextChanged: root.newAuthorDates = text
+                  onTextChanged: {
+                    root.newAuthorDates = text
+                    root.clearNoChangeAuthorError()
+                  }
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorDatesField)
                 }
                 Rectangle {
@@ -2384,6 +2397,7 @@ Item {
                     foreground: root.ink
                     onTextChanged: {
                       root.newAuthorImage = text
+                      root.clearNoChangeAuthorError()
                       if (text.trim() !== "") root.clearMissingAuthorField("image")
                       if (root.notice === root.pickerUnavailableNotice || root.notice === root.pickerUnsupportedNotice) {
                         root.clearPickerNotice()
@@ -2491,6 +2505,7 @@ Item {
                   foreground: root.ink
                   onTextChanged: {
                     root.newAuthorCitation = text
+                    root.clearNoChangeAuthorError()
                     if (text.trim() !== "") root.clearMissingAuthorField("citation")
                     else if (root.editingAuthorSlug !== "" && root.newAuthorText.trim() === "") root.clearMissingAuthorField("text")
                   }
@@ -2520,6 +2535,7 @@ Item {
                 invalid: root.isAuthorFieldMissing("text")
                 onTextChanged: {
                   root.newAuthorText = text
+                  root.clearNoChangeAuthorError()
                   if (text.trim() !== "") root.clearMissingAuthorField("text")
                   else if (root.editingAuthorSlug !== "" && root.newAuthorCitation.trim() === "") root.clearMissingAuthorField("citation")
                 }
