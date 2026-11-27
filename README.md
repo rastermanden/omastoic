@@ -189,9 +189,10 @@ omastoic config --replace-author musonius --image new-portrait.jpg
 omastoic config --remove-author musonius
 ```
 
-Optional `--name` and `--dates` update those fields, while `--citation` and
-`--text`, or `--add`, replace that custom author's quotes. Omitted fields stay
-as they are. Pass `--dates ""` to clear dates. Portrait replacement writes
+Optional `--name` and `--dates` update those fields. Paired `--citation` and
+`--text` flags, or `--add` lines, replace that custom author's quotes. Repeat
+`--citation` and `--text` in pairs to set more than one quote. Omitted fields
+stay as they are. Pass `--dates ""` to clear dates. Portrait replacement writes
 `art/<slug>.txt` atomically and rolls back on failure, so an unusable image
 keeps the previous portrait, author row, and quotes in place.
 
@@ -202,10 +203,10 @@ from `config.json` without touching bundled files or other custom authors.
 Bundled Stoics have no edit or remove buttons and are rejected by both
 commands. Passing an existing custom slug to `--add-author` fails and points to
 `--replace-author`. Each single-value `config` flag can be passed only once:
-`--authors`, `--interval`, `--name`, `--dates`, `--image`, `--citation`,
-`--text`, `--add-author`, `--replace-author`, and `--remove-author`. If you
-repeat any of them, the command exits with an error. You can repeat `--quotes`
-and `--add`.
+`--authors`, `--interval`, `--name`, `--dates`, `--image`, `--add-author`,
+`--replace-author`, and `--remove-author`. If you repeat any of them, the
+command exits with an error. You can repeat `--citation` and `--text` in pairs,
+and you can repeat `--quotes` and `--add`.
 
 ### On screen
 
