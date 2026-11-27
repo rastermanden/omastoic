@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cellWidth } from "../src/canvas.ts";
 import { sandbox } from "./sandbox.ts";
 import { pty } from "./pty.ts";
 
@@ -162,5 +163,95 @@ test("config --help documents single-use and repeatable flags", async () => {
     expect(singleUseSentence).not.toContain("--text");
     expect(repeatSentence).toMatch(/repeat.*--quotes.*--add/i);
     expect(repeatSentence).toMatch(/repeat.*--citation.*--text.*in pairs/i);
+  } finally { s.cleanup(); }
+});
+
+test("status keeps count and portrait columns aligned with long and wide custom author names", async () => {
+  const s = sandbox();
+  const extractBookRows = (stdout: string) => {
+    const lines = stdout.trimEnd().split("\n");
+    const headerIdx = lines.findIndex((line) => /^\d+ quotes?:$/.test(line));
+    expect(headerIdx).toBeGreaterThanOrEqual(0);
+    return lines.slice(headerIdx + 1);
+  };
+  const assertAlignedColumns = (rows: string[]) => {
+    const dataRows = rows.filter((line) => /\s+\d+\s+(?:no )?portrait$/.test(line));
+    expect(dataRows.length).toBeGreaterThan(1);
+    const countEnds = new Set<number>();
+    const artStarts = new Set<number>();
+    for (const line of dataRows) {
+      const match = /^(.*?\s+\d+)(\s+)((?:no )?portrait)$/.exec(line);
+      expect(match, line).not.toBeNull();
+      countEnds.add(cellWidth(match![1]!));
+      artStarts.add(cellWidth(match![1]! + match![2]!));
+    }
+    expect(countEnds.size).toBe(1);
+    expect(artStarts.size).toBe(1);
+  };
+
+  try {
+    // Bundled Stoics keep the exact existing 18-cell layout.
+    const bundled = await s.cli(["status"]);
+    expect(bundled.code).toBe(0);
+    expect(bundled.stderr).toBe("");
+    const bundledRows = extractBookRows(bundled.stdout);
+    expect(bundledRows).toContain("  Marcus Aurelius     27  portrait");
+    assertAlignedColumns(bundledRows);
+
+    // Medium-long name (> 18 chars) and wide CJK name align count and portrait columns by display cells.
+    const mediumName = "Lucius Annaeus Seneca the Younger";
+    s.put(
+      join(s.config, "omastoic/authors.tsv"),
+      `seneca-younger\t${mediumName}\tc. 4 BC – AD 65\nkongzi\t孔子\t551 – 479 BC\n`,
+    );
+    s.put(
+      join(s.config, "omastoic/quotes.tsv"),
+      "seneca-younger\tLetters I.1\tWe suffer more often in imagination than in reality.\n" +
+      "kongzi\tAnalects II.17\tReal knowledge is to know the extent of one's ignorance.\n",
+    );
+    const widened = await s.cli(["status"]);
+    expect(widened.code).toBe(0);
+    expect(widened.stderr).toBe("");
+    const widenedRows = extractBookRows(widened.stdout);
+    assertAlignedColumns(widenedRows);
+    expect(widened.stdout).toContain(mediumName);
+    expect(widened.stdout).toContain("孔子");
+
+    // Very long names (> 40 chars, both multi-word and unbroken) indent-wrap while preserving full names and alignment.
+    const longName = "Lucius Annaeus Seneca the Younger of Corduba in Hispania";
+    const unbrokenName = "SupercalifragilisticexpialidociousPhilosopherOfStoa";
+    s.put(
+      join(s.config, "omastoic/authors.tsv"),
+      `seneca-corduba\t${longName}\tc. 4 BC – AD 65\nunbroken\t${unbrokenName}\tAD 100 – 180\n`,
+    );
+    s.put(
+      join(s.config, "omastoic/quotes.tsv"),
+      "seneca-corduba\tLetters I.1\tWe suffer more often in imagination than in reality.\n" +
+      "unbroken\tFragments I.1\tEndure and renounce.\n",
+    );
+    const wrapped = await s.cli(["status"]);
+    expect(wrapped.code).toBe(0);
+    expect(wrapped.stderr).toBe("");
+    const wrappedRows = extractBookRows(wrapped.stdout);
+    assertAlignedColumns(wrappedRows);
+    for (const line of wrappedRows) {
+      expect(cellWidth(line), line).toBeLessThanOrEqual(80);
+    }
+    // Continuation lines carry a hanging indent and preserve every character of the long names.
+    expect(wrappedRows.some((line) => line.startsWith("    "))).toBe(true);
+    const renderedNames: string[] = [];
+    for (const line of wrappedRows) {
+      if (line.startsWith("    ")) {
+        expect(renderedNames.length).toBeGreaterThan(0);
+        const cont = line.trim();
+        renderedNames[renderedNames.length - 1] += ` ${cont}`;
+      } else {
+        const match = /^  (.*?)\s+\d+\s+(?:no )?portrait$/.exec(line);
+        expect(match, line).not.toBeNull();
+        renderedNames.push(match![1]!);
+      }
+    }
+    expect(renderedNames).toContain(longName);
+    expect(renderedNames.map((n) => n.replace(/\s+/g, ""))).toContain(unbrokenName);
   } finally { s.cleanup(); }
 });

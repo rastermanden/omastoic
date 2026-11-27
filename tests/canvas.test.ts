@@ -298,6 +298,108 @@ test("an author with no portrait still renders", () => {
   expect(block).toContain("— NOBODY");
 });
 
+test("long custom-author names stay inside the portrait column, keep quotes aligned, and fit cols in quote-only fallback", () => {
+  const marcusArt = art("marcus");
+  const artWidth = Math.max(...marcusArt.map(cellWidth));
+  const customQuote: Quote = {
+    author: "seneca-younger",
+    citation: "Moral Letters XIII.4",
+    text: "We suffer more often in imagination than in reality.",
+  };
+  const longNamed = {
+    slug: "seneca-younger",
+    name: "Lucius Annaeus Seneca the Younger of Corduba",
+    dates: "c. 4 BC – AD 65",
+  };
+  const unbrokenNamed = {
+    slug: "unbroken",
+    name: "SupercalifragilisticexpialidociousStoicAuthorName",
+    dates: "AD 100 – 180",
+  };
+
+  // With portrait: long name wraps inside the portrait column and never shifts the quote column.
+  for (const author of [longNamed, unbrokenNamed]) {
+    for (const [cols, rows] of [[111, 30], [92, 25], [91, 23], [88, 24]] as const) {
+      const block = compose(customQuote, author, { cols, rows, art: marcusArt });
+      const lines = block.split("\n");
+      expect(block).toMatch(/[\u2801-\u28ff]/);
+      expect(width(block)).toBeLessThanOrEqual(cols);
+      expect(height(block)).toBeLessThanOrEqual(rows);
+
+      const lastArtRow = lines.findLastIndex((line) => /[\u2801-\u28ff]/u.test(line));
+      const quoteStartCol = cellWidth(lines.find((line) => line.includes("“"))!.split("“")[0]!);
+      // Quote starts at leftWidth + ART_GAP; leftWidth never grows past the portrait width.
+      expect(quoteStartCol).toBeLessThanOrEqual(artWidth + 4);
+      expect(quoteStartCol).toBeGreaterThanOrEqual(20 + 4);
+      // Caption rows under the portrait stay strictly inside the portrait column.
+      const leftWidth = quoteStartCol - 4;
+      for (const captionLine of lines.slice(lastArtRow + 1)) {
+        expect(cellWidth(captionLine)).toBeLessThanOrEqual(leftWidth);
+      }
+      // Full author name and dates remain readable without truncation.
+      const captionText = lines.slice(lastArtRow + 1).join(" ").replace(/\s+/g, " ");
+      expect(captionText.replace(/\s+/g, "")).toContain(author.name.toUpperCase().replace(/\s+/g, ""));
+      expect(captionText).toContain(author.dates);
+    }
+  }
+
+  // Short portrait beside a tall quote: caption rows sit beside quote rows without shifting the quote column.
+  const shortArt = ["⣿".repeat(24), "⣿".repeat(24)];
+  const tallQuote: Quote = {
+    author: "seneca-younger",
+    citation: "Moral Letters XIII.4",
+    text:
+      "We suffer more often in imagination than in reality. Set aside the anxiety of what might happen " +
+      "tomorrow and attend to what is actually before you right now, calmly and without exaggeration.",
+  };
+  const sideBySide = compose(tallQuote, longNamed, { cols: 92, rows: 25, art: shortArt });
+  const sideLines = sideBySide.split("\n");
+  expect(width(sideBySide)).toBeLessThanOrEqual(92);
+  expect(height(sideBySide)).toBeLessThanOrEqual(25);
+  const firstQuoteRow = sideLines.findIndex((line) => line.includes("“"));
+  expect(cellWidth(sideLines[firstQuoteRow]!.split("“")[0]!)).toBe(28);
+  const captionWithQuoteRows = sideLines.filter((line) =>
+    /(?:LUCIUS|YOUNGER|CORDUBA|AD 65)/.test(line) && cellWidth(line) > 28,
+  );
+  expect(captionWithQuoteRows.length).toBeGreaterThanOrEqual(2);
+  for (const line of captionWithQuoteRows) {
+    // Caption stays within the 24-cell portrait column, followed by the 4-space ART_GAP,
+    // and the quote text begins right at column 28 (cell 28 is non-space).
+    const cells = [...line];
+    expect(cells.slice(24, 28).join("")).toBe("    ");
+    expect(cells[28]).not.toBe(" ");
+  }
+
+  // Max-length (128-char) name, wide CJK name, and 64-char fallback slug stay within cols and rows.
+  const maxLenAuthor = { slug: "maxlen", name: "W".repeat(128), dates: "1900 – 2000" };
+  const wideCjkAuthor = { slug: "cjk", name: "孔子孟子老子莊子荀子墨子韓非子孫子", dates: "551 – 479 BC" };
+  const longSlugQuote: Quote = { ...customQuote, author: "a".repeat(64) };
+  for (const [q, author, artArg] of [
+    [customQuote, maxLenAuthor, marcusArt],
+    [customQuote, wideCjkAuthor, marcusArt],
+    [longSlugQuote, undefined, marcusArt],
+    [customQuote, maxLenAuthor, null],
+    [customQuote, wideCjkAuthor, null],
+    [longSlugQuote, undefined, null],
+  ] as const) {
+    const block = compose(q, author, { cols: 92, rows: 25, art: artArg });
+    expect(width(block)).toBeLessThanOrEqual(92);
+    expect(height(block)).toBeLessThanOrEqual(25);
+  }
+
+  // Quote-only fallback: long "— NAME · dates" wraps cleanly inside cols on both wide and narrow terminals.
+  for (const author of [longNamed, unbrokenNamed]) {
+    for (const [cols, rows] of [[80, 24], [60, 20], [40, 24], [32, 20]] as const) {
+      const block = compose(customQuote, author, { cols, rows, art: null });
+      expect(block).not.toMatch(/[\u2801-\u28ff]/);
+      expect(width(block)).toBeLessThanOrEqual(cols);
+      expect(height(block)).toBeLessThanOrEqual(rows);
+      expect(block.replace(/\s+/g, "")).toContain(author.name.toUpperCase().replace(/\s+/g, ""));
+      expect(block.replace(/\s+/g, "")).toContain(customQuote.citation.replace(/\s+/g, ""));
+    }
+  }
+});
+
 test("no line ever carries trailing whitespace", () => {
   for (const grid of [
     { cols: 111, rows: 30, art: art("seneca") },
