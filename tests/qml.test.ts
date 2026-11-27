@@ -536,17 +536,33 @@ QQC.TextField {
     write(
       "MockUi/NumberField.qml",
       `import QtQuick
-Item {
+import QtQuick.Controls as QQC
+Column {
+  id: root
   property string label: ""
   property int value: 60
   property int from: 5
   property int to: 3600
   property int stepSize: 5
   property color foreground: "white"
-  property QtObject field: QtObject { property int value: 60; property bool activeFocus: false; property QtObject contentItem: QtObject { property string text: "60" } }
+  property alias field: spin
   signal modified(int value)
-  implicitWidth: 80
-  implicitHeight: 32
+  QQC.SpinBox {
+    id: spin
+    implicitWidth: 80
+    implicitHeight: 32
+    from: root.from
+    to: root.to
+    stepSize: root.stepSize
+    value: root.value
+    editable: true
+    onValueModified: root.modified(value)
+    contentItem: TextInput {
+      text: spin.displayText
+      readOnly: !spin.editable
+      validator: spin.validator
+    }
+  }
 }
 `,
     );
@@ -3569,6 +3585,349 @@ Item {
       compare(statusTextItem.Accessible.role, Accessible.AlertMessage)
       compare(statusTextItem.Accessible.name, "Could not save that.")
     }
+
+    function test_review_fixes_disclosure_collapse_quote_remove_focus_spinbox_and_announcements() {
+      var existingApply = findProcessFor("apply")
+      if (existingApply) existingApply.command = []
+
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [
+          { id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Desk", text: "One." },
+          { id: "c02", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Two." },
+        ],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        ],
+      })), true)
+      waitForRendering(panel)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      var customToggle = findOne(panel, function(item) { return item.objectName === "customCountToggle" && item.visible })
+      verify(scroller && addAuthorBtn && addQuoteBtn && customToggle)
+
+      // MUST 1a: Collapsing Advanced (click or pressAction) moves focus to advancedToggle so typing never hits hidden authorSlugField.
+      mouseClick(addAuthorBtn)
+      wait(30)
+      var advToggle = findOne(panel, function(item) { return item.objectName === "advancedToggle" && item.visible })
+      verify(advToggle !== null)
+      advToggle.Accessible.pressAction()
+      wait(30)
+      var slugField = findOne(panel, function(item) { return item.objectName === "authorSlugField" && item.visible })
+      verify(slugField !== null)
+      compare(slugField.activeFocus, true)
+
+      panel.reveal(advToggle)
+      wait(20)
+      mouseClick(advToggle)
+      wait(20)
+      compare(panel.authorAdvancedOpen, false)
+      compare(advToggle.activeFocus, true)
+      compare(slugField.activeFocus, false)
+      keyClick(Qt.Key_Z)
+      wait(10)
+      compare(slugField.text, "")
+      compare(panel.customAuthorSlug, "")
+
+      advToggle.Accessible.pressAction()
+      wait(30)
+      compare(slugField.activeFocus, true)
+      advToggle.Accessible.pressAction()
+      wait(20)
+      compare(panel.authorAdvancedOpen, false)
+      compare(advToggle.activeFocus, true)
+      compare(slugField.activeFocus, false)
+
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      mouseClick(cancelBtn)
+      wait(20)
+
+      // MUST 1b: Collapsing custom quotes disclosure (click or pressAction) moves focus to customCountToggle so Space/Enter cannot remove a hidden quote.
+      customToggle.Accessible.pressAction()
+      wait(20)
+      var customRemoveBtns = findAll(panel, function(item) {
+        return item.label === "Remove" && !item.keepsRemoveConfirm && item.hasOwnProperty("tabFocusable") && item.visible
+      })
+      compare(customRemoveBtns.length, 2)
+      customRemoveBtns[0].takeFocus()
+      wait(10)
+      compare(customRemoveBtns[0].buttonFocused, true)
+
+      panel.reveal(customToggle)
+      wait(20)
+      mouseClick(customToggle)
+      wait(20)
+      compare(panel.listOpen, false)
+      compare(customToggle.activeFocus, true)
+      compare(customRemoveBtns[0].buttonFocused, false)
+
+      customToggle.Accessible.pressAction()
+      wait(20)
+      customRemoveBtns[0].takeFocus()
+      wait(10)
+      compare(customRemoveBtns[0].buttonFocused, true)
+      customToggle.Accessible.pressAction()
+      wait(20)
+      compare(panel.listOpen, false)
+      compare(customToggle.activeFocus, true)
+      compare(customRemoveBtns[0].buttonFocused, false)
+
+      keyClick(Qt.Key_Space)
+      wait(20)
+      compare(panel.listOpen, true)
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // MUST 1c: Removing a custom quote moves focus to customCountToggle while quotes remain, or addQuoteButton when none remain.
+      customRemoveBtns[0].takeFocus()
+      wait(10)
+      innerButton(customRemoveBtns[0]).Accessible.pressAction()
+      wait(10)
+      var applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [
+          { id: "c02", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Two." },
+        ],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        ],
+      }), "", false)
+      wait(20)
+      compare(customToggle.activeFocus, true)
+
+      customRemoveBtns = findAll(panel, function(item) {
+        return item.label === "Remove" && !item.keepsRemoveConfirm && item.hasOwnProperty("tabFocusable") && item.visible
+      })
+      compare(customRemoveBtns.length, 1)
+      customRemoveBtns[0].takeFocus()
+      wait(10)
+      innerButton(customRemoveBtns[0]).Accessible.pressAction()
+      wait(10)
+      applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        ],
+      }), "", false)
+      wait(20)
+      compare(addQuoteBtn.buttonFocused, true)
+
+      // MUST 2: At min size (400x320), addQuote() validation with a long quote reveals focused citationField and its label above everything else.
+      panel.userWidth = 400
+      panel.userHeight = 320
+      waitForRendering(panel)
+      panel.reveal(addQuoteBtn)
+      wait(20)
+      mouseClick(addQuoteBtn)
+      wait(30)
+      var qCite = findOne(panel, function(item) { return item.objectName === "quoteCitationField" && item.visible })
+      var qCiteLabel = findOne(panel, function(item) { return item.objectName === "quoteCitationLabel" && item.visible })
+      var qText = findOne(panel, function(item) { return item.objectName === "quoteTextField" && item.visible })
+      var qSubmit = findOne(panel, function(item) { return item.label === "Add quote" && item.visible })
+      verify(qCite && qCiteLabel && qText && qSubmit)
+
+      var longQuote = []
+      for (var li = 0; li < 12; li++) longQuote.push("Line " + (li + 1) + " of a long Stoic quote.")
+      qText.text = longQuote.join("\\n")
+      qCite.text = ""
+      panel.reveal(qSubmit)
+      wait(20)
+      mouseClick(qSubmit)
+      wait(30)
+      compare(panel.errorScope, "quote")
+      compare(qCite.activeFocus, true)
+      assertInsideScroller(scroller, qCiteLabel, "Quote Citation label on min-size error")
+      assertInsideScroller(scroller, qCite, "Quote Citation field on min-size error")
+
+      panel.closeQuoteForm()
+      panel.userWidth = 0
+      panel.userHeight = 0
+      waitForRendering(panel)
+
+      // MUST 3: secondsField wraps a real SpinBox whose field and contentItem carry Accessible.name/labelledBy, and all 9 labels are StaticText.
+      var secondsFieldItem = findOne(panel, function(item) { return item.objectName === "secondsField" })
+      var secondsLabelItem = findOne(panel, function(item) { return item.objectName === "secondsLabel" })
+      verify(secondsFieldItem !== null && secondsFieldItem.field !== null && secondsFieldItem.field.contentItem !== null && secondsLabelItem !== null)
+      compare(secondsFieldItem.field.Accessible.name, "Seconds each quote stays up")
+      compare(secondsFieldItem.field.Accessible.labelledBy.text, "Seconds each quote stays up")
+      compare(secondsFieldItem.field.contentItem.Accessible.name, "Seconds each quote stays up")
+      compare(secondsFieldItem.field.contentItem.Accessible.labelledBy.text, "Seconds each quote stays up")
+      compare(secondsLabelItem.Accessible.role, Accessible.StaticText)
+      compare(secondsLabelItem.Accessible.name, "Seconds each quote stays up")
+
+      mouseClick(addQuoteBtn)
+      wait(20)
+      for (var qLblName of ["quoteCitationLabel", "quoteTextLabel"]) {
+        var qLbl = findOne(panel, function(item) { return item.objectName === qLblName })
+        verify(qLbl !== null, qLblName)
+        compare(qLbl.Accessible.role, Accessible.StaticText)
+        compare(qLbl.Accessible.name, qLbl.text)
+      }
+      panel.closeQuoteForm()
+
+      mouseClick(addAuthorBtn)
+      wait(20)
+      advToggle = findOne(panel, function(item) { return item.objectName === "advancedToggle" && item.visible })
+      mouseClick(advToggle)
+      wait(20)
+      for (var aLblName of ["authorNameLabel", "authorDatesLabel", "authorImageLabel", "authorCitationLabel", "authorTextLabel", "authorSlugLabel"]) {
+        var aLbl = findOne(panel, function(item) { return item.objectName === aLblName })
+        verify(aLbl !== null, aLblName)
+        compare(aLbl.Accessible.role, Accessible.StaticText)
+        compare(aLbl.Accessible.name, aLbl.text)
+      }
+      panel.closeAuthorForm()
+      wait(20)
+
+      // MUST 4 + SHOULD: Scoped errors announce once (never via statusMessageText), preview error announces, and closed panel announces nothing.
+      var statusTextItem = findOne(panel, function(item) { return item.objectName === "statusMessageText" })
+      var authorErrItem = findOne(panel, function(item) { return item.objectName === "authorErrorText" })
+      var quoteErrItem = findOne(panel, function(item) { return item.objectName === "quoteErrorText" })
+      var previewErrItem = findOne(panel, function(item) { return item.objectName === "authorPortraitPreviewErrorText" })
+      verify(statusTextItem && authorErrItem && quoteErrItem && previewErrItem)
+
+      var statusLog = []
+      var authorLog = []
+      var quoteLog = []
+      var previewLog = []
+      var onStatus = function() { if (statusTextItem.announcedText !== "") statusLog.push(statusTextItem.announcedText) }
+      var onAuthor = function() { if (authorErrItem.announcedText !== "") authorLog.push(authorErrItem.announcedText) }
+      var onQuote = function() { if (quoteErrItem.announcedText !== "") quoteLog.push(quoteErrItem.announcedText) }
+      var onPreview = function() { if (previewErrItem.announcedText !== "") previewLog.push(previewErrItem.announcedText) }
+      statusTextItem.announcedTextChanged.connect(onStatus)
+      authorErrItem.announcedTextChanged.connect(onAuthor)
+      quoteErrItem.announcedTextChanged.connect(onQuote)
+      previewErrItem.announcedTextChanged.connect(onPreview)
+      try {
+        // Author validation error -> 1 author announcement, 0 status announcements.
+        mouseClick(addAuthorBtn)
+        wait(20)
+        var addSubmitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+        verify(addSubmitBtn !== null)
+        mouseClick(addSubmitBtn)
+        wait(10)
+        compare(statusLog.length, 0)
+        compare(authorLog.length, 1)
+
+        // Portrait preview error while open -> 1 preview announcement.
+        var imgField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+        verify(imgField !== null)
+        imgField.text = "/tmp/missing-preview.jpg"
+        panel.runPortraitPreview("/tmp/missing-preview.jpg")
+        var previewProc = panel.activePortraitPreviewProcess
+        verify(previewProc !== null)
+        completeProcess(previewProc, 1, "", "omastoic: image file not found\\n", false)
+        wait(10)
+        compare(previewLog.length, 1)
+        compare(previewLog[0], "Image file not found")
+
+        // Scoped author CLI error in settleRun -> 1 author announcement, 0 status announcements.
+        panel.error = ""
+        panel.errorScope = ""
+        authorLog = []
+        statusLog = []
+        panel.addingAuthor = true
+        panel.saving = true
+        panel.settleRun({
+          exited: true,
+          exitCode: 1,
+          stdout: "",
+          stderr: "omastoic: bad image",
+          streamsLeft: 0,
+        }, "Could not save that.")
+        wait(10)
+        compare(statusLog.length, 0)
+        compare(authorLog.length, 1)
+        compare(authorLog[0], "Bad image")
+        panel.closeAuthorForm()
+        wait(20)
+
+        // Quote validation error -> 1 quote announcement, 0 status announcements.
+        statusLog = []
+        quoteLog = []
+        mouseClick(addQuoteBtn)
+        wait(20)
+        var qSubmitBtn = findOne(panel, function(item) { return item.label === "Add quote" && item.visible })
+        verify(qSubmitBtn !== null)
+        mouseClick(qSubmitBtn)
+        wait(10)
+        compare(statusLog.length, 0)
+        compare(quoteLog.length, 1)
+        panel.closeQuoteForm()
+        wait(20)
+
+        // Closing panel mid-save announces nothing on completion or reopen.
+        statusLog = []
+        authorLog = []
+        quoteLog = []
+        previewLog = []
+        panel.saving = true
+        panel.addingAuthor = true
+        panel.close()
+        panel.settleRun({
+          exited: true,
+          exitCode: 0,
+          stdout: JSON.stringify({
+            settings: { authors: ["marcus", "musonius"], interval: 60 },
+            portraitFont: 8,
+            portraitLine: 11.2,
+            intervalApplied: true,
+            custom: [],
+            samples: [
+              { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+              { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+            ],
+          }),
+          stderr: "",
+          streamsLeft: 0,
+        }, "Could not save that.")
+        wait(10)
+        compare(panel.notice, "Saved")
+        compare(statusLog.length, 0)
+
+        panel.open("")
+        wait(10)
+        compare(statusLog.length, 0)
+        var stateProc = findProcessFor("state")
+        if (stateProc && stateProc.running) completeProcess(stateProc, 0, JSON.stringify({
+          settings: { authors: ["marcus", "musonius"], interval: 60 },
+          portraitFont: 8,
+          portraitLine: 11.2,
+          intervalApplied: true,
+          custom: [],
+          samples: [
+            { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+            { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+          ],
+        }), "", false)
+      } finally {
+        statusTextItem.announcedTextChanged.disconnect(onStatus)
+        authorErrItem.announcedTextChanged.disconnect(onAuthor)
+        quoteErrItem.announcedTextChanged.disconnect(onQuote)
+        previewErrItem.announcedTextChanged.disconnect(onPreview)
+      }
+    }
   }
 }
 `,
@@ -3584,7 +3943,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("23 passed, 0 failed");
+    expect(combined, combined).toContain("24 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -3773,17 +4132,33 @@ QQC.TextField {
     write(
       "MockUi/NumberField.qml",
       `import QtQuick
-Item {
+import QtQuick.Controls as QQC
+Column {
+  id: root
   property string label: ""
   property int value: 60
   property int from: 5
   property int to: 3600
   property int stepSize: 5
   property color foreground: "white"
-  property QtObject field: QtObject { property int value: 60; property bool activeFocus: false; property QtObject contentItem: QtObject { property string text: "60" } }
+  property alias field: spin
   signal modified(int value)
-  implicitWidth: 80
-  implicitHeight: 32
+  QQC.SpinBox {
+    id: spin
+    implicitWidth: 80
+    implicitHeight: 32
+    from: root.from
+    to: root.to
+    stepSize: root.stepSize
+    value: root.value
+    editable: true
+    onValueModified: root.modified(value)
+    contentItem: TextInput {
+      text: spin.displayText
+      readOnly: !spin.editable
+      validator: spin.validator
+    }
+  }
 }
 `,
     );
