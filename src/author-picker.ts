@@ -1,6 +1,7 @@
 // The Stoic checklist for `omastoic config`: a small raw-mode picker with a
 // plain numbered fallback, so a pipe or a dumb terminal still gets to choose.
 import { writeSync } from "node:fs";
+import { cellWidth, truncateCells } from "./canvas.ts";
 
 export type AuthorRow = { slug: string; name: string };
 
@@ -21,6 +22,7 @@ export type PickerOutput = {
   fd?: number;
   isTTY?: boolean;
   columns?: number;
+  rows?: number;
   on?(event: string, listener: () => void): unknown;
   off?(event: string, listener: () => void): unknown;
 };
@@ -225,21 +227,48 @@ function decode(buffer: string): { key: Key; rest: string } | "more" {
 
 const HEADER = "Authors on the screensaver";
 
-function hintsFor(count: number): string {
+function hintItemsFor(count: number): string[] {
   const digits = count > 1 ? `1-${Math.min(count, 9)}` : "1";
-  return `space/x toggle · ${digits} · j/k move · a all · n none · enter save · q cancel`;
+  return ["space/x toggle", digits, "j/k move", "a all", "n none", "enter save", "q cancel"];
 }
 
-/** One line per row keeps the frame's line count fixed, so a redraw can clear it. */
-function frameLines(rows: AuthorRow[], checked: Set<string>, focus: number, columns: number): string[] {
+/** Pack shortcut hints onto lines that fit `width` display cells without breaking inside a hint. */
+export function wrapHints(items: readonly string[], separator: string, width: number): string[] {
+  const lines: string[] = [];
+  let current = "";
+  for (const item of items) {
+    if (!current) {
+      current = truncateCells(item, width);
+      continue;
+    }
+    const candidate = `${current}${separator}${item}`;
+    if (cellWidth(candidate) <= width) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = truncateCells(item, width);
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** Fit every row to the terminal width by display cells and keep the frame inside `height` rows so redraws stay in place. */
+function frameLines(rows: AuthorRow[], checked: Set<string>, focus: number, columns: number, height: number | null): string[] {
   const width = Number.isInteger(columns) && columns > 4 ? columns - 1 : FALLBACK_COLUMNS - 1;
-  const fit = (line: string) => (line.length > width ? line.slice(0, width) : line);
-  const lines = [HEADER];
-  rows.forEach((row, index) => {
-    lines.push(`${index === focus ? ">" : " "} ${index + 1} [${checked.has(row.slug) ? "x" : " "}] ${row.name}`);
-  });
-  lines.push(hintsFor(rows.length));
-  return lines.map(fit);
+  const header = truncateCells(HEADER, width);
+  const rowLines = rows.map((row, index) =>
+    truncateCells(`${index === focus ? ">" : " "} ${index + 1} [${checked.has(row.slug) ? "x" : " "}] ${row.name}`, width),
+  );
+  const hintLines = wrapHints(hintItemsFor(rows.length), " · ", width);
+  const lines = [header, ...rowLines, ...hintLines];
+  if (height == null || lines.length <= height) return lines;
+  // Drop wrapped hints first; if still taller than the terminal, window the rows around focus.
+  if (1 + rowLines.length <= height) return [header, ...rowLines];
+  if (height === 1) return [rowLines[focus] ?? header];
+  const visibleRows = Math.max(1, height - 1);
+  const start = Math.min(Math.max(0, focus - visibleRows + 1), Math.max(0, rowLines.length - visibleRows));
+  return [header, ...rowLines.slice(start, start + visibleRows)];
 }
 
 /**
@@ -263,14 +292,24 @@ export async function pickAuthorsTui(rows: AuthorRow[], selected: string[], io: 
   // SIGINT is a user cancelling; SIGTERM and SIGHUP mean the process must die.
   let fatal: string | null = null;
 
+  const terminalHeight = (): number | null => {
+    const height = output.rows;
+    return Number.isInteger(height) && (height ?? 0) > 0 ? (height as number) : null;
+  };
+  const upTo = (lines: number): string => {
+    const moves = lines > 1 ? lines - 1 : 0;
+    const height = terminalHeight();
+    const allowed = height == null ? moves : Math.min(moves, height - 1);
+    return allowed > 0 ? `\x1b[${allowed}A` : "";
+  };
   const clearFrame = (): string => {
-    const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
+    const up = upTo(drawn);
     drawn = 0;
     return `${up}\r\x1b[J`;
   };
   const draw = (): void => {
-    const lines = frameLines(rows, checked, focus, output.columns ?? 0);
-    const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
+    const lines = frameLines(rows, checked, focus, output.columns ?? 0, terminalHeight());
+    const up = upTo(drawn);
     drawn = lines.length;
     writeTerminal(output, `${up}\r\x1b[J${lines.join("\n")}`);
   };

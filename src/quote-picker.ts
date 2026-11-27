@@ -2,7 +2,8 @@
 // picker uses, plus a filter line and paging for a Stoic's whole book. The quote
 // id is the key, so a choice survives a re-filter, a redraw and a config write.
 
-import { ChunkSource, rawTtyUsable, writeTerminal, type PickOptions, type PickerIo } from "./author-picker.ts";
+import { ChunkSource, rawTtyUsable, wrapHints, writeTerminal, type PickOptions, type PickerIo } from "./author-picker.ts";
+import { truncateCells } from "./canvas.ts";
 
 export type QuoteRow = { id: string; citation: string; text: string };
 
@@ -77,7 +78,7 @@ function decode(buffer: string): { key: Key; rest: string } | "more" {
   return { key: { kind: "ignore" }, rest };
 }
 
-const HINTS = "space/x/tab toggle, 1-9, j/k, / filter, a all, n none, enter save, q cancel";
+const HINT_ITEMS = ["space/x/tab toggle", "1-9", "j/k", "/ filter", "a all", "n none", "enter save", "q cancel"];
 
 type FilterKey =
   | { kind: "text"; value: string }
@@ -145,6 +146,8 @@ export async function pickQuotesTui(
   // SIGINT is a user cancelling; SIGTERM and SIGHUP mean the process must die.
   let fatal: string | null = null;
 
+  const frameWidth = (): number =>
+    Number.isInteger(output.columns) && (output.columns ?? 0) > 4 ? (output.columns as number) - 1 : FALLBACK_COLUMNS - 1;
   /** The screen height, or null when the terminal does not report one. */
   const terminalHeight = (): number | null => {
     const height = output.rows;
@@ -155,11 +158,12 @@ export async function pickQuotesTui(
   const pageSize = (): number => {
     const height = terminalHeight();
     if (height == null) return FALLBACK_PAGE;
-    return Math.min(MAX_PAGE, Math.max(1, height - 3));
+    const hintRows = wrapHints(HINT_ITEMS, ", ", frameWidth()).length;
+    return Math.min(MAX_PAGE, Math.max(1, height - 2 - hintRows));
   };
   /** Moving up more rows than the screen has would paint over its top edge. */
   const upTo = (lines: number): string => {
-    const moves = lines > 0 ? lines - 1 : 0;
+    const moves = lines > 1 ? lines - 1 : 0;
     const height = terminalHeight();
     const allowed = height == null ? moves : Math.min(moves, height - 1);
     return allowed > 0 ? `\x1b[${allowed}A` : "";
@@ -175,8 +179,8 @@ export async function pickQuotesTui(
   };
 
   const frameLines = (): string[] => {
-    const width = Number.isInteger(output.columns) && (output.columns ?? 0) > 4 ? (output.columns as number) - 1 : FALLBACK_COLUMNS - 1;
-    const clip = (line: string) => (line.length > width ? line.slice(0, width) : line);
+    const width = frameWidth();
+    const clip = (line: string) => truncateCells(line, width);
     const list = visible();
     const size = pageSize();
     const start = page * size;
@@ -186,24 +190,25 @@ export async function pickQuotesTui(
         ? `filter: ${filter} (${list.length} of ${rows.length})`
         : `filter: none (${rows.length} ${rows.length === 1 ? "quote" : "quotes"})`;
     const paged = pageCount() > 1 ? `${status} · page ${Math.min(page + 1, pageCount())}/${pageCount()}` : status;
-    const lines = [header, paged];
+    const lines = [clip(header), clip(paged)];
     const slice = list.slice(start, start + size);
-    if (!slice.length) lines.push("(no quotes)");
+    if (!slice.length) lines.push(clip("(no quotes)"));
     slice.forEach((row, offset) => {
       const position = offset + 1;
       const cursor = start + offset === focus ? ">" : " ";
-      lines.push(`${cursor} ${position} [${checked.has(row.id) ? "x" : " "}] ${quoteChoiceLabel(row)}`);
+      lines.push(clip(`${cursor} ${position} [${checked.has(row.id) ? "x" : " "}] ${quoteChoiceLabel(row)}`));
     });
-    lines.push(HINTS);
+    const hintLines = wrapHints(HINT_ITEMS, ", ", width);
+    lines.push(...hintLines);
     const height = terminalHeight();
     if (height != null && lines.length > height) {
       // A screen too short for the hints drops them, then the status line; the
       // rows that remain are the ones the page size already fitted.
-      lines.pop();
-      if (lines.length > height && lines[1] === paged) lines.splice(1, 1);
+      lines.splice(lines.length - hintLines.length, hintLines.length);
+      if (lines.length > height && lines[1] === clip(paged)) lines.splice(1, 1);
       if (lines.length > height) lines.length = Math.max(1, height);
     }
-    return lines.map(clip);
+    return lines;
   };
 
   const clearFrame = (): string => {

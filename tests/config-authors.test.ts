@@ -1,14 +1,15 @@
 import { test, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cellWidth } from "../src/canvas.ts";
 import { root, sandbox } from "./sandbox.ts";
 
 import { pty as runPty, ptySignal, SHOWS } from "./pty.ts";
 
 /** `config` on a pty with a loud gum stub: every prompt must be the CLI's own. */
-function pty(s: ReturnType<typeof sandbox>, args: string[], steps: { marker: string; keys: string }[] = []) {
+function pty(s: ReturnType<typeof sandbox>, args: string[], steps: { marker: string; keys: string }[] = [], extra: Record<string, string> = {}) {
   s.stub("gum", "echo 'gum must not run any more' >&2\nexit 1");
-  return runPty(s, args, steps);
+  return runPty(s, args, steps, extra);
 }
 
 test("every config prompt runs in the terminal, so gum is not needed", async () => {
@@ -97,3 +98,53 @@ test("config without a tty and without --plain still prints the settings", async
     expect(existsSync(join(s.config, "omastoic/config.json"))).toBe(false);
   } finally { s.cleanup(); }
 });
+
+test("config picker stays within 40/60/80/120 columns in a real pty and redraws in place on toggle", async () => {
+  const s = sandbox();
+  try {
+    s.put(
+      join(s.config, "omastoic/authors.tsv"),
+      "seneca-long\tLucius Annaeus Seneca the Younger of Corduba in Hispania\tc. 4 BC – AD 65\n",
+    );
+    s.put(
+      join(s.config, "omastoic/quotes.tsv"),
+      "seneca-long\tLetters I.1\tWe suffer more often in imagination than in reality.\n",
+    );
+
+    for (const cols of [40, 60, 80, 120]) {
+      const ran = await pty(s, ["config"], [
+        { marker: SHOWS.authors, keys: " q" },
+      ], { PTY_COLS: String(cols), PTY_ROWS: "24" });
+      expect(ran.code, `${cols} cols`).toBe(0);
+
+      const parts = ran.stdout.split("\x1b[J");
+      // parts[1] is initial draw; parts[2] is the redraw after toggling row 1 with space.
+      expect(parts.length, `${cols} cols`).toBeGreaterThanOrEqual(4);
+      const parseLines = (chunk: string) =>
+        chunk
+          .replace(/\r\n/g, "\n")
+          .replace(/\x1b\[\d*A/g, "")
+          .replace(/\r/g, "")
+          .split("\n");
+
+      const first = parseLines(parts[1]!);
+      const second = parseLines(parts[2]!);
+      expect(first.length, `${cols} cols`).toBe(second.length);
+      for (const line of [...first, ...second]) {
+        expect(cellWidth(line), `${cols} cols: ${line}`).toBeLessThanOrEqual(cols);
+      }
+      expect(first.some((line) => line.startsWith("> 1 [x]"))).toBe(true);
+      expect(second.some((line) => line.startsWith("> 1 [ ]"))).toBe(true);
+
+      const upOnToggle = /\x1b\[(\d+)A\r$/.exec(parts[1]!);
+      const upOnExit = /\x1b\[(\d+)A\r$/.exec(parts[2]!);
+      expect(Number(upOnToggle?.[1]), `${cols} cols`).toBe(first.length - 1);
+      expect(Number(upOnExit?.[1]), `${cols} cols`).toBe(second.length - 1);
+
+      if (cols === 40) {
+        const longRow = first.find((line) => line.includes("7 [x]"))!;
+        expect(longRow.endsWith("…")).toBe(true);
+      }
+    }
+  } finally { s.cleanup(); }
+}, 30000);

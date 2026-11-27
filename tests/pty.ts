@@ -5,9 +5,13 @@ import { root, sandbox } from "./sandbox.ts";
 // type the keys for that stage. One keystroke per prompt is not enough any more,
 // because every prompt in `omastoic config` now belongs to the CLI itself.
 const ptyScript = [
-  "import binascii, json, os, pty, select, sys",
+  "import binascii, fcntl, json, os, pty, select, struct, sys, termios",
   "pid, fd = pty.fork()",
   "if pid == 0:",
+  "    cols = int(os.environ.get('PTY_COLS', '0') or '0')",
+  "    rows = int(os.environ.get('PTY_ROWS', '0') or '0')",
+  "    if cols > 0 or rows > 0:",
+  "        fcntl.ioctl(1, termios.TIOCSWINSZ, struct.pack('HHHH', rows or 24, cols or 80, 0, 0))",
   "    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
   "steps = json.loads(os.environ.get('PTY_STEPS', '[]'))",
   "out = b''",

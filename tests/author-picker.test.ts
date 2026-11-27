@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { EventEmitter } from "node:events";
 import { pickAuthors, pickAuthorsPlain, pickAuthorsTui, rawTtyUsable } from "../src/author-picker.ts";
+import { cellWidth } from "../src/canvas.ts";
 
 const rows = [
   { slug: "marcus", name: "Marcus Aurelius" },
@@ -14,7 +15,7 @@ const all = rows.map((row) => row.slug);
 const without = (...slugs: string[]) => all.filter((slug) => !slugs.includes(slug));
 
 /** A fake terminal: queued keystrokes, recorded raw-mode calls, recorded writes. */
-function harness(opts: { isTTY?: boolean; raw?: boolean; fail?: string; isRaw?: boolean; stdoutTTY?: boolean; columns?: number } = {}) {
+function harness(opts: { isTTY?: boolean; raw?: boolean; fail?: string; isRaw?: boolean; stdoutTTY?: boolean; columns?: number; rows?: number } = {}) {
   const chunks: string[] = [];
   let ended = false;
   let returned = false;
@@ -51,6 +52,7 @@ function harness(opts: { isTTY?: boolean; raw?: boolean; fail?: string; isRaw?: 
   const output: any = {
     isTTY: opts.stdoutTTY ?? true,
     columns: opts.columns ?? 80,
+    rows: opts.rows,
     write: (chunk: string) => { writes.push(chunk); return true; },
     on: (event: string, cb: (...args: unknown[]) => void) => { events.on(event, cb); return output; },
     off: (event: string, cb: (...args: unknown[]) => void) => { events.off(event, cb); return output; },
@@ -330,12 +332,122 @@ test("a narrow terminal truncates every frame line and a resize re-fits them", a
   // Each frame carries the cursor-up and carriage return of the next redraw.
   const lines = (frame: string) => frame.replace(/\x1b\[\d*A/g, "").replace(/\r/g, "").split("\n");
   const narrow = lines(frames[1]!);
-  expect(narrow.length).toBe(8);
-  for (const line of narrow) expect(line.length).toBeLessThanOrEqual(19);
+  expect(narrow.length).toBeGreaterThanOrEqual(8);
+  for (const line of narrow) expect(cellWidth(line)).toBeLessThanOrEqual(19);
+  const moveAfterNarrow = /\x1b\[(\d+)A\r$/.exec(frames[1]!);
+  expect(moveAfterNarrow).not.toBeNull();
+  expect(Number(moveAfterNarrow![1])).toBe(narrow.length - 1);
   const wide = lines(frames[2]!);
-  expect(wide.some((line) => line.length > 19)).toBe(true);
-  expect(wide.every((line) => line.length <= 59)).toBe(true);
+  expect(wide.some((line) => cellWidth(line) > 19)).toBe(true);
+  expect(wide.every((line) => cellWidth(line) <= 59)).toBe(true);
   expect(wide[0]).toContain("Authors on the screensaver");
+});
+
+test("author picker fits 40, 60, 80 and 120 columns, truncates wide/long rows with ellipsis, and redraws cleanly", async () => {
+  const wideRows = [
+    ...rows,
+    { slug: "seneca-long", name: "Lucius Annaeus Seneca the Younger of Corduba in Hispania" },
+    { slug: "kongzi-long", name: "孔子孟子老子莊子荀子墨子韓非子孫子吳子鬼谷子" },
+  ];
+  const parseFrame = (raw: string) => raw.replace(/\x1b\[\d*A/g, "").replace(/\r/g, "").split("\n");
+
+  for (const cols of [40, 60, 80, 120]) {
+    const h = harness({ columns: cols });
+    const picked = pickAuthorsTui(wideRows, [], h.io);
+    // Toggle focused row so we get an initial draw plus a redraw, then confirm.
+    h.send(" ");
+    h.send("\r");
+    expect(await picked).toEqual(wideRows.slice(1).map((r) => r.slug));
+
+    const parts = h.text().split("\x1b[J");
+    // parts[1] is frame 1 + cursor-up for frame 2; parts[2] is frame 2 + cursor-up for clear.
+    const first = parseFrame(parts[1]!);
+    const second = parseFrame(parts[2]!);
+    expect(first.length).toBe(second.length);
+    for (const frame of [first, second]) {
+      for (const line of frame) {
+        expect(cellWidth(line), `${cols} cols: ${line}`).toBeLessThanOrEqual(cols - 1);
+      }
+      // Every key hint remains present even when wrapped at 40 or 60 cols.
+      const joined = frame.join(" ");
+      for (const hint of ["space/x toggle", "1-8", "j/k move", "a all", "n none", "enter save", "q cancel"]) {
+        expect(joined, `${cols} cols`).toContain(hint);
+      }
+    }
+
+    // Cursor-up between frames and on exit matches the exact drawn line count.
+    const upOnRedraw = /\x1b\[(\d+)A\r$/.exec(parts[1]!);
+    const upOnClear = /\x1b\[(\d+)A\r$/.exec(parts[2]!);
+    expect(Number(upOnRedraw?.[1])).toBe(first.length - 1);
+    expect(Number(upOnClear?.[1])).toBe(second.length - 1);
+
+    // Long ASCII and CJK rows get truncated with `…` when they exceed width.
+    const longRow = first.find((line) => line.includes("7 [x]"))!;
+    const cjkRow = first.find((line) => line.includes("8 [x]"))!;
+    if (cols <= 60) {
+      expect(longRow.endsWith("…")).toBe(true);
+    } else {
+      expect(longRow).toContain("Hispania");
+    }
+    if (cols === 40) {
+      expect(cjkRow.endsWith("…")).toBe(true);
+    } else {
+      expect(cjkRow).toContain("鬼谷子");
+    }
+
+    // At 80 and 120 cols the help line stays on a single line.
+    if (cols >= 80) {
+      expect(first.length).toBe(1 + wideRows.length + 1);
+      expect(first.at(-1)).toBe("space/x toggle · 1-8 · j/k move · a all · n none · enter save · q cancel");
+    } else {
+      expect(first.length).toBeGreaterThan(1 + wideRows.length + 1);
+    }
+  }
+
+  // Resizing across 40 -> 80 -> 40 keeps cursor-up matched to each previous frame's line count.
+  const resized = harness({ columns: 40 });
+  const picked = pickAuthorsTui(wideRows, [], resized.io);
+  resized.setColumns(80);
+  resized.resize();
+  resized.setColumns(40);
+  resized.resize();
+  resized.send("q");
+  expect(await picked).toBeUndefined();
+  const parts = resized.text().split("\x1b[J");
+  for (let i = 1; i <= 3; i++) {
+    const drawn = parseFrame(parts[i]!);
+    const up = /\x1b\[(\d+)A\r$/.exec(parts[i]!);
+    expect(Number(up?.[1]), `frame ${i}`).toBe(drawn.length - 1);
+  }
+  expect(parseFrame(parts[1]!).length).toBeGreaterThan(parseFrame(parts[2]!).length);
+  expect(parseFrame(parts[3]!).length).toBe(parseFrame(parts[1]!).length);
+
+  // Plain/piped mode preserves full author names without truncation.
+  const piped = harness({ isTTY: false, columns: 40 });
+  const plainPick = pickAuthorsPlain(wideRows, [], piped.io);
+  piped.send("\n");
+  expect(await plainPick).toEqual(wideRows.map((r) => r.slug));
+  expect(piped.text()).toContain("Lucius Annaeus Seneca the Younger of Corduba in Hispania");
+  expect(piped.text()).toContain("孔子孟子老子莊子荀子墨子韓非子孫子吳子鬼谷子");
+});
+
+test("a short and narrow terminal caps author picker height so redraws stay inside the screen", async () => {
+  const parseFrame = (raw: string) => raw.replace(/\x1b\[\d*A/g, "").replace(/\r/g, "").split("\n");
+  for (const height of [5, 8]) {
+    const h = harness({ columns: 40, rows: height });
+    const picked = pickAuthorsTui(rows, [], h.io);
+    h.send("j ");
+    h.send("\r");
+    expect(await picked).toEqual(without("seneca"));
+    const parts = h.text().split("\x1b[J").slice(1, -1);
+    expect(parts.length).toBeGreaterThanOrEqual(2);
+    for (const part of parts) {
+      const drawn = parseFrame(part);
+      expect(drawn.length, `height ${height}`).toBeLessThanOrEqual(height);
+      const up = /\x1b\[(\d+)A\r$/.exec(part);
+      expect(Number(up?.[1]), `height ${height}`).toBe(drawn.length - 1);
+    }
+  }
 });
 
 test("a raw tty is required for the picker and plain mode is used otherwise", async () => {

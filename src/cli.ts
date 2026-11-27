@@ -21,7 +21,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { atomicWrite, digest, locked, OwnedFiles } from "./files.ts";
 import { createBrandingSlot, ownsBranding as slotOwnsBranding, preserveDisplaced as slotPreserveDisplaced, rememberWrite as slotRememberWrite, restoreSlot as slotRestoreSlot, standAside as slotStandAside, writeSlot } from "./branding.ts";
 import { dirname, join } from "node:path";
-import { AUTHOR_SLUG, cellWidth, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, wrap, type Author, type BundledQuote, type Quote } from "./canvas.ts";
+import { AUTHOR_SLUG, cellWidth, compose, indexBundled, indexCustom, loadArt, normalizeAuthorDates, parseAuthors, parseQuotes, pick, canonicalQuoteId, truncateCells, wrap, type Author, type BundledQuote, type Quote } from "./canvas.ts";
 import { headerPortraitLayout, padPortrait, panelPreviewPortrait, PORTRAIT_COLS, PORTRAIT_ROWS, portraitDownscale, previewPortraitLayout, transcodePortrait } from "./portrait.ts";
 import { pickPortraitImage, PORTRAIT_PICKER_EXIT } from "./file-picker.ts";
 import { screensaverIsRunning, screensaverSize, screensaverWindowEvents, waitForLiveGrid } from "./hyprland.ts";
@@ -3125,6 +3125,12 @@ function styleDim(text: string, styled: boolean): string {
   return styled ? `\x1b[2m${text}\x1b[0m` : text;
 }
 
+function terminalWidth(): number | null {
+  if (!process.stdout.isTTY) return null;
+  const cols = process.stdout.columns;
+  return Number.isInteger(cols) && cols > 0 ? cols : null;
+}
+
 const MIN_STATUS_NAME_WIDTH = 18;
 const MAX_STATUS_NAME_WIDTH = 40;
 
@@ -3132,23 +3138,86 @@ function padCells(text: string, width: number): string {
   return text + " ".repeat(Math.max(0, width - cellWidth(text)));
 }
 
+function formatStatusSummary(summaryLine: string, styled: boolean, maxWidth: number | null): string[] {
+  if (maxWidth === null || cellWidth(summaryLine) <= maxWidth) {
+    return [styleBold(summaryLine, styled)];
+  }
+  const indent = maxWidth >= 6 ? "  " : "";
+  const contWidth = Math.max(2, maxWidth - indent.length);
+  const lines: string[] = [];
+  let current = "";
+  const pushWrapped = (text: string) => {
+    for (const line of wrap(text, contWidth)) {
+      lines.push(lines.length === 0 ? line : `${indent}${line}`);
+    }
+  };
+  for (const part of summaryLine.split(" · ")) {
+    const lineLimit = lines.length === 0 ? maxWidth : contWidth;
+    if (!current) {
+      if (cellWidth(part) <= lineLimit) current = part;
+      else pushWrapped(part);
+      continue;
+    }
+    const joined = `${current} · ${part}`;
+    if (cellWidth(joined) <= lineLimit) {
+      current = joined;
+    } else {
+      lines.push(lines.length === 0 ? current : `${indent}${current}`);
+      current = "";
+      if (cellWidth(part) <= contWidth) current = part;
+      else pushWrapped(part);
+    }
+  }
+  if (current) lines.push(lines.length === 0 ? current : `${indent}${current}`);
+  return lines.map((line) => styleBold(line, styled));
+}
+
+function formatStatusField(
+  label: string,
+  value: string,
+  labelWidth: number,
+  styled: boolean,
+  maxWidth: number | null,
+): string[] {
+  const padded = label.padEnd(labelWidth);
+  if (maxWidth === null || cellWidth(padded) + cellWidth(value) <= maxWidth) {
+    return [`${styleDim(padded, styled)}${value}`];
+  }
+  const valueWidth = maxWidth - labelWidth;
+  if (valueWidth >= 4) {
+    const indent = " ".repeat(labelWidth);
+    const wrapped = value.trim() ? wrap(value, valueWidth) : [""];
+    return wrapped.map((line, index) => (index === 0 ? `${styleDim(padded, styled)}${line}` : `${indent}${line}`));
+  }
+  const indent = maxWidth >= 6 ? "  " : "";
+  const wrapped = value.trim() ? wrap(value, Math.max(2, maxWidth - indent.length)) : [];
+  return [styleDim(truncateCells(label, maxWidth), styled), ...wrapped.map((line) => `${indent}${line}`)];
+}
+
 function formatStatusBook(
   entries: ReadonlyArray<{ name: string; count: number; art: string }>,
   styled: boolean,
+  maxWidth: number | null,
 ): string[] {
+  const countWidth = Math.max(3, ...entries.map((entry) => String(entry.count).length));
+  const artWidth = Math.max(0, ...entries.map((entry) => cellWidth(entry.art)));
+  const rowOverhead = 2 + 1 + countWidth + 2 + artWidth;
+  const maxNameWidth = maxWidth === null
+    ? MAX_STATUS_NAME_WIDTH
+    : Math.min(MAX_STATUS_NAME_WIDTH, Math.max(4, maxWidth - rowOverhead));
+  const minNameWidth = Math.min(MIN_STATUS_NAME_WIDTH, maxNameWidth);
   const rows = entries.map((entry) => ({
     ...entry,
-    lines: cellWidth(entry.name) <= MAX_STATUS_NAME_WIDTH
+    lines: cellWidth(entry.name) <= maxNameWidth
       ? [entry.name]
-      : wrap(entry.name, MAX_STATUS_NAME_WIDTH - 2),
+      : wrap(entry.name, maxNameWidth - 2),
   }));
   const nameWidth = Math.max(
-    MIN_STATUS_NAME_WIDTH,
+    minNameWidth,
     ...rows.flatMap((row) =>
       row.lines.map((line, index) => cellWidth(line) + (index === 0 ? 0 : 2)),
     ),
   );
-  const countWidth = Math.max(3, ...rows.map((row) => String(row.count).length));
   const out: string[] = [];
   for (const { lines, count, art } of rows) {
     out.push(`  ${padCells(lines[0] ?? "", nameWidth)} ${String(count).padStart(countWidth)}  ${styleDim(art, styled)}`);
@@ -3166,6 +3235,7 @@ function formatTwoColumn(rows: ReadonlyArray<readonly [string, string]>, colWidt
 async function status(opts: { verbose?: boolean } = {}): Promise<number> {
   const verbose = Boolean(opts.verbose);
   const styled = useTerminalStyle();
+  const maxWidth = terminalWidth();
   const quotes = await quoteBook();
   const byAuthor = new Map<string, number>();
   for (const q of quotes) byAuthor.set(q.author, (byAuthor.get(q.author) ?? 0) + 1);
@@ -3186,19 +3256,19 @@ async function status(opts: { verbose?: boolean } = {}): Promise<number> {
       ? "terminal (ttfx), a new quote on the interval while it is up"
       : "not found";
 
-  const summaryLine = `Stoics: ${stateLabel} · ${summarySettings}`;
+  const summaryLines = formatStatusSummary(`Stoics: ${stateLabel} · ${summarySettings}`, styled, maxWidth);
   const labelWidth = verbose ? 14 : 10;
-  const field = (label: string, value: string) => `${styleDim(label.padEnd(labelWidth), styled)}${value}`;
+  const field = (label: string, value: string) => formatStatusField(label, value, labelWidth, styled, maxWidth);
 
   const metaLines = [
-    field("version:", manifestVersion()),
-    field("backend:", backendLine),
-    field("service:", unit.stdout.trim() || "not installed"),
+    ...field("version:", manifestVersion()),
+    ...field("backend:", backendLine),
+    ...field("service:", unit.stdout.trim() || "not installed"),
   ];
   if (verbose) {
     const size = await screensaverSize();
-    metaLines.push(field("grid:", `${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)`));
-    metaLines.push(field("canvas file:", BRANDING));
+    metaLines.push(...field("grid:", `${size.cols}x${size.rows} cells (${size.source}, ${size.cell.width.toFixed(1)}×${size.cell.height.toFixed(1)}px)`));
+    metaLines.push(...field("canvas file:", BRANDING));
   }
 
   const quoteLabel = quotes.length === 1 ? "1 quote:" : `${quotes.length} quotes:`;
@@ -3211,9 +3281,9 @@ async function status(opts: { verbose?: boolean } = {}): Promise<number> {
         art: (await loadPortrait(slug)) ? "portrait" : "no portrait",
       })),
   );
-  const bookLines = [styleDim(quoteLabel, styled), ...formatStatusBook(entries, styled)];
+  const bookLines = [styleDim(quoteLabel, styled), ...formatStatusBook(entries, styled, maxWidth)];
 
-  console.log([styleBold(summaryLine, styled), "", ...metaLines, "", ...bookLines].join("\n"));
+  console.log([...summaryLines, "", ...metaLines, "", ...bookLines].join("\n"));
   return 0;
 }
 

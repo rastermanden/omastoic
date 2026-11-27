@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { EventEmitter } from "node:events";
+import { cellWidth } from "../src/canvas.ts";
 import { askConfirm, askLine, askText } from "../src/line-prompt.ts";
 
 /** A fake terminal: queued keys, recorded raw-mode calls, recorded writes. */
@@ -339,4 +340,25 @@ test("an already raw terminal is left as it was found", async () => {
   h.send("\r");
   expect(await asking).toBe("Desk note");
   expect(h.modes).toEqual([]);
+});
+
+test("askText and askConfirm fit 40 columns by display width with ellipsis and never emit zero cursor-up", async () => {
+  const confirm = harness({ columns: 40 });
+  const confirmed = askConfirm("Add a custom quote from Lucius Annaeus Seneca?", confirm.io);
+  confirm.send("n");
+  expect(await confirmed).toBe(false);
+  expect(confirm.text()).not.toContain("\x1b[0A");
+  const confirmLine = confirm.text().split("\x1b[J")[1]!.replace(/\r/g, "");
+  expect(cellWidth(confirmLine)).toBeLessThanOrEqual(39);
+  expect(confirmLine.endsWith("…")).toBe(true);
+
+  const text = harness({ columns: 40 });
+  const writing = askText({ header: "Quote text for 孔子孟子老子莊子荀子墨子韓非子", value: "知之為知之不知為不知是知也學而不思則罔思而不學則殆" }, text.io);
+  text.send("\x04");
+  expect(await writing).toBe("知之為知之不知為不知是知也學而不思則罔思而不學則殆");
+  const drawn = text.text().split("\x1b[J")[1]!.replace(/\x1b\[\d*A/g, "").replace(/\r/g, "").split("\n");
+  for (const line of drawn) {
+    expect(cellWidth(line), line).toBeLessThanOrEqual(39);
+    expect(line.endsWith("…")).toBe(true);
+  }
 });
