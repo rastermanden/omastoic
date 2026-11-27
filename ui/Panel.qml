@@ -73,6 +73,7 @@ Item {
   property bool listOpen: false
   property string activeAuthorSaveSlug: ""
   property string activeAuthorRemoveSlug: ""
+  property string activeQuoteRemoveId: ""
   property real formReturnContentY: 0
   property bool hasFormReturnY: false
   property int formScrollSeq: 0
@@ -180,6 +181,12 @@ Item {
   function open(payloadJson) {
     cancelImagePick()
     clearPortraitPreview()
+    error = ""
+    errorScope = ""
+    if (notice !== "Saving…") {
+      savedTimer.stop()
+      notice = ""
+    }
     opened = true
     hasLocalSize = sizeProcess.running || pendingSizePayload !== ""
     resizing = false
@@ -190,8 +197,6 @@ Item {
     hasFormReturnY = false
     formReturnContentY = 0
     scroller.contentY = 0
-    error = ""
-    errorScope = ""
     authorListHint = ""
     missingAuthorFields = []
     missingQuoteFields = []
@@ -209,6 +214,7 @@ Item {
     confirmRemoveAuthor = ""
     activeAuthorSaveSlug = ""
     activeAuthorRemoveSlug = ""
+    activeQuoteRemoveId = ""
     reload()
     Qt.callLater(function() { if (root.opened) previewButton.takeFocus() })
   }
@@ -244,6 +250,7 @@ Item {
     customAuthorSlug = ""
     activeAuthorSaveSlug = ""
     activeAuthorRemoveSlug = ""
+    activeQuoteRemoveId = ""
   }
 
   function clearValidationState() {
@@ -351,22 +358,27 @@ Item {
         return
       }
       addAuthorButton.takeFocus()
+      root.reveal(addAuthorButton)
       return
     }
     if (kind === "author-edit") {
       let rowItem = findAuthorRow(slug)
       if (rowItem && typeof rowItem.focusEditButton === "function") {
         rowItem.focusEditButton()
+        root.reveal(rowItem)
         return
       }
       addAuthorButton.takeFocus()
+      root.reveal(addAuthorButton)
       return
     }
     if (kind === "quote-opener") {
       addQuoteButton.takeFocus()
+      root.reveal(addQuoteButton)
       return
     }
     addAuthorButton.takeFocus()
+    root.reveal(addAuthorButton)
   }
 
   function captureFormReturnY() {
@@ -384,13 +396,22 @@ Item {
     var seq = formScrollSeq
     var clampAndSet = function() {
       var maxY = 0
+      var prevRevealing = false
       if (seq !== root.formScrollSeq || root.authorOpen || root.quoteOpen) return
       content.forceLayout()
       if (hasReturn) {
         maxY = Math.max(0, scroller.contentHeight - scroller.height)
         scroller.contentY = Math.max(0, Math.min(target, maxY))
       }
-      if (typeof onDone === "function") onDone()
+      if (typeof onDone === "function") {
+        prevRevealing = root.revealingAfterLayout
+        root.revealingAfterLayout = true
+        try {
+          onDone()
+        } finally {
+          root.revealingAfterLayout = prevRevealing
+        }
+      }
     }
     clampAndSet()
     Qt.callLater(clampAndSet)
@@ -703,6 +724,7 @@ Item {
         root.syncFormLayout(form)
         if (first) root.reveal(first)
         if (second) root.reveal(second)
+        if (focusTarget && focusTarget.visible && focusTarget !== second) root.reveal(focusTarget)
       } finally {
         root.revealingAfterLayout = prevRevealing
       }
@@ -729,12 +751,19 @@ Item {
     authorAdvancedOpen = !authorAdvancedOpen
     if (authorAdvancedOpen) {
       revealAfterLayout(authorForm, advancedFields, authorSlugField, authorSlugField)
+    } else {
+      advancedToggle.forceActiveFocus()
+      root.reveal(advancedToggle)
     }
   }
 
   function toggleCustomList() {
     confirmRemoveAuthor = ""
     listOpen = !listOpen
+    if (!listOpen && customCountToggle.visible) {
+      customCountToggle.forceActiveFocus()
+      root.reveal(customCountToggle)
+    }
   }
 
   function portraitFullyVisible(top, height, contentY, viewport) {
@@ -800,7 +829,6 @@ Item {
       notice = ""
       authorValidationError = false
       quoteValidationError = false
-      error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       if ((addingAuthor || replacingAuthor) && authorOpen) {
         errorScope = "author"
       } else if (addingQuote && quoteOpen) {
@@ -808,6 +836,7 @@ Item {
       } else {
         errorScope = ""
       }
+      error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       let slugCollision = errorScope === "author" && editingAuthorSlug === "" && /\b(?:slug|bundled author|already exists|reserved)\b/i.test(error)
       if (slugCollision) {
         authorAdvancedOpen = true
@@ -855,6 +884,7 @@ Item {
     addingQuote = false
     activeAuthorSaveSlug = ""
     activeAuthorRemoveSlug = ""
+    activeQuoteRemoveId = ""
     if (applyQueued) {
       applyQueued = false
       applyNow()
@@ -931,6 +961,17 @@ Item {
         let firstRow = authorRows.count > 0 ? authorRows.itemAt(0) : null
         if (firstRow) firstRow.forceActiveFocus()
         else addAuthorButton.takeFocus()
+      }
+    } else if (activeQuoteRemoveId !== "" && !authorOpen && !quoteOpen && root.opened) {
+      let quoteRemovedGone = !custom.some(function(item) { return item.id === root.activeQuoteRemoveId })
+      if (quoteRemovedGone) {
+        if (custom.length > 0 && customCountToggle.visible) {
+          customCountToggle.forceActiveFocus()
+          root.reveal(customCountToggle)
+        } else {
+          addQuoteButton.takeFocus()
+          root.reveal(addQuoteButton)
+        }
       }
     }
     if (secondsField.field) secondsField.field.value = interval
@@ -1040,6 +1081,7 @@ Item {
       if (intervalApplied) payload.interval = interval
       if (pendingRemove !== "") {
         payload.removeQuote = pendingRemove
+        activeQuoteRemoveId = pendingRemove
         pendingRemove = ""
         if (pendingQuote) applyQueued = true
       } else if (pendingQuote) {
@@ -1115,8 +1157,8 @@ Item {
       notice = ""
       missingQuoteFields = missingKeys
       quoteValidationError = true
-      error = "Fill in " + joinFieldList(missingLabels) + "."
       errorScope = "quote"
+      error = "Fill in " + joinFieldList(missingLabels) + "."
       root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow, firstMissingField)
       return
     }
@@ -1125,8 +1167,8 @@ Item {
       notice = ""
       missingQuoteFields = []
       quoteValidationError = false
-      error = "Pick an author."
       errorScope = "quote"
+      error = "Pick an author."
       root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
       return
     }
@@ -1239,8 +1281,8 @@ Item {
         notice = ""
         missingAuthorFields = ["name"]
         authorValidationError = true
-        error = "Fill in Name."
         errorScope = "author"
+        error = "Fill in Name."
         root.revealAfterLayout(authorForm, authorNameField, null, authorNameField)
         return
       }
@@ -1252,8 +1294,8 @@ Item {
         let missingField = hasCite ? authorTextField : authorCitationField
         missingAuthorFields = [hasCite ? "text" : "citation"]
         authorValidationError = true
-        error = hasCite ? "Fill in Quote to match the citation." : "Fill in Citation to match the quote."
         errorScope = "author"
+        error = hasCite ? "Fill in Quote to match the citation." : "Fill in Citation to match the quote."
         root.revealAfterLayout(authorForm, missingField, null, missingField)
         return
       }
@@ -1281,8 +1323,8 @@ Item {
         notice = ""
         missingAuthorFields = []
         authorValidationError = false
-        error = noAuthorChangesError
         errorScope = "author"
+        error = noAuthorChangesError
         return
       }
       missingAuthorFields = []
@@ -1327,10 +1369,10 @@ Item {
       notice = ""
       missingAuthorFields = missingKeys
       authorValidationError = true
+      errorScope = "author"
       error = (missingKeys.length === 1 && missingKeys[0] === "slug")
         ? "Use letters or numbers in the name, or set an Author id under Advanced."
         : ("Fill in " + joinFieldList(missingLabels) + ".")
-      errorScope = "author"
       if (firstMissingField === authorSlugField) {
         root.revealAfterLayout(authorForm, advancedFields, authorSlugField, authorSlugField)
       } else {
@@ -1736,8 +1778,8 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         if (String(text || "").trim() !== "") {
-          root.error = root.plainError(text, "Could not open the preview.")
           root.errorScope = ""
+          root.error = root.plainError(text, "Could not open the preview.")
         }
       }
     }
@@ -2166,7 +2208,7 @@ Item {
                 font.pixelSize: Style.font.bodySmall
                 Accessible.role: Accessible.AlertMessage
                 Accessible.name: text
-                readonly property string announcedText: visible ? text : ""
+                readonly property string announcedText: root.opened && visible ? text : ""
                 onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
               }
             }
@@ -2295,12 +2337,15 @@ Item {
 
             Text {
               id: secondsLabel
+              objectName: "secondsLabel"
               width: parent.width
               visible: root.intervalApplied
               text: "Seconds each quote stays up"
               color: root.quiet
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
+              Accessible.role: Accessible.StaticText
+              Accessible.name: text
             }
 
             Item {
@@ -2309,14 +2354,23 @@ Item {
               visible: root.intervalApplied
               NumberField {
                 id: secondsField
+                objectName: "secondsField"
                 label: ""
                 value: root.interval
                 from: 5
                 to: 3600
                 stepSize: 5
                 foreground: root.ink
-                Accessible.name: secondsLabel.text
-                Accessible.labelledBy: secondsLabel
+                Component.onCompleted: {
+                  if (secondsField.field) {
+                    secondsField.field.Accessible.name = Qt.binding(function() { return secondsLabel.text })
+                    secondsField.field.Accessible.labelledBy = secondsLabel
+                    if (secondsField.field.contentItem) {
+                      secondsField.field.contentItem.Accessible.name = Qt.binding(function() { return secondsLabel.text })
+                      secondsField.field.contentItem.Accessible.labelledBy = secondsLabel
+                    }
+                  }
+                }
                 onModified: function(value) { root.confirmRemoveAuthor = ""; root.interval = value; root.scheduleApply() }
                 onActiveFocusChanged: if (activeFocus) root.reveal(secondsField, secondsLabel)
               }
@@ -2327,8 +2381,9 @@ Item {
                 }
               }
               Rectangle {
+                objectName: "fieldBorder"
                 anchors.fill: parent
-                anchors.margins: -2
+                z: 1
                 enabled: false
                 color: "transparent"
                 radius: Style.cornerRadius
@@ -2407,10 +2462,13 @@ Item {
               }
               Text {
                 id: quoteCitationLabel
+                objectName: "quoteCitationLabel"
                 text: "Citation"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2446,10 +2504,13 @@ Item {
               }
               Text {
                 id: quoteTextLabel
+                objectName: "quoteTextLabel"
                 text: "Quote"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               QuoteArea {
                 id: textField
@@ -2493,7 +2554,7 @@ Item {
                 wrapMode: Text.WordWrap
                 Accessible.role: Accessible.AlertMessage
                 Accessible.name: text
-                readonly property string announcedText: visible ? text : ""
+                readonly property string announcedText: root.opened && visible ? text : ""
                 onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
               }
               Row {
@@ -2529,10 +2590,13 @@ Item {
               }
               Text {
                 id: authorNameLabel
+                objectName: "authorNameLabel"
                 text: "Name"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2574,10 +2638,13 @@ Item {
               }
               Text {
                 id: authorDatesLabel
+                objectName: "authorDatesLabel"
                 text: "Dates (optional)"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2612,10 +2679,13 @@ Item {
               }
               Text {
                 id: authorImageLabel
+                objectName: "authorImageLabel"
                 text: root.editingAuthorSlug !== "" ? "New portrait image (optional, JPEG or PNG)" : "Portrait image (JPEG or PNG)"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Row {
                 id: authorImageRow
@@ -2728,15 +2798,20 @@ Item {
                     wrapMode: Text.WordWrap
                     Accessible.role: Accessible.AlertMessage
                     Accessible.name: text
+                    readonly property string announcedText: root.opened && visible ? text : ""
+                    onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
                   }
                 }
               }
               Text {
                 id: authorCitationLabel
+                objectName: "authorCitationLabel"
                 text: root.editingAuthorSlug !== "" ? "Replacement citation (optional)" : "Citation"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2773,10 +2848,13 @@ Item {
               }
               Text {
                 id: authorTextLabel
+                objectName: "authorTextLabel"
                 text: root.editingAuthorSlug !== "" ? "Replacement quote (optional)" : "Quote"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               QuoteArea {
                 id: authorTextField
@@ -2840,10 +2918,13 @@ Item {
                 spacing: Style.space(6)
                 Text {
                   id: authorSlugLabel
+                  objectName: "authorSlugLabel"
                   text: "Author id"
                   color: root.quiet
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
+                  Accessible.role: Accessible.StaticText
+                  Accessible.name: text
                 }
                 Item {
                   width: parent.width
@@ -3047,7 +3128,7 @@ Item {
             wrapMode: Text.WordWrap
             Accessible.role: Accessible.AlertMessage
             Accessible.name: text
-            readonly property string announcedText: visible ? text : ""
+            readonly property string announcedText: root.opened && visible ? text : ""
             onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
           }
 
@@ -3128,7 +3209,8 @@ Item {
             elide: Text.ElideRight
             Accessible.role: root.errorShownInStatus ? Accessible.AlertMessage : Accessible.StaticText
             Accessible.name: root.statusText
-            onTextChanged: if (statusMessageText.text !== "" && statusMessageText.text !== "Loading…" && statusMessageText.text !== "Saving…") Accessible.announce(statusMessageText.text, root.errorShownInStatus ? Accessible.Assertive : Accessible.Polite)
+            readonly property string announcedText: root.opened && text !== "" && text !== "Loading…" && text !== "Saving…" ? text : ""
+            onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, root.errorShownInStatus ? Accessible.Assertive : Accessible.Polite)
           }
         }
 

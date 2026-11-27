@@ -70,7 +70,8 @@ test("small panel text stays at 4.5:1, dates hold over the selected-row wash, an
     expect(contrast(theme.urgent, theme.background), `${name} urgent border and error text`).toBeGreaterThanOrEqual(4.5);
     const savedFill = mix(theme.accent, theme.background, savedPill);
     expect(contrast(theme.ink, savedFill), `${name} saved confirmation pill text`).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(theme.accent, theme.background), `${name} saved confirmation accent border and check`).toBeGreaterThanOrEqual(3.0);
+    expect(contrast(theme.accent, theme.background), `${name} saved confirmation accent border`).toBeGreaterThanOrEqual(3.0);
+    expect(contrast(theme.accent, savedFill), `${name} saved confirmation check on pill`).toBeGreaterThanOrEqual(3.0);
     expect(contrast(mix(theme.ink, theme.background, scrollThumb), theme.background), `${name} scroll thumb`).toBeGreaterThanOrEqual(3.0);
     // A selected row paints the accent wash behind the dates, so the date
     // colour is mixed over the wash, not over the plain popup background.
