@@ -145,22 +145,24 @@ test("config --help documents single-use and repeatable flags", async () => {
     }
 
     const collapsed = note.replace(/\s+/g, " ");
-    expect(collapsed).toMatch(/only once/i);
+    const [singleUseSentence = "", repeatSentence = ""] = collapsed.split(/\.\s+/);
+    expect(singleUseSentence).toMatch(/only once/i);
     for (const flag of [
       "--authors",
       "--interval",
       "--name",
       "--dates",
       "--image",
-      "--citation",
-      "--text",
       "--add-author",
       "--replace-author",
       "--remove-author",
     ]) {
-      expect(collapsed).toContain(flag);
+      expect(singleUseSentence).toContain(flag);
     }
-    expect(collapsed).toMatch(/repeat.*--quotes.*--add/i);
+    expect(singleUseSentence).not.toContain("--citation");
+    expect(singleUseSentence).not.toContain("--text");
+    expect(repeatSentence).toMatch(/repeat.*--quotes.*--add/i);
+    expect(repeatSentence).toMatch(/repeat.*--citation.*--text.*in pairs/i);
   } finally { s.cleanup(); }
 });
 

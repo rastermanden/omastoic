@@ -13,6 +13,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `omastoic --version` and `omastoic version` print the version from
   `manifest.json`. `omastoic status` shows that same version on one line (#80).
 
+### Fixed
+
+- `omastoic config --add-author` and `--replace-author` accept repeated, paired
+  `--citation` and `--text` flags in order to set multiple quotes (#145).
+  Unpaired or unequal counts still exit 1 and write nothing, and other
+  single-value flags stay single-use.
+
 ## 2.5.0 - 2026-11-22
 
 ### Added

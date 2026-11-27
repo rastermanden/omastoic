@@ -1924,7 +1924,7 @@ async function configure(rest: string[]): Promise<number> {
     const list = parsedFlags.values.get(`--${name}`);
     return list ? { present: true, value: list[0] } : { present: false };
   };
-  for (const key of ["authors", "interval", "name", "dates", "image", "citation", "text"]) {
+  for (const key of ["authors", "interval", "name", "dates", "image"]) {
     if ((parsedFlags.values.get(`--${key}`)?.length ?? 0) > 1) {
       console.error(`omastoic: --${key} can only be passed once`);
       return 1;
@@ -1950,8 +1950,8 @@ async function configure(rest: string[]): Promise<number> {
   const nameFlag = singleFlag("name");
   const datesFlag = singleFlag("dates");
   const imageFlag = singleFlag("image");
-  const citationFlag = singleFlag("citation");
-  const textFlag = singleFlag("text");
+  const citationValues = parsedFlags.values.get("--citation") ?? [];
+  const textValues = parsedFlags.values.get("--text") ?? [];
   const list = parsedFlags.bools.has("--list");
   // --plain asks for numbers instead of keys for the authors and their quotes; the
   // interval and custom-quote prompts read a line either way.
@@ -1964,11 +1964,26 @@ async function configure(rest: string[]): Promise<number> {
     console.error("omastoic: use only one of --add-author, --replace-author, or --remove-author at a time");
     return 1;
   }
-  const authorSubFlags = nameFlag.present || datesFlag.present || imageFlag.present || citationFlag.present || textFlag.present;
+  const authorSubFlags = nameFlag.present || datesFlag.present || imageFlag.present || citationValues.length > 0 || textValues.length > 0;
   if (authorSubFlags && addAuthorFlags.length === 0 && replaceAuthorFlags.length === 0) {
     console.error("omastoic: --name, --dates, --image, --citation and --text require --add-author or --replace-author");
     return 1;
   }
+  const collectCitationTextPairs = (): { ok: true; quotes: Array<{ citation: string; text: string }> } | { ok: false; error: string } => {
+    if (citationValues.length !== textValues.length) {
+      return { ok: false, error: "--citation and --text must be given together" };
+    }
+    const pairs: Array<{ citation: string; text: string }> = [];
+    for (let i = 0; i < citationValues.length; i++) {
+      const citation = citationValues[i];
+      const text = textValues[i];
+      if (!citation || !text) {
+        return { ok: false, error: "--citation and --text cannot be empty" };
+      }
+      pairs.push({ citation, text });
+    }
+    return { ok: true, quotes: pairs };
+  };
   if (removeAuthorFlags.length > 0 && addFlags.length > 0) {
     console.error("omastoic: --add cannot be used with --remove-author");
     return 1;
@@ -2037,18 +2052,12 @@ async function configure(rest: string[]): Promise<number> {
         addAuthorUsage();
         return 1;
       }
-      if (citationFlag.present !== textFlag.present) {
-        console.error("omastoic: --citation and --text must be given together");
+      const paired = collectCitationTextPairs();
+      if (!paired.ok) {
+        console.error(`omastoic: ${paired.error}`);
         return 1;
       }
-      const quotesForAuthor: Array<{ citation: string; text: string }> = [];
-      if (citationFlag.present && textFlag.present) {
-        if (!citationFlag.value || !textFlag.value) {
-          console.error("omastoic: --citation and --text cannot be empty");
-          return 1;
-        }
-        quotesForAuthor.push({ citation: citationFlag.value, text: textFlag.value });
-      }
+      const quotesForAuthor: Array<{ citation: string; text: string }> = [...paired.quotes];
       if (addFlags.length) {
         if (addFlags.some((line) => !line)) {
           addUsage();
@@ -2163,18 +2172,12 @@ async function configure(rest: string[]): Promise<number> {
       console.error("omastoic: --image requires a file path");
       return 1;
     }
-    if (citationFlag.present !== textFlag.present) {
-      console.error("omastoic: --citation and --text must be given together");
+    const paired = collectCitationTextPairs();
+    if (!paired.ok) {
+      console.error(`omastoic: ${paired.error}`);
       return 1;
     }
-    const quotesForAuthor: Array<{ citation: string; text: string }> = [];
-    if (citationFlag.present && textFlag.present) {
-      if (!citationFlag.value || !textFlag.value) {
-        console.error("omastoic: --citation and --text cannot be empty");
-        return 1;
-      }
-      quotesForAuthor.push({ citation: citationFlag.value, text: textFlag.value });
-    }
+    const quotesForAuthor: Array<{ citation: string; text: string }> = [...paired.quotes];
     if (addFlags.length) {
       if (addFlags.some((line) => !line)) {
         addUsage();
@@ -3344,8 +3347,9 @@ function commandUsage(rawCommand: string, styled = false): string | null {
         ], 26),
         "",
         "Pass single-value options only once: --authors, --interval, --name,",
-        "--dates, --image, --citation, --text, --add-author, --replace-author,",
-        "and --remove-author. You can repeat --quotes and --add.",
+        "--dates, --image, --add-author, --replace-author, and --remove-author.",
+        "You can repeat --quotes and --add, and repeat --citation and --text",
+        "in pairs.",
       ].join("\n");
     case "ui":
       return [

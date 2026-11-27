@@ -915,8 +915,9 @@ function primaryErrorLine(text: string): string {
 
 const DECODE_WARNING =
   /Premature end|Corrupt (?:JPEG|PNG|image)|unexpected end[- ]of[- ]file|insufficient image data|Not a JPEG file|Invalid JPEG|incomplete image|Improper image header/i;
+// Exempt only header, metadata, and SOS markers that may follow harmless padding; EOI (0xD9) and RST0-RST7 (0xD0-0xD7) mean a scan ended early.
 const HARMLESS_DECODE_WARNING =
-  /Corrupt JPEG data:\s*\d+\s+extraneous bytes? before marker\b/i;
+  /Corrupt JPEG data:\s*\d+\s+extraneous bytes? before marker\s+0x(?:c[0-9a-f]|d[abd]|e[0-9a-f]|fe)\b/i;
 
 function decodeWarningLines(stderr: string): string[] {
   return stderr
