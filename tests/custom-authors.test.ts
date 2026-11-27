@@ -1324,6 +1324,30 @@ function jpegWithExtraneousBytesBeforeSos(source: Buffer): Buffer {
   throw new Error("expected SOS marker 0xFF 0xDA in JPEG fixture");
 }
 
+/** Overwrite 64 bytes mid-scan so libjpeg finishes MCUs early and emits only an extraneous-bytes-before-0xD9 warning. */
+function jpegWithMidScanCorruptionBeforeEoi(source: Buffer): Buffer {
+  let pos = 2; // Skip SOI (0xFF 0xD8).
+  while (pos + 1 < source.length) {
+    if (source[pos] !== 0xff) { pos++; continue; }
+    while (pos < source.length && source[pos] === 0xff) pos++;
+    if (pos >= source.length) break;
+    const marker = source[pos]!;
+    if (marker === 0xda) {
+      const segmentLength = (source[pos + 1]! << 8) | source[pos + 2]!;
+      const scanStart = pos + 1 + segmentLength;
+      const scanLen = source.length - 2 - scanStart;
+      const corrupted = Buffer.from(source);
+      const offset = scanStart + Math.floor(scanLen * 0.2);
+      corrupted.fill(0x55, offset, offset + 64);
+      return corrupted;
+    }
+    if (marker === 0xd9) break;
+    const segmentLength = (source[pos + 1]! << 8) | source[pos + 2]!;
+    pos = pos + 1 + segmentLength;
+  }
+  throw new Error("expected SOS marker 0xFF 0xDA in JPEG fixture");
+}
+
 test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and panel apply without overwriting existing portrait", async () => {
   const s = sandbox();
   const pngA = join(s.home, "a.png");
@@ -1447,7 +1471,8 @@ test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and 
 test.skipIf(!hasImageMagick)("JPEG with harmless extraneous bytes before marker is accepted on add, replace, and panel apply", async () => {
   expect(hasDecodeWarning("magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xda")).toBe(false);
   expect(hasDecodeWarning("magick: Corrupt JPEG data: 12 extraneous bytes before marker 0xed")).toBe(false);
-  expect(hasDecodeWarning("magick: Corrupt JPEG data: 1 extraneous bytes before marker 0xd9")).toBe(false);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xe0")).toBe(false);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 2 extraneous bytes before marker 0xfe")).toBe(false);
   expect(hasDecodeWarning([
     "magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xda",
     "magick: Premature end of JPEG file",
@@ -1514,6 +1539,133 @@ test.skipIf(!hasImageMagick)("JPEG with harmless extraneous bytes before marker 
       replaceAuthor: { slug: "musonius", image: paddedJpeg },
     })]), "panel apply extraneous-bytes jpg");
     expect(readFileSync(musoniusArtPath, "utf8")).toBe(expectedArt);
+  } finally { s.cleanup(); }
+}, 30000);
+
+test.skipIf(!hasImageMagick)("mid-scan corrupted JPEG emitting extraneous bytes before 0xD9 fails cleanly on add, replace, and panel apply", async () => {
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 1 extraneous bytes before marker 0xd9")).toBe(true);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xD9")).toBe(true);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 11 extraneous bytes before marker 0xd2")).toBe(true);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 4 extraneous bytes before marker")).toBe(true);
+  expect(hasDecodeWarning([
+    "magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xda",
+    "magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xd9",
+  ].join("\n"))).toBe(true);
+
+  const s = sandbox();
+  const pngA = join(s.home, "a.png");
+  const corruptJpeg = join(s.home, "mid-scan-eoi.jpg");
+  const jpgBytes = readFileSync(sampleJpeg);
+  writePortraitPng(pngA);
+  writeFileSync(corruptJpeg, jpegWithMidScanCorruptionBeforeEoi(jpgBytes));
+
+  // Confirm the fixture triggers only libjpeg's extraneous-bytes-before-0xD9 warning while exiting 0.
+  const magick = Bun.which("magick") ?? Bun.which("convert")!;
+  const probe = Bun.spawnSync([
+    magick, "-background", "white",
+    "-define", `jpeg:size=${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}`,
+    corruptJpeg, "-auto-orient", "-alpha", "remove", "-alpha", "off",
+    "-colorspace", "Gray",
+    "-resize", `${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}^>`,
+    "-blur", "0x0.6",
+    "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`,
+    "-compress", "none", "pgm:-",
+  ]);
+  const probeStderr = probe.stderr.toString().trim();
+  expect(probe.exitCode).toBe(0);
+  expect(probeStderr).toMatch(/Corrupt JPEG data:\s*\d+\s+extraneous bytes? before marker 0xd9\b/i);
+  expect(probeStderr).not.toMatch(/Premature end|bad Huffman code|premature end of data segment/i);
+  expect(hasDecodeWarning(probeStderr)).toBe(true);
+
+  try {
+    // 1. --add-author rejects the mid-scan corrupted JPEG and writes nothing.
+    const failedAdd = await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", corruptJpeg,
+      "--citation", "Lectures VI",
+      "--text", "Train both soul and body.",
+    ]);
+    expect(failedAdd.code).toBe(1);
+    expect(failedAdd.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedAdd.stderr).not.toContain("omastoic-portrait-");
+    expect(failedAdd.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedAdd.stderr).not.toContain("@ warning/");
+    expect(existsSync(join(s.config, "omastoic/authors.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
+
+    // 2. panel apply addAuthor rejects the mid-scan corrupted JPEG and writes nothing.
+    const failedPanelAdd = await s.cli(["panel", "apply", JSON.stringify({
+      addAuthor: {
+        slug: "musonius",
+        name: "Musonius Rufus",
+        image: corruptJpeg,
+        citation: "Lectures VI",
+        text: "Train both soul and body.",
+      },
+    })]);
+    expect(failedPanelAdd.code).toBe(1);
+    expect(failedPanelAdd.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedPanelAdd.stderr).not.toContain("omastoic-portrait-");
+    expect(failedPanelAdd.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedPanelAdd.stderr).not.toContain("@ warning/");
+    expect(existsSync(join(s.config, "omastoic/authors.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
+
+    // Seed a valid custom author portrait, row, and quote.
+    expectOk(await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", pngA,
+      "--citation", "Lectures VI",
+      "--text", "Original intact line.",
+    ]), "seed musonius");
+
+    const artPath = join(s.config, "omastoic/art/musonius.txt");
+    const authorsPath = join(s.config, "omastoic/authors.tsv");
+    const quotesPath = join(s.config, "omastoic/quotes.tsv");
+    const artBefore = readFileSync(artPath, "utf8");
+    const authorsBefore = readFileSync(authorsPath, "utf8");
+    const quotesBefore = readFileSync(quotesPath, "utf8");
+
+    // 3. --replace-author fails cleanly, rolls back, and leaves portrait and metadata untouched.
+    const failedReplace = await s.cli([
+      "config",
+      "--replace-author", "musonius",
+      "--name", "Should Not Land",
+      "--image", corruptJpeg,
+      "--citation", "Broken",
+      "--text", "Must not overwrite.",
+    ]);
+    expect(failedReplace.code).toBe(1);
+    expect(failedReplace.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedReplace.stderr).not.toContain("omastoic-portrait-");
+    expect(failedReplace.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedReplace.stderr).not.toContain("@ warning/");
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+
+    // 4. panel apply replaceAuthor fails cleanly, rolls back, and leaves portrait and metadata untouched.
+    const failedPanelReplace = await s.cli(["panel", "apply", JSON.stringify({
+      replaceAuthor: {
+        slug: "musonius",
+        name: "Panel Should Not Land",
+        image: corruptJpeg,
+      },
+    })]);
+    expect(failedPanelReplace.code).toBe(1);
+    expect(failedPanelReplace.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedPanelReplace.stderr).not.toContain("omastoic-portrait-");
+    expect(failedPanelReplace.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedPanelReplace.stderr).not.toContain("@ warning/");
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
   } finally { s.cleanup(); }
 }, 30000);
 
@@ -1830,3 +1982,259 @@ test("custom author date ranges normalize on add, replace, panel, and read witho
     expect(reject129.stderr).toContain("at most 128 characters");
   } finally { s.cleanup(); }
 });
+
+test("config --add-author and --replace-author accept repeated paired --citation/--text flags and reject mismatches", async () => {
+  const s = sandbox();
+  const pngA = join(s.home, "a.png");
+  const pngB = join(s.home, "b.png");
+  writePortraitPng(pngA);
+  writePhotoPng(pngB);
+  const quotesPath = join(s.config, "omastoic/quotes.tsv");
+  const authorsPath = join(s.config, "omastoic/authors.tsv");
+  const configPath = join(s.config, "omastoic/config.json");
+
+  try {
+    // Unpaired / unequal / empty --citation and --text on --add-author fail cleanly and write nothing.
+    const badAddCases: Array<{ label: string; args: string[]; error: string }> = [
+      {
+        label: "lone --citation",
+        args: ["config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA, "--citation", "Lectures VI"],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "lone --text",
+        args: ["config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA, "--text", "Only text."],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "two --citation, one --text",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--citation", "Lectures VII",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "one --citation, two --text",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--text", "Second line.",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "empty second --citation",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--citation", "", "--text", "Second line.",
+        ],
+        error: "--citation and --text cannot be empty",
+      },
+      {
+        label: "missing value before --text",
+        args: [
+          "config", "--add-author", "musonius", "--name", "Musonius Rufus", "--image", pngA,
+          "--citation", "Lectures VI", "--text", "First line.",
+          "--citation", "--text", "Second line.",
+        ],
+        error: "--citation and --text cannot be empty",
+      },
+    ];
+    for (const c of badAddCases) {
+      const res = await s.cli(c.args);
+      expect(res.code, c.label).toBe(1);
+      expect(res.stderr, c.label).toContain(c.error);
+    }
+    expect(existsSync(authorsPath)).toBe(false);
+    expect(existsSync(quotesPath)).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
+
+    // --add-author accepts repeated paired --citation/--text flags in order.
+    const addedMulti = await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", pngA,
+      "--citation", "Lectures VI", "--text", "First line.",
+      "--citation", "Lectures VII", "--text", "Second line.",
+    ]);
+    expectOk(addedMulti, "add-author with two citation/text pairs");
+    expect(addedMulti.stdout).toContain("2 quotes");
+    expect(readFileSync(quotesPath, "utf8")).toBe(
+      "# author-slug <TAB> citation <TAB> text\n" +
+      "musonius\tLectures VI\tFirst line.\n" +
+      "musonius\tLectures VII\tSecond line.\n",
+    );
+
+    // --add-author also combines repeated --citation/--text pairs with repeated --add lines in order
+    // (citation/text pairs first, then --add lines).
+    const addedMixed = await s.cli([
+      "config",
+      "--add-author", "hierocles",
+      "--name", "Hierocles",
+      "--image", pngA,
+      "--citation", "Elements I", "--text", "Pair one.",
+      "--citation", "Elements II", "--text", "Pair two.",
+      "--add", "hierocles\tElements III\tTsv one.",
+      "--add", "hierocles\tElements IV\tTsv two.",
+    ]);
+    expectOk(addedMixed, "add-author combining paired citation/text and --add");
+    expect(addedMixed.stdout).toContain("4 quotes");
+
+    expectOk(await s.cli(["config", "--add", "seneca\tDesk note\tSeneca custom line."]), "add seneca custom quote");
+    // musonius has 2 (c01, c02), hierocles has 4 (c03..c06), seneca has 1 (c07).
+    expectOk(await s.cli(["config", "--quotes", "seneca=q19,c07"]), "select seneca custom quote");
+
+    // --replace-author replaces musonius's quotes with two --citation/--text pairs in order,
+    // leaving hierocles's and seneca's quotes untouched.
+    const replacedTwo = await s.cli([
+      "config",
+      "--replace-author", "musonius",
+      "--citation", "Lectures XI", "--text", "Replaced first.",
+      "--citation", "Lectures XII", "--text", "Replaced second.",
+    ]);
+    expectOk(replacedTwo, "replace-author with two citation/text pairs");
+    expect(readFileSync(quotesPath, "utf8")).toBe(
+      "# author-slug <TAB> citation <TAB> text\n" +
+      "musonius\tLectures XI\tReplaced first.\n" +
+      "musonius\tLectures XII\tReplaced second.\n" +
+      "hierocles\tElements I\tPair one.\n" +
+      "hierocles\tElements II\tPair two.\n" +
+      "hierocles\tElements III\tTsv one.\n" +
+      "hierocles\tElements IV\tTsv two.\n" +
+      "seneca\tDesk note\tSeneca custom line.\n",
+    );
+
+    // --replace-author combines repeated --citation/--text pairs with --add lines (pairs first, then --add)
+    // and remaps other authors' custom quote ids when quote count changes.
+    const replacedMixed = await s.cli([
+      "config",
+      "--replace-author", "musonius",
+      "--citation", "Lectures XIII", "--text", "Mixed pair one.",
+      "--citation", "Lectures XIV", "--text", "Mixed pair two.",
+      "--add", "musonius\tLectures XV\tMixed tsv three.",
+    ]);
+    expectOk(replacedMixed, "replace-author combining citation/text pairs and --add");
+    const quotesAfterMixed = readFileSync(quotesPath, "utf8");
+    expect(quotesAfterMixed).toBe(
+      "# author-slug <TAB> citation <TAB> text\n" +
+      "musonius\tLectures XIII\tMixed pair one.\n" +
+      "musonius\tLectures XIV\tMixed pair two.\n" +
+      "musonius\tLectures XV\tMixed tsv three.\n" +
+      "hierocles\tElements I\tPair one.\n" +
+      "hierocles\tElements II\tPair two.\n" +
+      "hierocles\tElements III\tTsv one.\n" +
+      "hierocles\tElements IV\tTsv two.\n" +
+      "seneca\tDesk note\tSeneca custom line.\n",
+    );
+    // musonius grew from 2 to 3 quotes, shifting seneca's custom quote from c07 to c08.
+    expect(JSON.parse(readFileSync(configPath, "utf8")).quotes.seneca).toEqual(["q19", "c08"]);
+
+    // Unpaired, unequal, empty, duplicate, and repeated single-value flags on --replace-author fail and write nothing.
+    const authorsBeforeFail = readFileSync(authorsPath, "utf8");
+    const artBeforeFail = readFileSync(join(s.config, "omastoic/art/musonius.txt"), "utf8");
+    const configBeforeFail = readFileSync(configPath, "utf8");
+
+    const badReplaceCases: Array<{ label: string; args: string[]; error: string }> = [
+      {
+        label: "replace lone --citation",
+        args: ["config", "--replace-author", "musonius", "--citation", "Only cite"],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace lone --text",
+        args: ["config", "--replace-author", "musonius", "--text", "Only text."],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace unequal 2 citations 1 text",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "A", "--text", "a",
+          "--citation", "B",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace unequal 1 citation 2 texts",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "A", "--text", "a",
+          "--text", "b",
+        ],
+        error: "--citation and --text must be given together",
+      },
+      {
+        label: "replace empty second --text",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "A", "--text", "a",
+          "--citation", "B", "--text", "",
+        ],
+        error: "--citation and --text cannot be empty",
+      },
+      {
+        label: "replace duplicate pair",
+        args: [
+          "config", "--replace-author", "musonius",
+          "--citation", "Same", "--text", "Same line.",
+          "--citation", "Same", "--text", "Same line.",
+        ],
+        error: "duplicate quote",
+      },
+      {
+        label: "repeated --name",
+        args: ["config", "--replace-author", "musonius", "--name", "One", "--name", "Two"],
+        error: "--name can only be passed once",
+      },
+      {
+        label: "repeated --dates",
+        args: ["config", "--replace-author", "musonius", "--dates", "30 – 100", "--dates", "25 – 95"],
+        error: "--dates can only be passed once",
+      },
+      {
+        label: "repeated --image",
+        args: ["config", "--replace-author", "musonius", "--image", pngA, "--image", pngB],
+        error: "--image can only be passed once",
+      },
+      {
+        label: "repeated --authors",
+        args: ["config", "--authors", "marcus", "--authors", "seneca"],
+        error: "--authors can only be passed once",
+      },
+      {
+        label: "repeated --interval",
+        args: ["config", "--interval", "30", "--interval", "60"],
+        error: "--interval can only be passed once",
+      },
+      {
+        label: "repeated --add-author",
+        args: ["config", "--add-author", "a", "--add-author", "b"],
+        error: "--add-author accepts one author at a time",
+      },
+      {
+        label: "repeated --replace-author",
+        args: ["config", "--replace-author", "musonius", "--replace-author", "hierocles", "--name", "Both"],
+        error: "--replace-author accepts one author at a time",
+      },
+      {
+        label: "repeated --remove-author",
+        args: ["config", "--remove-author", "musonius", "--remove-author", "hierocles"],
+        error: "--remove-author accepts one author at a time",
+      },
+    ];
+    for (const c of badReplaceCases) {
+      const res = await s.cli(c.args);
+      expect(res.code, c.label).toBe(1);
+      expect(res.stderr, c.label).toContain(c.error);
+    }
+
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesAfterMixed);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBeforeFail);
+    expect(readFileSync(join(s.config, "omastoic/art/musonius.txt"), "utf8")).toBe(artBeforeFail);
+    expect(readFileSync(configPath, "utf8")).toBe(configBeforeFail);
+  } finally { s.cleanup(); }
+}, 30000);
