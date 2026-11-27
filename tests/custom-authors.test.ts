@@ -1219,6 +1219,16 @@ test("panel state and panel apply replace and remove custom authors while protec
     expect(emptyPanelReplace.stderr).not.toContain("--image");
     expect(emptyPanelReplace.stderr).not.toContain("--name");
 
+    for (const partial of [
+      { slug: "hierocles", citation: "Only citation" },
+      { slug: "hierocles", text: "Only text" },
+    ]) {
+      const partialReplace = await s.cli(["panel", "apply", JSON.stringify({ replaceAuthor: partial })]);
+      expect(partialReplace.code).toBe(1);
+      expect(partialReplace.stderr).toContain("A quote needs a citation and the words.");
+      expect(partialReplace.stderr).not.toContain("panel replaceAuthor");
+    }
+
     // Removing the only selected custom author via panel apply switches explicitly to Marcus Aurelius and returns a clear notice.
     expectOk(await s.cli(["panel", "apply", JSON.stringify({ authors: ["hierocles"] })]), "select only hierocles via panel");
     const removedOnlyPanel = await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: "hierocles" })]);
@@ -1229,6 +1239,23 @@ test("panel state and panel apply replace and remove custom authors while protec
     expect(stateAfterOnly.notice).toBe("Removed Hierocles. Rotation is now Marcus Aurelius.");
     expect(stateAfterOnly.authors.filter((entry: { selected: boolean }) => entry.selected).map((entry: { slug: string }) => entry.slug)).toEqual(["marcus"]);
     expect(JSON.parse(readFileSync(join(s.config, "omastoic/config.json"), "utf8")).authors).toEqual(["marcus"]);
+
+    // Adding an author through the panel while only a subset is selected keeps the new author checked in rotation.
+    const addedSelected = await s.cli(["panel", "apply", JSON.stringify({
+      authors: ["marcus", "hume"],
+      addAuthor: {
+        slug: "hume",
+        name: "David Hume",
+        image: pngA,
+        citation: "Treatise",
+        text: "Reason is, and ought only to be the slave of the passions.",
+      },
+    })]);
+    expectOk(addedSelected, "panel apply addAuthor with default selection");
+    const stateAfterHume = JSON.parse(addedSelected.stdout);
+    expect(stateAfterHume.settings.authors).toEqual(["marcus", "hume"]);
+    expect(stateAfterHume.authors.find((entry: { slug: string }) => entry.slug === "hume")?.selected).toBe(true);
+    expectOk(await s.cli(["panel", "apply", JSON.stringify({ removeAuthor: "hume" })]), "remove hume after subset check");
     const statusAfterPanel = await s.cli(["status"]);
     expectOk(statusAfterPanel, "status after panel remove sole author");
     expect(statusAfterPanel.stdout).toContain("Marcus Aurelius");

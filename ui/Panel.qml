@@ -53,6 +53,7 @@ Item {
   property string portraitPreviewSource: ""
   readonly property string pickerUnavailableNotice: "Could not open the file picker. Type a path instead."
   readonly property string pickerUnsupportedNotice: "Choose a JPEG or PNG saved on this computer."
+  readonly property string noAuthorChangesError: "Change the portrait, name, dates, or quote first."
   property string pendingRemove: ""
   property string pendingRemoveAuthor: ""
   property string confirmRemoveAuthor: ""
@@ -85,13 +86,20 @@ Item {
   property string newCitation: ""
   property string newText: ""
   property string newAuthorName: ""
-  property string newAuthorSlug: ""
-  property bool authorSlugEdited: false
+  readonly property string derivedAuthorSlug: slugFromName(newAuthorName)
+  property string customAuthorSlug: ""
+  readonly property string newAuthorSlug: editingAuthorSlug !== ""
+    ? editingAuthorSlug
+    : (customAuthorSlug.trim() !== "" ? customAuthorSlug.trim() : derivedAuthorSlug)
   property bool authorAdvancedOpen: false
   property string newAuthorDates: ""
   property string newAuthorImage: ""
   property string newAuthorCitation: ""
   property string newAuthorText: ""
+  property var missingAuthorFields: []
+  property var missingQuoteFields: []
+  property bool authorValidationError: false
+  property bool quoteValidationError: false
 
   readonly property bool quoteReady: newAuthor !== "" && newCitation.trim() !== "" && newText.trim() !== ""
   readonly property bool authorReady: editingAuthorSlug !== ""
@@ -106,7 +114,7 @@ Item {
         )
       )
     : (
-        (newAuthorSlug.trim() !== "" || !authorAdvancedOpen) &&
+        newAuthorSlug.trim() !== "" &&
         newAuthorName.trim() !== "" &&
         newAuthorImage.trim() !== "" &&
         newAuthorCitation.trim() !== "" &&
@@ -118,6 +126,21 @@ Item {
     }
     return null
   }
+  readonly property var duplicateAuthorNames: {
+    let counts = Object.create(null)
+    for (let i = 0; i < samples.length; i++) {
+      let key = String(samples[i].name || "").trim().toLowerCase()
+      if (key !== "") counts[key] = (counts[key] || 0) + 1
+    }
+    let dups = Object.create(null)
+    for (let k in counts) {
+      if (counts[k] > 1) dups[k] = true
+    }
+    return dups
+  }
+  readonly property string editingAuthorHeading: hasDuplicateAuthorName(editingAuthorOrigName)
+    ? (editingAuthorOrigName + " (" + editingAuthorSlug + ")")
+    : editingAuthorOrigName
   readonly property bool hasPortrait: preview !== null && /[^\s\u2800]/.test(String(preview.portrait || ""))
   readonly property string displayedAuthorPortrait: newAuthorImage.trim() !== ""
     ? portraitPreviewArt
@@ -140,7 +163,7 @@ Item {
   // 0.88 clears 4.5:1 for small text on Tokyo Night and Catppuccin Latte.
   // Placeholders stay lower so they read as hints, not as typed text.
   readonly property color quiet: Qt.rgba(ink.r, ink.g, ink.b, 0.88)
-  readonly property color hint: Qt.rgba(ink.r, ink.g, ink.b, 0.7)
+  readonly property color hint: Qt.rgba(ink.r, ink.g, ink.b, 0.45)
   // The roster dates sit on the selected-row accent wash (0.16). `quiet` at
   // 0.88 drops below 4.5:1 over that wash in Catppuccin Latte, so the dates get
   // a stronger ink that still reads quieter than the author's name.
@@ -162,12 +185,17 @@ Item {
     error = ""
     errorScope = ""
     authorListHint = ""
+    missingAuthorFields = []
+    missingQuoteFields = []
+    authorValidationError = false
+    quoteValidationError = false
     pendingApplyNotice = ""
     rotationNotice = ""
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
+    customAuthorSlug = ""
     pendingReplaceAuthor = null
     pendingRemoveAuthor = ""
     confirmRemoveAuthor = ""
@@ -195,8 +223,100 @@ Item {
     error = ""
     errorScope = ""
     authorListHint = ""
+    missingAuthorFields = []
+    missingQuoteFields = []
+    authorValidationError = false
+    quoteValidationError = false
     confirmRemoveAuthor = ""
     editingAuthorPortrait = ""
+    customAuthorSlug = ""
+  }
+
+  function clearValidationState() {
+    missingAuthorFields = []
+    missingQuoteFields = []
+    authorValidationError = false
+    quoteValidationError = false
+  }
+
+  function clearNoChangeAuthorError() {
+    if (errorScope === "author" && error === noAuthorChangesError) {
+      error = ""
+      errorScope = ""
+      authorValidationError = false
+    }
+  }
+
+  function isAuthorFieldMissing(key) {
+    return missingAuthorFields.indexOf(key) !== -1
+  }
+
+  function isQuoteFieldMissing(key) {
+    return missingQuoteFields.indexOf(key) !== -1
+  }
+
+  function clearMissingAuthorField(key) {
+    if (missingAuthorFields.indexOf(key) === -1) return
+    let next = missingAuthorFields.filter(function(item) { return item !== key })
+    missingAuthorFields = next
+    if (next.length === 0 && authorValidationError && errorScope === "author") {
+      error = ""
+      errorScope = ""
+      authorValidationError = false
+    }
+  }
+
+  function clearMissingQuoteField(key) {
+    if (missingQuoteFields.indexOf(key) === -1) return
+    let next = missingQuoteFields.filter(function(item) { return item !== key })
+    missingQuoteFields = next
+    if (next.length === 0 && quoteValidationError && errorScope === "quote") {
+      error = ""
+      errorScope = ""
+      quoteValidationError = false
+    }
+  }
+
+  function joinFieldList(names) {
+    if (!names || names.length === 0) return ""
+    if (names.length === 1) return names[0]
+    if (names.length === 2) return names[0] + " and " + names[1]
+    return names.slice(0, names.length - 1).join(", ") + ", and " + names[names.length - 1]
+  }
+
+  function focusField(field) {
+    if (!field) return
+    if (typeof field.takeFocus === "function") field.takeFocus()
+    else field.forceActiveFocus()
+  }
+
+  function hasDuplicateAuthorName(name) {
+    var key = String(name || "").trim().toLowerCase()
+    return key !== "" && duplicateAuthorNames[key] === true
+  }
+
+  function authorDisplayName(author) {
+    if (!author) return ""
+    var name = String(author.name || "")
+    var slug = String(author.slug || "")
+    return (slug !== "" && hasDuplicateAuthorName(name)) ? (name + " (" + slug + ")") : name
+  }
+
+  function authorDisplayNameBySlug(slug, fallbackName) {
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].slug === slug) return authorDisplayName(samples[i])
+    }
+    return String(fallbackName || slug || "")
+  }
+
+  function authorRowMeta(author) {
+    if (!author) return ""
+    var dates = String(author.dates || "")
+    var slug = String(author.slug || "")
+    if (slug !== "" && hasDuplicateAuthorName(author.name)) {
+      return dates !== "" ? (slug + " · " + dates) : slug
+    }
+    return dates
   }
 
   function captureFormReturnY() {
@@ -398,8 +518,10 @@ Item {
       let chosen = String(stdoutText || "").replace(/\r?\n$/, "")
       if (chosen !== "") {
         authorImageField.text = chosen
-        error = ""
-        errorScope = ""
+        if (!authorValidationError || missingAuthorFields.length === 0) {
+          error = ""
+          errorScope = ""
+        }
         clearPickerNotice()
         schedulePortraitPreview(chosen, true)
         Qt.callLater(function() {
@@ -438,8 +560,17 @@ Item {
     })
   }
 
+  function isInsideScroller(item) {
+    var cur = item
+    while (cur) {
+      if (cur === scroller.contentItem) return true
+      cur = cur.parent
+    }
+    return false
+  }
+
   function reveal(item) {
-    if (!item) return
+    if (!item || !isInsideScroller(item)) return
     var pos = item.mapToItem(scroller.contentItem, 0, 0)
     var top = pos.y
     var bottom = pos.y + item.height
@@ -456,6 +587,7 @@ Item {
       if (form === quoteForm) authorGrid.forceLayout()
       if (form === authorForm && authorPortraitPreviewBox.visible) previewBoxColumn.forceLayout()
       if (form && typeof form.forceLayout === "function") form.forceLayout()
+      if (form === authorForm && authorFooter.visible) authorFooter.forceLayout()
       content.forceLayout()
       if (first) root.reveal(first)
       if (second) root.reveal(second)
@@ -480,6 +612,10 @@ Item {
     error = ""
     errorScope = ""
     authorListHint = ""
+    missingAuthorFields = []
+    missingQuoteFields = []
+    authorValidationError = false
+    quoteValidationError = false
     pendingApplyNotice = ""
     rotationNotice = ""
     notice = "Loading…"
@@ -519,6 +655,8 @@ Item {
       pendingApplyNotice = ""
       rotationNotice = ""
       notice = ""
+      authorValidationError = false
+      quoteValidationError = false
       error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       if ((addingAuthor || replacingAuthor) && authorOpen) {
         errorScope = "author"
@@ -527,7 +665,8 @@ Item {
       } else {
         errorScope = ""
       }
-      if (errorScope === "author" && editingAuthorSlug === "" && /\b(?:slug|bundled author|already exists|reserved)\b/i.test(error)) {
+      let slugCollision = errorScope === "author" && editingAuthorSlug === "" && /\b(?:slug|bundled author|already exists|reserved)\b/i.test(error)
+      if (slugCollision) {
         authorAdvancedOpen = true
       }
       applyQueued = false
@@ -538,7 +677,12 @@ Item {
       pendingRemoveAuthor = ""
       confirmRemoveAuthor = ""
       if (errorScope === "author") {
-        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
+        if (slugCollision) {
+          root.revealAfterLayout(authorForm, authorSlugField, null)
+          Qt.callLater(function() { if (root.opened && root.authorOpen && root.authorAdvancedOpen) root.focusField(authorSlugField) })
+        } else {
+          root.revealAfterLayout(authorForm, null, null)
+        }
       } else if (errorScope === "quote") {
         root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
       } else {
@@ -607,15 +751,23 @@ Item {
     if (addingQuote || !quoteOpen) {
       let closingQuote = addingQuote && quoteOpen
       quoteOpen = false
+      missingQuoteFields = []
+      quoteValidationError = false
       citationField.text = ""
       textField.text = ""
-      if (closingQuote) restoreFormReturnY()
+      if (closingQuote) {
+        keyCatcher.forceActiveFocus()
+        restoreFormReturnY()
+      }
     }
     if (addingAuthor || replacingAuthor) {
+      let closingAuthor = authorOpen
       clearPortraitPreview()
       authorOpen = false
       authorAdvancedOpen = false
-      authorSlugEdited = false
+      customAuthorSlug = ""
+      missingAuthorFields = []
+      authorValidationError = false
       editingAuthorSlug = ""
       editingAuthorOrigName = ""
       editingAuthorOrigDates = ""
@@ -626,6 +778,7 @@ Item {
       authorImageField.text = ""
       authorCitationField.text = ""
       authorTextField.text = ""
+      if (closingAuthor) keyCatcher.forceActiveFocus()
       restoreFormReturnY()
     } else if (editingAuthorSlug !== "" && !samples.some(function(author) { return author.slug === root.editingAuthorSlug })) {
       closeAuthorForm()
@@ -652,6 +805,7 @@ Item {
     if (!next.length) {
       error = ""
       errorScope = ""
+      clearValidationState()
       authorListHint = "Pick at least one author."
       root.reveal(rotationHeaderRow)
       return
@@ -671,6 +825,7 @@ Item {
     if (adopting || !opened) return
     error = ""
     errorScope = ""
+    clearValidationState()
     applyTimer.restart()
   }
 
@@ -680,6 +835,7 @@ Item {
     if (!selectedAuthors.length) {
       error = ""
       errorScope = ""
+      clearValidationState()
       authorListHint = "Pick at least one author."
       root.reveal(rotationHeaderRow)
       return
@@ -689,7 +845,14 @@ Item {
     var payload = {}
     if (pendingAuthor) {
       payload.addAuthor = pendingAuthor
-      if (selectedAuthors.join(",") !== committedAuthors.join(",")) payload.authors = selectedAuthors
+      let hadExplicitAuthors = settings.authors instanceof Array && settings.authors.length > 0
+      let selectionChanged = selectedAuthors.join(",") !== committedAuthors.join(",")
+      let partialSelection = selectedAuthors.length < samples.length
+      if (hadExplicitAuthors || selectionChanged || partialSelection) {
+        let nextAuthors = selectedAuthors.slice()
+        if (nextAuthors.indexOf(pendingAuthor.slug) === -1) nextAuthors.push(pendingAuthor.slug)
+        payload.authors = nextAuthors
+      }
       if (intervalApplied && interval !== committedInterval) payload.interval = interval
       pendingAuthor = null
       addingAuthor = true
@@ -734,6 +897,7 @@ Item {
     saving = true
     error = ""
     errorScope = ""
+    clearValidationState()
     notice = "Saving…"
     resetRun(applyRun)
     applyProcess.command = [command, "panel", "apply", JSON.stringify(payload)]
@@ -755,6 +919,8 @@ Item {
     clearPortraitPreview()
     clearPickerNotice()
     authorOpen = false
+    missingAuthorFields = []
+    authorValidationError = false
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
@@ -765,6 +931,8 @@ Item {
 
   function closeQuoteForm() {
     quoteOpen = false
+    missingQuoteFields = []
+    quoteValidationError = false
     error = ""
     errorScope = ""
     keyCatcher.forceActiveFocus()
@@ -772,13 +940,41 @@ Item {
   }
 
   function addQuote() {
-    if (!quoteReady) {
+    if (!root.quoteOpen || root.busy) return
+    let missingKeys = []
+    let missingLabels = []
+    let firstMissingField = null
+    if (newCitation.trim() === "") {
+      missingKeys.push("citation")
+      missingLabels.push("Citation")
+      if (!firstMissingField) firstMissingField = citationField
+    }
+    if (newText.trim() === "") {
+      missingKeys.push("text")
+      missingLabels.push("Quote")
+      if (!firstMissingField) firstMissingField = textField
+    }
+    if (missingKeys.length > 0) {
       notice = ""
-      error = "A quote needs a citation and the words."
+      missingQuoteFields = missingKeys
+      quoteValidationError = true
+      error = "Fill in " + joinFieldList(missingLabels) + "."
+      errorScope = "quote"
+      root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
+      Qt.callLater(function() { if (root.opened && root.quoteOpen) root.focusField(firstMissingField) })
+      return
+    }
+    if (newAuthor === "") {
+      notice = ""
+      missingQuoteFields = []
+      quoteValidationError = false
+      error = "Pick an author."
       errorScope = "quote"
       root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
       return
     }
+    missingQuoteFields = []
+    quoteValidationError = false
     pendingQuote = { author: newAuthor, citation: newCitation.trim(), text: newText.trim() }
     applyNow()
   }
@@ -792,17 +988,21 @@ Item {
     error = ""
     errorScope = ""
     authorListHint = ""
+    missingAuthorFields = []
+    authorValidationError = false
     if (authorOpen && editingAuthorSlug === "") {
       closeAuthorForm()
       return
     }
     captureFormReturnY()
     quoteOpen = false
+    missingQuoteFields = []
+    quoteValidationError = false
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
-    authorSlugEdited = false
+    customAuthorSlug = ""
     authorAdvancedOpen = false
     authorNameField.text = ""
     authorSlugField.text = ""
@@ -823,20 +1023,24 @@ Item {
     error = ""
     errorScope = ""
     authorListHint = ""
+    missingAuthorFields = []
+    authorValidationError = false
     if (authorOpen && editingAuthorSlug === author.slug) {
       closeAuthorForm()
       return
     }
     captureFormReturnY()
     quoteOpen = false
+    missingQuoteFields = []
+    quoteValidationError = false
     editingAuthorSlug = author.slug
     editingAuthorOrigName = author.name
     editingAuthorOrigDates = author.dates
     editingAuthorPortrait = String(author.fullPortrait || "")
-    authorSlugEdited = true
+    customAuthorSlug = ""
     authorAdvancedOpen = false
     authorNameField.text = author.name
-    authorSlugField.text = author.slug
+    authorSlugField.text = ""
     authorDatesField.text = author.dates
     authorImageField.text = ""
     authorCitationField.text = ""
@@ -851,12 +1055,15 @@ Item {
     clearPickerNotice()
     authorOpen = false
     authorAdvancedOpen = false
+    missingAuthorFields = []
+    authorValidationError = false
     error = ""
     errorScope = ""
     editingAuthorSlug = ""
     editingAuthorOrigName = ""
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
+    customAuthorSlug = ""
     keyCatcher.forceActiveFocus()
     restoreFormReturnY()
   }
@@ -866,22 +1073,29 @@ Item {
   }
 
   function submitAuthor() {
-    if (root.busy || root.pickingImage) return
+    if (!root.authorOpen || root.busy || root.pickingImage) return
     if (editingAuthorSlug !== "") {
       if (newAuthorName.trim() === "") {
         notice = ""
-        error = "An author needs a name."
+        missingAuthorFields = ["name"]
+        authorValidationError = true
+        error = "Fill in Name."
         errorScope = "author"
-        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
+        root.revealAfterLayout(authorForm, authorNameField, null)
+        Qt.callLater(function() { if (root.opened && root.authorOpen) root.focusField(authorNameField) })
         return
       }
       let hasCite = newAuthorCitation.trim() !== ""
       let hasWords = newAuthorText.trim() !== ""
       if (hasCite !== hasWords) {
         notice = ""
-        error = "A quote needs a citation and the words."
+        let missingField = hasCite ? authorTextField : authorCitationField
+        missingAuthorFields = [hasCite ? "text" : "citation"]
+        authorValidationError = true
+        error = hasCite ? "Fill in Quote to match the citation." : "Fill in Citation to match the quote."
         errorScope = "author"
-        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
+        root.revealAfterLayout(authorForm, missingField, null)
+        Qt.callLater(function() { if (root.opened && root.authorOpen) root.focusField(missingField) })
         return
       }
       let patch = { slug: editingAuthorSlug }
@@ -905,27 +1119,63 @@ Item {
       }
       if (!changed) {
         notice = ""
-        error = "Change the portrait, name, dates, or quote first."
+        missingAuthorFields = []
+        authorValidationError = false
+        error = noAuthorChangesError
         errorScope = "author"
-        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
         return
       }
+      missingAuthorFields = []
+      authorValidationError = false
       stopPendingPortraitPreview()
       applyTimer.stop()
       pendingReplaceAuthor = patch
       applyNow()
       return
     }
-    if (!authorReady || newAuthorSlug.trim() === "") {
+    let missingKeys = []
+    let missingLabels = []
+    let firstMissingField = null
+    if (newAuthorName.trim() === "") {
+      missingKeys.push("name")
+      missingLabels.push("Name")
+      if (!firstMissingField) firstMissingField = authorNameField
+    }
+    if (newAuthorImage.trim() === "") {
+      missingKeys.push("image")
+      missingLabels.push("Portrait image")
+      if (!firstMissingField) firstMissingField = authorImageField
+    }
+    if (newAuthorCitation.trim() === "") {
+      missingKeys.push("citation")
+      missingLabels.push("Citation")
+      if (!firstMissingField) firstMissingField = authorCitationField
+    }
+    if (newAuthorText.trim() === "") {
+      missingKeys.push("text")
+      missingLabels.push("Quote")
+      if (!firstMissingField) firstMissingField = authorTextField
+    }
+    if (newAuthorName.trim() !== "" && newAuthorSlug.trim() === "") {
+      missingKeys.push("slug")
+      missingLabels.push("Author id")
+      authorAdvancedOpen = true
+      if (!firstMissingField) firstMissingField = authorSlugField
+    }
+    if (missingKeys.length > 0) {
       notice = ""
-      error = newAuthorName.trim() !== "" && newAuthorSlug.trim() === ""
+      missingAuthorFields = missingKeys
+      authorValidationError = true
+      error = (missingKeys.length === 1 && missingKeys[0] === "slug")
         ? "Use letters or numbers in the name, or set an Author id under Advanced."
-        : "An author needs a name, portrait image, citation, and quote."
+        : ("Fill in " + joinFieldList(missingLabels) + ".")
       errorScope = "author"
-      if (newAuthorName.trim() !== "" && newAuthorSlug.trim() === "") authorAdvancedOpen = true
-      root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
+      root.revealAfterLayout(authorForm, firstMissingField, null)
+      Qt.callLater(function() { if (root.opened && root.authorOpen) root.focusField(firstMissingField) })
       return
     }
+    missingAuthorFields = []
+    authorValidationError = false
     stopPendingPortraitPreview()
     applyTimer.stop()
     pendingAuthor = {
@@ -971,7 +1221,9 @@ Item {
     property bool picked: false
     property bool destructive: false
     property bool available: true
+    property bool tabFocusable: true
     property bool keepsRemoveConfirm: false
+    readonly property bool buttonFocused: inner.activeFocus
     signal activated()
     signal focusLost()
     implicitWidth: Math.max(labelText.implicitWidth, sizeProbe.implicitWidth) + Style.space(28)
@@ -998,6 +1250,7 @@ Item {
       selected: false
       enabled: host.available
       focusable: true
+      activeFocusOnTab: host.tabFocusable && host.available
       bordered: true
       foreground: root.ink
       accent: host.destructive ? Commons.Color.urgent : Commons.Color.accent
@@ -1052,6 +1305,7 @@ Item {
     id: area
     property alias text: edit.text
     property string placeholderText: ""
+    property bool invalid: false
     readonly property bool editFocused: edit.activeFocus
     readonly property real contentHeight: edit.contentHeight
     readonly property real viewportHeight: areaScroll.height
@@ -1148,6 +1402,7 @@ Item {
         color: root.hint
         font.family: Style.font.family
         font.pixelSize: Style.font.body
+        font.italic: true
         wrapMode: Text.WordWrap
       }
     }
@@ -1158,8 +1413,8 @@ Item {
       enabled: false
       color: "transparent"
       radius: Style.cornerRadius
-      border.width: edit.activeFocus ? 2 : 0
-      border.color: Commons.Color.accent
+      border.width: (area.invalid || edit.activeFocus) ? 2 : 0
+      border.color: area.invalid ? Commons.Color.urgent : Commons.Color.accent
     }
   }
 
@@ -1539,7 +1794,12 @@ Item {
         width: root.clampedCardWidth(root.userWidth > 0 ? root.userWidth : Style.space(520), keyCatcher.width)
         height: root.userHeight > 0
           ? root.clampedCardHeight(root.userHeight, keyCatcher.height)
-          : Math.min(content.implicitHeight + Style.spacing.popupPadding * 2, root.maxCardHeight(keyCatcher.height))
+          : Math.min(
+              content.implicitHeight
+                + (authorFooter.visible ? authorFooter.implicitHeight + Style.space(8) : 0)
+                + Style.spacing.popupPadding * 2,
+              root.maxCardHeight(keyCatcher.height)
+            )
         radius: Style.cornerRadius
         color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
@@ -1548,8 +1808,14 @@ Item {
 
         Flickable {
           id: scroller
-          anchors.fill: parent
-          anchors.margins: Style.spacing.popupPadding
+          anchors.top: parent.top
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: authorFooter.visible ? authorFooter.top : parent.bottom
+          anchors.topMargin: Style.spacing.popupPadding
+          anchors.leftMargin: Style.spacing.popupPadding
+          anchors.rightMargin: Style.spacing.popupPadding
+          anchors.bottomMargin: authorFooter.visible ? Style.space(8) : Style.spacing.popupPadding
           contentWidth: width
           contentHeight: content.implicitHeight
           clip: true
@@ -1627,6 +1893,7 @@ Item {
                       root.clearRotationNotice()
                       root.error = ""
                       root.errorScope = ""
+                      root.clearValidationState()
                       root.authorListHint = ""
                       root.notice = "Opening preview…"
                       previewProcess.command = root.preview && root.preview.id
@@ -1666,7 +1933,7 @@ Item {
                     id: citationPreviewText
                     width: parent.width
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.preview ? (root.preview.citation !== "" ? (root.preview.name + ", " + root.preview.citation) : root.preview.name) : ""
+                    text: root.preview ? (root.preview.citation !== "" ? (root.authorDisplayName(root.preview) + ", " + root.preview.citation) : root.authorDisplayName(root.preview)) : ""
                     color: root.quiet
                     font.family: Style.font.family
                     font.pixelSize: Style.font.bodySmall
@@ -1730,7 +1997,7 @@ Item {
                 border.width: activeFocus ? Math.max(2, Style.space(2)) : (rowPress.containsMouse ? Math.max(1, Style.space(1)) : 0)
                 border.color: activeFocus ? Commons.Color.accent : root.ink
                 activeFocusOnTab: true
-                Accessible.name: modelData.name
+                Accessible.name: root.authorDisplayName(authorRow.modelData)
                 Accessible.role: Accessible.CheckBox
 
                 MouseArea {
@@ -1780,8 +2047,8 @@ Item {
                     Text {
                       width: parent.width
                       elide: Text.ElideRight
-                      visible: authorRow.modelData.dates !== ""
-                      text: authorRow.modelData.dates
+                      visible: authorRow.modelData.dates !== "" || root.hasDuplicateAuthorName(authorRow.modelData.name)
+                      text: root.authorRowMeta(authorRow.modelData)
                       color: root.dates
                       font.family: Style.font.family
                       font.pixelSize: Style.font.bodySmall
@@ -1898,7 +2165,7 @@ Item {
                     required property int index
                     property int chipIndex: index
                     width: Math.floor((authorGrid.width - Style.space(12)) / 3)
-                    label: modelData.name
+                    label: root.authorDisplayName(modelData)
                     picked: root.newAuthor === modelData.slug
                     onActivated: root.newAuthor = modelData.slug
                     Keys.onPressed: function(event) {
@@ -1930,11 +2197,16 @@ Item {
                 height: citationField.implicitHeight
                 TextField {
                   id: citationField
+                  objectName: "quoteCitationField"
                   width: parent.width
-                  placeholderText: "Meditations IV.17"
+                  placeholderText: "Example: Meditations IV.17"
                   placeholderTextColor: root.hint
+                  font.italic: text === ""
                   foreground: root.ink
-                  onTextChanged: root.newCitation = text
+                  onTextChanged: {
+                    root.newCitation = text
+                    if (text.trim() !== "") root.clearMissingQuoteField("citation")
+                  }
                   Keys.onReturnPressed: root.addQuote()
                   onActiveFocusChanged: if (activeFocus) root.reveal(citationField)
                 }
@@ -1944,8 +2216,8 @@ Item {
                   enabled: false
                   color: "transparent"
                   radius: Style.cornerRadius
-                  border.width: citationField.activeFocus ? 2 : 0
-                  border.color: Commons.Color.accent
+                  border.width: (root.isQuoteFieldMissing("citation") || citationField.activeFocus) ? 2 : 0
+                  border.color: root.isQuoteFieldMissing("citation") ? Commons.Color.urgent : Commons.Color.accent
                 }
               }
               Text {
@@ -1956,9 +2228,14 @@ Item {
               }
               QuoteArea {
                 id: textField
+                objectName: "quoteTextField"
                 width: parent.width
-                placeholderText: "The line itself"
-                onTextChanged: root.newText = text
+                placeholderText: "Type the quote"
+                invalid: root.isQuoteFieldMissing("text")
+                onTextChanged: {
+                  root.newText = text
+                  if (text.trim() !== "") root.clearMissingQuoteField("text")
+                }
                 onSubmitted: if (!root.busy) root.addQuote()
               }
               Text {
@@ -1967,7 +2244,7 @@ Item {
                 text: {
                   var who = ""
                   for (let i = 0; i < root.samples.length; i++) {
-                    if (root.samples[i].slug === root.newAuthor) who = root.samples[i].name
+                    if (root.samples[i].slug === root.newAuthor) who = root.authorDisplayName(root.samples[i])
                   }
                   var cite = root.newCitation.trim()
                   var line = root.newText.replace(/[\r\n]+/g, " ").trim()
@@ -1994,7 +2271,7 @@ Item {
                 RingButton {
                   id: quoteSubmitButton
                   label: "Add quote"
-                  available: root.quoteReady && !root.busy
+                  available: !root.busy
                   onActivated: root.addQuote()
                 }
                 RingButton {
@@ -2012,7 +2289,7 @@ Item {
 
               Text {
                 visible: root.editingAuthorSlug !== ""
-                text: "Edit " + root.editingAuthorOrigName
+                text: "Edit " + root.editingAuthorHeading
                 color: root.ink
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
@@ -2029,19 +2306,21 @@ Item {
                 height: authorNameField.implicitHeight
                 TextField {
                   id: authorNameField
+                  objectName: "authorNameField"
                   width: parent.width
-                  placeholderText: "Musonius Rufus"
+                  placeholderText: "Example: Musonius Rufus"
                   placeholderTextColor: root.hint
+                  font.italic: text === ""
                   foreground: root.ink
                   onTextChanged: {
                     root.newAuthorName = text
-                    if (!root.authorSlugEdited) {
-                      let suggested = root.slugFromName(text)
-                      root.newAuthorSlug = suggested
-                      if (authorSlugField.text !== suggested) authorSlugField.text = suggested
-                      if (root.editingAuthorSlug === "" && text.trim() !== "" && suggested === "") {
-                        root.authorAdvancedOpen = true
-                      }
+                    root.clearNoChangeAuthorError()
+                    if (text.trim() !== "") root.clearMissingAuthorField("name")
+                    if (root.derivedAuthorSlug !== "" || root.customAuthorSlug.trim() !== "") {
+                      root.clearMissingAuthorField("slug")
+                    }
+                    if (root.editingAuthorSlug === "" && text.trim() !== "" && root.derivedAuthorSlug === "" && root.customAuthorSlug.trim() === "") {
+                      root.authorAdvancedOpen = true
                     }
                   }
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorNameField)
@@ -2052,8 +2331,8 @@ Item {
                   enabled: false
                   color: "transparent"
                   radius: Style.cornerRadius
-                  border.width: authorNameField.activeFocus ? 2 : 0
-                  border.color: Commons.Color.accent
+                  border.width: (root.isAuthorFieldMissing("name") || authorNameField.activeFocus) ? 2 : 0
+                  border.color: root.isAuthorFieldMissing("name") ? Commons.Color.urgent : Commons.Color.accent
                 }
               }
               Text {
@@ -2067,11 +2346,16 @@ Item {
                 height: authorDatesField.implicitHeight
                 TextField {
                   id: authorDatesField
+                  objectName: "authorDatesField"
                   width: parent.width
-                  placeholderText: "c. AD 30 – 100"
+                  placeholderText: "Example: c. AD 30 – 100"
                   placeholderTextColor: root.hint
+                  font.italic: text === ""
                   foreground: root.ink
-                  onTextChanged: root.newAuthorDates = text
+                  onTextChanged: {
+                    root.newAuthorDates = text
+                    root.clearNoChangeAuthorError()
+                  }
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorDatesField)
                 }
                 Rectangle {
@@ -2099,14 +2383,18 @@ Item {
                   height: Math.max(authorImageField.implicitHeight, chooseImageButton.implicitHeight)
                   TextField {
                     id: authorImageField
+                    objectName: "authorImageField"
                     width: parent.width
                     anchors.verticalCenter: parent.verticalCenter
                     Accessible.name: root.editingAuthorSlug !== "" ? "New portrait image path" : "Portrait image path"
-                    placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current portrait" : "/path/to/portrait.png"
+                    placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current portrait" : "Choose or type an image path"
                     placeholderTextColor: root.hint
+                    font.italic: text === ""
                     foreground: root.ink
                     onTextChanged: {
                       root.newAuthorImage = text
+                      root.clearNoChangeAuthorError()
+                      if (text.trim() !== "") root.clearMissingAuthorField("image")
                       if (root.notice === root.pickerUnavailableNotice || root.notice === root.pickerUnsupportedNotice) {
                         root.clearPickerNotice()
                         if (activeFocus) root.reveal(authorImageField)
@@ -2121,8 +2409,8 @@ Item {
                     enabled: false
                     color: "transparent"
                     radius: Style.cornerRadius
-                    border.width: authorImageField.activeFocus ? 2 : 0
-                    border.color: Commons.Color.accent
+                    border.width: (root.isAuthorFieldMissing("image") || authorImageField.activeFocus) ? 2 : 0
+                    border.color: root.isAuthorFieldMissing("image") ? Commons.Color.urgent : Commons.Color.accent
                   }
                 }
                 RingButton {
@@ -2205,11 +2493,18 @@ Item {
                 height: authorCitationField.implicitHeight
                 TextField {
                   id: authorCitationField
+                  objectName: "authorCitationField"
                   width: parent.width
-                  placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "Lectures VI"
+                  placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "Example: Lectures VI"
                   placeholderTextColor: root.hint
+                  font.italic: text === ""
                   foreground: root.ink
-                  onTextChanged: root.newAuthorCitation = text
+                  onTextChanged: {
+                    root.newAuthorCitation = text
+                    root.clearNoChangeAuthorError()
+                    if (text.trim() !== "") root.clearMissingAuthorField("citation")
+                    else if (root.editingAuthorSlug !== "" && root.newAuthorText.trim() === "") root.clearMissingAuthorField("text")
+                  }
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorCitationField)
                 }
                 Rectangle {
@@ -2218,8 +2513,8 @@ Item {
                   enabled: false
                   color: "transparent"
                   radius: Style.cornerRadius
-                  border.width: authorCitationField.activeFocus ? 2 : 0
-                  border.color: Commons.Color.accent
+                  border.width: (root.isAuthorFieldMissing("citation") || authorCitationField.activeFocus) ? 2 : 0
+                  border.color: root.isAuthorFieldMissing("citation") ? Commons.Color.urgent : Commons.Color.accent
                 }
               }
               Text {
@@ -2230,9 +2525,16 @@ Item {
               }
               QuoteArea {
                 id: authorTextField
+                objectName: "authorTextField"
                 width: parent.width
-                placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "The line itself"
-                onTextChanged: root.newAuthorText = text
+                placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "Type the quote"
+                invalid: root.isAuthorFieldMissing("text")
+                onTextChanged: {
+                  root.newAuthorText = text
+                  root.clearNoChangeAuthorError()
+                  if (text.trim() !== "") root.clearMissingAuthorField("text")
+                  else if (root.editingAuthorSlug !== "" && root.newAuthorCitation.trim() === "") root.clearMissingAuthorField("citation")
+                }
                 onSubmitted: if (!root.busy) root.submitAuthor()
               }
               Rectangle {
@@ -2288,13 +2590,15 @@ Item {
                   height: authorSlugField.implicitHeight
                   TextField {
                     id: authorSlugField
+                    objectName: "authorSlugField"
                     width: parent.width
-                    placeholderText: "musonius"
+                    placeholderText: root.derivedAuthorSlug !== "" ? ("From name: " + root.derivedAuthorSlug) : "Example: musonius"
                     placeholderTextColor: root.hint
+                    font.italic: text === ""
                     foreground: root.ink
                     onTextChanged: {
-                      root.newAuthorSlug = text
-                      if (activeFocus) root.authorSlugEdited = text.trim() !== ""
+                      root.customAuthorSlug = text
+                      if (text.trim() !== "") root.clearMissingAuthorField("slug")
                     }
                     onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField)
                   }
@@ -2304,32 +2608,9 @@ Item {
                     enabled: false
                     color: "transparent"
                     radius: Style.cornerRadius
-                    border.width: authorSlugField.activeFocus ? 2 : 0
-                    border.color: Commons.Color.accent
+                    border.width: (root.isAuthorFieldMissing("slug") || authorSlugField.activeFocus) ? 2 : 0
+                    border.color: root.isAuthorFieldMissing("slug") ? Commons.Color.urgent : Commons.Color.accent
                   }
-                }
-              }
-              Text {
-                id: authorErrorText
-                width: parent.width
-                visible: root.error !== "" && root.errorScope === "author"
-                text: root.error
-                color: Commons.Color.urgent
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
-              Row {
-                id: authorSubmitRow
-                spacing: Style.space(8)
-                RingButton {
-                  label: root.editingAuthorSlug !== "" ? "Save changes" : "Add author"
-                  available: root.authorReady && !root.busy
-                  onActivated: root.submitAuthor()
-                }
-                RingButton {
-                  label: "Cancel"
-                  onActivated: root.closeAuthorForm()
                 }
               }
             }
@@ -2343,7 +2624,7 @@ Item {
               color: customCountHover.containsMouse ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.06) : "transparent"
               border.width: activeFocus ? 2 : 0
               border.color: Commons.Color.accent
-              activeFocusOnTab: true
+              activeFocusOnTab: !root.authorOpen
               Text {
                 id: customCountLabel
                 anchors.centerIn: parent
@@ -2383,7 +2664,7 @@ Item {
                   spacing: Style.space(8)
                   Text {
                     width: parent.width - Style.space(96)
-                    text: customRow.modelData.name + ", " + customRow.modelData.citation
+                    text: root.authorDisplayNameBySlug(customRow.modelData.author, customRow.modelData.name) + ", " + customRow.modelData.citation
                     color: root.ink
                     font.family: Style.font.family
                     font.pixelSize: Style.font.bodySmall
@@ -2391,6 +2672,7 @@ Item {
                   }
                   RingButton {
                     label: "Remove"
+                    tabFocusable: !root.authorOpen
                     onActivated: root.removeQuote(customRow.modelData.id)
                   }
                 }
@@ -2411,6 +2693,48 @@ Item {
                 maximumLineCount: 2
                 elide: Text.ElideRight
               }
+            }
+          }
+        }
+
+        Column {
+          id: authorFooter
+          objectName: "authorFooter"
+          visible: root.authorOpen
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.margins: Style.spacing.popupPadding
+          spacing: Style.space(8)
+
+          PanelSeparator { foreground: root.ink }
+
+          Text {
+            id: authorErrorText
+            objectName: "authorErrorText"
+            width: parent.width
+            visible: root.error !== "" && root.errorScope === "author"
+            text: root.error
+            color: Commons.Color.urgent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Row {
+            id: authorSubmitRow
+            objectName: "authorSubmitRow"
+            spacing: Style.space(8)
+            RingButton {
+              id: authorSubmitButton
+              label: root.editingAuthorSlug !== "" ? "Save changes" : "Add author"
+              available: !root.busy && !root.pickingImage
+              onActivated: root.submitAuthor()
+            }
+            RingButton {
+              id: authorCancelButton
+              label: "Cancel"
+              onActivated: root.closeAuthorForm()
             }
           }
         }
