@@ -54,8 +54,15 @@ PRUNE_UNIT="$CONFIG/systemd/user/omastoic-prune.service"
 BRANDING="$CONFIG/omarchy/branding/screensaver.txt"
 BACKUP="$BRANDING.pre-omastoic"
 
+trim_env() {
+  local s="${1:-}"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 is_truthy_env() {
-  case "${1:-}" in
+  case "$(trim_env "${1:-}")" in
     ""|0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]) return 1 ;;
     *) return 0 ;;
   esac
@@ -95,12 +102,14 @@ should_skip_systemctl() {
   [[ -n $bin ]] || return 0
   resolved=$(canonical_path "$bin")
   if ! is_system_binary "$resolved"; then return 1; fi
-  case "${NODE_ENV:-}" in [Tt][Ee][Ss][Tt]) return 0 ;; esac
-  case "${BUN_ENV:-}" in [Tt][Ee][Ss][Tt]) return 0 ;; esac
-  [[ -n ${HOME:-} ]] || return 0
+  case "$(trim_env "${NODE_ENV:-}")" in [Tt][Ee][Ss][Tt]) return 0 ;; esac
+  case "$(trim_env "${BUN_ENV:-}")" in [Tt][Ee][Ss][Tt]) return 0 ;; esac
+  local env_home
+  env_home=$(trim_env "${HOME:-}")
+  [[ -n $env_home ]] || return 0
   local pw_home
   pw_home=$(passwd_home)
-  if [[ -n $pw_home && $(canonical_path "$HOME") != "$(canonical_path "$pw_home")" ]]; then
+  if [[ -n $pw_home && $(canonical_path "$env_home") != "$(canonical_path "$pw_home")" ]]; then
     return 0
   fi
   return 1

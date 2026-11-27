@@ -1241,20 +1241,11 @@ Item {
       property bool settled: false
       property int exitStatus: 0
       property string stdoutText: ""
-      property string stderrText: ""
-      property int streamsLeft: 2
+      property int streamsLeft: 1
       stdout: StdioCollector {
         waitForEnd: true
         onStreamFinished: {
           proc.stdoutText = String(text || "")
-          proc.streamsLeft--
-          root.settlePickProcess(proc)
-        }
-      }
-      stderr: StdioCollector {
-        waitForEnd: true
-        onStreamFinished: {
-          proc.stderrText = String(text || "")
           proc.streamsLeft--
           root.settlePickProcess(proc)
         }

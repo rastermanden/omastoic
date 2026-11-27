@@ -2291,7 +2291,16 @@ async function configure(rest: string[]): Promise<number> {
       console.error(`omastoic: ${(error as Error).message}`);
       return 1;
     }
-    const beforeRotation = await daemonRotationDigest(bundled);
+    const mayMutate =
+      interactive ||
+      authorsFlag != null ||
+      intervalFlag != null ||
+      quoteFlags.length > 0 ||
+      addFlags.length > 0 ||
+      preparedAuthor != null ||
+      preparedReplace != null ||
+      pendingRemoveAuthorSlug != null;
+    const beforeRotation = mayMutate ? await daemonRotationDigest(bundled) : null;
 
     let next: Settings = { ...current };
     let quoteLines: string[] | null = null;

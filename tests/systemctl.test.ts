@@ -499,3 +499,126 @@ test("isolated HOME and OMASTOIC_NO_SYSTEMCTL never invoke real host systemctl i
     }
   }
 }, 20000);
+
+test("config --list skips daemonRotationDigest while mutating config still computes it", async () => {
+  const s = sandbox();
+  const pngA = join(s.home, "a.png");
+  writeTestPng(pngA, 220, "box");
+  try {
+    expect(
+      (
+        await s.cli([
+          "config",
+          "--add-author",
+          "musonius",
+          "--name",
+          "Musonius Rufus",
+          "--image",
+          pngA,
+          "--citation",
+          "Lectures VI",
+          "--text",
+          "List digest test line.",
+        ])
+      ).code,
+    ).toBe(0);
+    expect((await s.cli(["config", "--authors", "musonius"])).code).toBe(0);
+
+    // Corrupt the custom portrait with a control character so loadPortrait() warns whenever daemonRotationDigest() runs.
+    s.put(join(s.config, "omastoic/art/musonius.txt"), "\x07broken\n");
+
+    const listed = await s.cli(["config", "--list"]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain("List digest test line.");
+    expect(listed.stderr).toBe("");
+
+    const listedPlain = await s.cli(["config", "--list", "--plain"]);
+    expect(listedPlain.code).toBe(0);
+    expect(listedPlain.stderr).toBe("");
+
+    // Mutating config still runs daemonRotationDigest() and surfaces the unreadable portrait warning.
+    const mutated = await s.cli(["config", "--interval", "60"]);
+    expect(mutated.code).toBe(0);
+    expect(mutated.stderr).toContain("ignoring unreadable portrait for musonius");
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("prune.sh trims whitespace in OMASTOIC_NO_SYSTEMCTL, NODE_ENV, BUN_ENV, and HOME", async () => {
+  const s = sandbox();
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+
+    // Padded falsy OMASTOIC_NO_SYSTEMCTL must not skip the sandbox stubbed systemctl.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.prune({ OMASTOIC_NO_SYSTEMCTL: " false " })).code).toBe(0);
+    expect(s.log()).toContain("disable --now omastoic.service");
+
+    // Re-setup and verify padded truthy OMASTOIC_NO_SYSTEMCTL skips the stubbed systemctl.
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.prune({ OMASTOIC_NO_SYSTEMCTL: "\t1 " })).code).toBe(0);
+    expect(s.log()).toBe("");
+
+    // Exercise prune.sh's exact helper functions for padded NODE_ENV, BUN_ENV, HOME, and OMASTOIC_NO_SYSTEMCTL.
+    const pruneText = readFileSync(join(root, "scripts/prune.sh"), "utf8");
+    const start = pruneText.indexOf("trim_env()");
+    const end = pruneText.indexOf("run_systemctl()");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const helpers = pruneText.slice(start, end);
+
+    const checkScript = `set -euo pipefail
+${helpers}
+passwd_home() { printf '%s' "$TEST_PW_HOME"; }
+command() {
+  if [[ \${1:-} == "-v" && \${2:-} == "systemctl" ]]; then
+    printf '%s\\n' "/usr/bin/systemctl"
+    return 0
+  fi
+  builtin command "$@"
+}
+assert_true() { if ! "$@"; then echo "expected true: $*" >&2; exit 1; fi; }
+assert_false() { if "$@"; then echo "expected false: $*" >&2; exit 1; fi; }
+
+assert_false is_truthy_env "   "
+assert_false is_truthy_env " false "
+assert_false is_truthy_env $'\\t0\\t'
+assert_false is_truthy_env " NO "
+assert_true is_truthy_env " 1 "
+assert_true is_truthy_env " true "
+assert_true is_truthy_env " * "
+
+TEST_PW_HOME="${s.home}"
+HOME="${s.home}"
+OMASTOIC_NO_SYSTEMCTL=" false "
+NODE_ENV=""
+BUN_ENV=""
+assert_false should_skip_systemctl
+
+NODE_ENV=" test "
+assert_true should_skip_systemctl
+
+NODE_ENV=""
+BUN_ENV=$'\\tTEST '
+assert_true should_skip_systemctl
+
+BUN_ENV=""
+HOME="   "
+assert_true should_skip_systemctl
+
+HOME=" ${s.home} "
+assert_false should_skip_systemctl
+
+OMASTOIC_NO_SYSTEMCTL=" true "
+assert_true should_skip_systemctl
+`;
+    const check = await s.exec(["bash", "-c", checkScript]);
+    expect(check.code, check.stderr).toBe(0);
+  } finally {
+    s.cleanup();
+  }
+});
