@@ -656,7 +656,8 @@ Item {
       } else {
         errorScope = ""
       }
-      if (errorScope === "author" && editingAuthorSlug === "" && /\b(?:slug|bundled author|already exists|reserved)\b/i.test(error)) {
+      let slugCollision = errorScope === "author" && editingAuthorSlug === "" && /\b(?:slug|bundled author|already exists|reserved)\b/i.test(error)
+      if (slugCollision) {
         authorAdvancedOpen = true
       }
       applyQueued = false
@@ -667,7 +668,12 @@ Item {
       pendingRemoveAuthor = ""
       confirmRemoveAuthor = ""
       if (errorScope === "author") {
-        root.revealAfterLayout(authorForm, authorErrorText, authorSubmitRow)
+        if (slugCollision) {
+          root.revealAfterLayout(authorForm, authorSlugField, null)
+          Qt.callLater(function() { if (root.opened && root.authorOpen && root.authorAdvancedOpen) root.focusField(authorSlugField) })
+        } else {
+          root.revealAfterLayout(authorForm, null, null)
+        }
       } else if (errorScope === "quote") {
         root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
       } else {

@@ -1121,9 +1121,13 @@ Item {
       })
       verify(visibleErr !== null)
 
-      // #115 & #122: Bundled author id collision capitalizes the panel error and automatically expands Advanced.
+      // #115 & #122: Bundled author id collision capitalizes the panel error, expands Advanced, and reveals Author id inside scroller.
       panel.openAddAuthor()
       wait(20)
+      panel.userHeight = 440
+      waitForRendering(panel)
+      scroller.contentY = 0
+      wait(0)
       compare(panel.authorAdvancedOpen, false)
       var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
       verify(nameField !== null)
@@ -1143,6 +1147,11 @@ Item {
       compare(panel.authorAdvancedOpen, true)
       var slugField = findOne(panel, function(item) { return item.objectName === "authorSlugField" && item.visible })
       verify(slugField !== null)
+      var slugInView = slugField.mapToItem(scroller, 0, 0)
+      verify(slugInView.y >= -1 && slugInView.y + slugField.height <= scroller.height + 1)
+      compare(slugField.activeFocus, true)
+      panel.userHeight = 0
+      waitForRendering(panel)
 
       // #114 (author form): Triggering an author form error keeps BOTH error and submit button inside the pinned footer within panelCard.
       var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
