@@ -38,9 +38,11 @@ test("small panel text stays at 4.5:1, dates hold over the selected-row wash, an
   const quiet = alpha("quiet");
   const dates = alpha("dates");
   const hint = alpha("hint");
+  const scrollThumb = alpha("scrollThumbColor");
   const chip = Number(source.match(/host\.picked\s*\?\s*Qt\.rgba\(Commons\.Color\.accent\.r, Commons\.Color\.accent\.g, Commons\.Color\.accent\.b, (0\.\d+)\)/)?.[1]);
   const urgentChip = Number(source.match(/host\.destructive\s*\?\s*Qt\.rgba\(Commons\.Color\.urgent\.r, Commons\.Color\.urgent\.g, Commons\.Color\.urgent\.b, (0\.\d+)\)/)?.[1]);
   const wash = Number(source.match(/if \(on\) return Qt\.rgba\(Commons\.Color\.accent\.r, Commons\.Color\.accent\.g, Commons\.Color\.accent\.b, (0\.\d+)\)/)?.[1]);
+  const savedPill = Number(source.match(/id:\s*savedPill[\s\S]*?color:\s*Qt\.rgba\(Commons\.Color\.accent\.r, Commons\.Color\.accent\.g, Commons\.Color\.accent\.b, (0\.\d+)\)/)?.[1]);
 
   // Dates sit over the tint, so they read stronger than the other quiet text
   // but still quieter than the author's name. Placeholders stay the faintest.
@@ -49,9 +51,12 @@ test("small panel text stays at 4.5:1, dates hold over the selected-row wash, an
   expect(quiet).toBeGreaterThan(hint);
   expect(dates).toBeGreaterThan(quiet);
   expect(dates).toBeLessThan(1);
+  expect(scrollThumb).toBeGreaterThan(hint);
+  expect(scrollThumb).toBeLessThan(quiet);
   expect(chip).toBeGreaterThan(0);
   expect(urgentChip).toBeGreaterThan(0);
   expect(wash).toBeGreaterThan(0);
+  expect(savedPill).toBeGreaterThan(0);
 
   for (const [name, theme] of Object.entries(themes)) {
     expect(contrast(mix(theme.ink, theme.background, quiet), theme.background), name).toBeGreaterThanOrEqual(4.5);
@@ -63,6 +68,10 @@ test("small panel text stays at 4.5:1, dates hold over the selected-row wash, an
     const urgentFill = mix(theme.urgent, theme.background, urgentChip);
     expect(contrast(theme.ink, urgentFill), `${name} destructive confirm button`).toBeGreaterThanOrEqual(4.5);
     expect(contrast(theme.urgent, theme.background), `${name} urgent border and error text`).toBeGreaterThanOrEqual(4.5);
+    const savedFill = mix(theme.accent, theme.background, savedPill);
+    expect(contrast(theme.ink, savedFill), `${name} saved confirmation pill text`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(theme.accent, theme.background), `${name} saved confirmation accent border and check`).toBeGreaterThanOrEqual(3.0);
+    expect(contrast(mix(theme.ink, theme.background, scrollThumb), theme.background), `${name} scroll thumb`).toBeGreaterThanOrEqual(3.0);
     // A selected row paints the accent wash behind the dates, so the date
     // colour is mixed over the wash, not over the plain popup background.
     const washColor = mix(theme.accent, theme.background, wash);

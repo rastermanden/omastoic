@@ -80,6 +80,9 @@ Item {
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
   readonly property bool errorShownInStatus: error !== "" && (errorScope === "" || (errorScope === "author" && !authorOpen) || (errorScope === "quote" && !quoteOpen))
   readonly property string statusText: errorShownInStatus ? error : notice
+  readonly property bool statusIsSaved: !errorShownInStatus && statusText === "Saved"
+  readonly property int savedNoticeMs: savedTimer.interval
+  readonly property bool savedTimerRunning: savedTimer.running
 
   property var selectedAuthors: []
   property var committedAuthors: []
@@ -171,6 +174,8 @@ Item {
   // 0.88 drops below 4.5:1 over that wash in Catppuccin Latte, so the dates get
   // a stronger ink that still reads quieter than the author's name.
   readonly property color dates: Qt.rgba(ink.r, ink.g, ink.b, 0.92)
+  // 0.65 clears 3:1 UI-component contrast on Tokyo Night and Catppuccin Latte.
+  readonly property color scrollThumbColor: Qt.rgba(ink.r, ink.g, ink.b, 0.65)
 
   function open(payloadJson) {
     cancelImagePick()
@@ -218,6 +223,7 @@ Item {
 
   function close() {
     applyTimer.stop()
+    clearSavedNotice()
     cancelImagePick()
     clearPortraitPreview()
     clearPickerNotice()
@@ -390,6 +396,11 @@ Item {
     Qt.callLater(clampAndSet)
   }
 
+  function clearSavedNotice() {
+    savedTimer.stop()
+    if (notice === "Saved") notice = ""
+  }
+
   function clearPickerNotice() {
     if (notice === pickerUnavailableNotice || notice === pickerUnsupportedNotice) notice = ""
   }
@@ -420,13 +431,13 @@ Item {
       command: [command, "panel", "pick-image", "--watch-stdin"],
     })
     if (!proc) {
+      savedTimer.stop()
       error = ""
       errorScope = ""
       notice = pickerUnavailableNotice
       Qt.callLater(function() {
         if (root.opened && root.authorOpen && !root.pickingImage) {
           authorImageField.forceActiveFocus()
-          root.reveal(statusSlot)
         }
       })
       return
@@ -597,13 +608,13 @@ Item {
       })
       return
     }
+    savedTimer.stop()
     error = ""
     errorScope = ""
     notice = exitStatus === 3 ? pickerUnsupportedNotice : pickerUnavailableNotice
     Qt.callLater(function() {
       if (root.opened && root.authorOpen && !root.pickingImage) {
         authorImageField.forceActiveFocus()
-        root.reveal(statusSlot)
       }
     })
   }
@@ -738,6 +749,7 @@ Item {
 
   function reload() {
     if (notice === "Saving…") return
+    savedTimer.stop()
     saving = false
     error = ""
     errorScope = ""
@@ -782,6 +794,7 @@ Item {
     var adopted = !failed && adoptState(run.stdout)
     if (failed || !adopted) {
       if (saving) restoreCommitted()
+      savedTimer.stop()
       pendingApplyNotice = ""
       rotationNotice = ""
       notice = ""
@@ -814,8 +827,6 @@ Item {
         }
       } else if (errorScope === "quote") {
         root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
-      } else {
-        root.revealAfterLayout(null, statusSlot, null)
       }
     } else {
       error = ""
@@ -826,13 +837,13 @@ Item {
           notice = pendingApplyNotice
           pendingApplyNotice = ""
           savedTimer.stop()
-          root.revealAfterLayout(null, statusSlot, null)
         } else {
           rotationNotice = ""
           notice = "Saved"
           savedTimer.restart()
         }
       } else {
+        savedTimer.stop()
         pendingApplyNotice = ""
         rotationNotice = ""
         notice = ""
@@ -962,6 +973,7 @@ Item {
 
   function scheduleApply() {
     if (adopting || !opened) return
+    clearSavedNotice()
     error = ""
     errorScope = ""
     clearValidationState()
@@ -1037,6 +1049,7 @@ Item {
       }
     }
     saving = true
+    savedTimer.stop()
     error = ""
     errorScope = ""
     clearValidationState()
@@ -1098,6 +1111,7 @@ Item {
       if (!firstMissingField) firstMissingField = textField
     }
     if (missingKeys.length > 0) {
+      savedTimer.stop()
       notice = ""
       missingQuoteFields = missingKeys
       quoteValidationError = true
@@ -1107,6 +1121,7 @@ Item {
       return
     }
     if (newAuthor === "") {
+      savedTimer.stop()
       notice = ""
       missingQuoteFields = []
       quoteValidationError = false
@@ -1220,6 +1235,7 @@ Item {
     if (!root.authorOpen || root.busy || root.pickingImage) return
     if (editingAuthorSlug !== "") {
       if (newAuthorName.trim() === "") {
+        savedTimer.stop()
         notice = ""
         missingAuthorFields = ["name"]
         authorValidationError = true
@@ -1231,6 +1247,7 @@ Item {
       let hasCite = newAuthorCitation.trim() !== ""
       let hasWords = newAuthorText.trim() !== ""
       if (hasCite !== hasWords) {
+        savedTimer.stop()
         notice = ""
         let missingField = hasCite ? authorTextField : authorCitationField
         missingAuthorFields = [hasCite ? "text" : "citation"]
@@ -1260,6 +1277,7 @@ Item {
         changed = true
       }
       if (!changed) {
+        savedTimer.stop()
         notice = ""
         missingAuthorFields = []
         authorValidationError = false
@@ -1305,6 +1323,7 @@ Item {
       if (!firstMissingField) firstMissingField = authorSlugField
     }
     if (missingKeys.length > 0) {
+      savedTimer.stop()
       notice = ""
       missingAuthorFields = missingKeys
       authorValidationError = true
@@ -1574,8 +1593,9 @@ Item {
     }
 
     Rectangle {
+      objectName: "fieldBorder"
       anchors.fill: parent
-      anchors.margins: -2
+      z: 1
       enabled: false
       color: "transparent"
       radius: Style.cornerRadius
@@ -1592,7 +1612,7 @@ Item {
   }
   Timer {
     id: savedTimer
-    interval: 2200
+    interval: 3500
     onTriggered: { if (root.notice === "Saved") root.notice = "" }
   }
 
@@ -1874,13 +1894,13 @@ Item {
         ? root.clampedCardWidth(handle.startWidth + handle.horizontalEdge * 2 * dx, keyCatcher.width)
         : card.width
       var nextHeight = handle.verticalEdge !== 0
-        ? root.clampedCardHeight(handle.startHeight + handle.verticalEdge * dy, keyCatcher.height)
+        ? root.clampedCardHeight(handle.startHeight + handle.verticalEdge * 2 * dy, keyCatcher.height)
         : card.height
       if (!handle.dragged && Math.abs(nextWidth - handle.startWidth) < 0.5 && Math.abs(nextHeight - handle.startHeight) < 0.5) return
       handle.dragged = true
       root.hasLocalSize = true
       if (handle.horizontalEdge !== 0) {
-        // Card stays horizontally centered, so 2*dx keeps the dragged edge 1:1 with the cursor.
+        // Card stays centered, so 2*dx and 2*dy keep the dragged edges 1:1 with the cursor.
         root.userWidth = nextWidth
       }
       if (handle.verticalEdge !== 0) {
@@ -1954,15 +1974,14 @@ Item {
         readonly property real resizeCornerSize: resizeCornerInner + resizeOuterLip
         readonly property real resizeEdgeInner: Math.min(Style.space(6), Style.spacing.popupPadding)
         readonly property real resizeEdgeThickness: resizeEdgeInner + resizeOuterLip
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: Style.space(32)
+        anchors.centerIn: parent
         width: root.clampedCardWidth(root.userWidth > 0 ? root.userWidth : Style.space(520), keyCatcher.width)
         height: root.userHeight > 0
           ? root.clampedCardHeight(root.userHeight, keyCatcher.height)
           : Math.min(
               content.implicitHeight
                 + (authorFooter.visible ? authorFooter.implicitHeight + Style.space(8) : 0)
+                + statusSlot.implicitHeight + Style.space(8)
                 + Style.spacing.popupPadding * 2,
               root.maxCardHeight(keyCatcher.height)
             )
@@ -1977,11 +1996,11 @@ Item {
           anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.bottom: authorFooter.visible ? authorFooter.top : parent.bottom
+          anchors.bottom: authorFooter.visible ? authorFooter.top : statusSlot.top
           anchors.topMargin: Style.spacing.popupPadding
           anchors.leftMargin: Style.spacing.popupPadding
           anchors.rightMargin: Style.spacing.popupPadding
-          anchors.bottomMargin: authorFooter.visible ? Style.space(8) : Style.spacing.popupPadding
+          anchors.bottomMargin: Style.space(8)
           contentWidth: width
           contentHeight: content.implicitHeight
           clip: true
@@ -2057,6 +2076,7 @@ Item {
                     onActivated: {
                       root.confirmRemoveAuthor = ""
                       root.clearRotationNotice()
+                      savedTimer.stop()
                       root.error = ""
                       root.errorScope = ""
                       root.clearValidationState()
@@ -2414,8 +2434,9 @@ Item {
                   onActiveFocusChanged: if (activeFocus) root.reveal(citationField, quoteCitationLabel)
                 }
                 Rectangle {
+                  objectName: "fieldBorder"
                   anchors.fill: parent
-                  anchors.margins: -2
+                  z: 1
                   enabled: false
                   color: "transparent"
                   radius: Style.cornerRadius
@@ -2541,8 +2562,9 @@ Item {
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorNameField, authorNameLabel)
                 }
                 Rectangle {
+                  objectName: "fieldBorder"
                   anchors.fill: parent
-                  anchors.margins: -2
+                  z: 1
                   enabled: false
                   color: "transparent"
                   radius: Style.cornerRadius
@@ -2578,8 +2600,9 @@ Item {
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorDatesField, authorDatesLabel)
                 }
                 Rectangle {
+                  objectName: "fieldBorder"
                   anchors.fill: parent
-                  anchors.margins: -2
+                  z: 1
                   enabled: false
                   color: "transparent"
                   radius: Style.cornerRadius
@@ -2626,8 +2649,9 @@ Item {
                     onActiveFocusChanged: if (activeFocus) root.reveal(authorImageField, authorImageLabel)
                   }
                   Rectangle {
+                    objectName: "fieldBorder"
                     anchors.fill: authorImageField
-                    anchors.margins: -2
+                    z: 1
                     enabled: false
                     color: "transparent"
                     radius: Style.cornerRadius
@@ -2737,8 +2761,9 @@ Item {
                   onActiveFocusChanged: if (activeFocus) root.reveal(authorCitationField, authorCitationLabel)
                 }
                 Rectangle {
+                  objectName: "fieldBorder"
                   anchors.fill: parent
-                  anchors.margins: -2
+                  z: 1
                   enabled: false
                   color: "transparent"
                   radius: Style.cornerRadius
@@ -2841,8 +2866,9 @@ Item {
                     onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField, authorSlugLabel)
                   }
                   Rectangle {
+                    objectName: "fieldBorder"
                     anchors.fill: parent
-                    anchors.margins: -2
+                    z: 1
                     enabled: false
                     color: "transparent"
                     radius: Style.cornerRadius
@@ -2922,26 +2948,75 @@ Item {
                 }
               }
             }
+          }
+        }
 
-            Item {
-              id: statusSlot
-              width: parent.width
-              implicitHeight: Style.font.bodySmall * 2 + Style.space(4)
-              Text {
-                id: statusMessageText
-                objectName: "statusMessageText"
-                width: parent.width
-                text: root.statusText
-                color: root.errorShownInStatus ? Commons.Color.urgent : root.quiet
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-                maximumLineCount: 2
-                elide: Text.ElideRight
-                Accessible.role: root.errorShownInStatus ? Accessible.AlertMessage : Accessible.StaticText
-                Accessible.name: root.statusText
-                onTextChanged: if (statusMessageText.text !== "" && statusMessageText.text !== "Loading…" && statusMessageText.text !== "Saving…") Accessible.announce(statusMessageText.text, root.errorShownInStatus ? Accessible.Assertive : Accessible.Polite)
+        Item {
+          id: scrollCue
+          objectName: "scrollCue"
+          readonly property bool overflowing: scroller.contentHeight > scroller.height + 1
+          readonly property real maxScrollY: Math.max(0, scroller.contentHeight - scroller.height)
+          readonly property real thumbRatio: scroller.contentHeight > 0 ? Math.min(1, scroller.height / scroller.contentHeight) : 1
+          readonly property real thumbHeight: Math.max(Style.space(24), Math.min(height, Math.round(height * thumbRatio)))
+          readonly property real maxThumbY: Math.max(0, height - thumbHeight)
+          visible: overflowing
+          z: 5
+          anchors.top: scroller.top
+          anchors.bottom: scroller.bottom
+          anchors.right: parent.right
+          anchors.rightMargin: Math.max(Style.space(3), Math.min(Style.space(7), Style.spacing.popupPadding - width - Style.space(2)))
+          width: Math.max(3, Style.space(4))
+
+          Rectangle {
+            id: scrollTrack
+            objectName: "scrollTrack"
+            anchors.fill: parent
+            radius: width / 2
+            color: Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.14)
+          }
+
+          Rectangle {
+            id: scrollThumb
+            objectName: "scrollThumb"
+            width: parent.width
+            height: scrollCue.thumbHeight
+            y: scrollCue.maxScrollY > 0
+              ? Math.max(0, Math.min(scrollCue.maxThumbY, (scroller.contentY / scrollCue.maxScrollY) * scrollCue.maxThumbY))
+              : 0
+            radius: width / 2
+            color: (scrollDrag.pressed || scrollDrag.containsMouse)
+              ? Commons.Color.accent
+              : root.scrollThumbColor
+          }
+
+          MouseArea {
+            id: scrollDrag
+            anchors.fill: parent
+            anchors.leftMargin: -Style.space(3)
+            anchors.rightMargin: -Style.space(1)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            preventStealing: true
+            property real grabOffset: 0
+            function scrollToThumbY(thumbY) {
+              if (scrollCue.maxThumbY <= 0 || scrollCue.maxScrollY <= 0) return
+              var clamped = Math.max(0, Math.min(scrollCue.maxThumbY, thumbY))
+              scroller.contentY = (clamped / scrollCue.maxThumbY) * scrollCue.maxScrollY
+              root.formScrollSeq++
+            }
+            onPressed: function(mouse) {
+              root.confirmRemoveAuthor = ""
+              if (mouse.y >= scrollThumb.y && mouse.y <= scrollThumb.y + scrollThumb.height) {
+                grabOffset = mouse.y - scrollThumb.y
+              } else {
+                grabOffset = scrollThumb.height / 2
+                scrollToThumbY(mouse.y - grabOffset)
               }
+              mouse.accepted = true
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed) return
+              scrollToThumbY(mouse.y - grabOffset)
             }
           }
         }
@@ -2952,8 +3027,10 @@ Item {
           visible: root.authorOpen
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.bottom: parent.bottom
-          anchors.margins: Style.spacing.popupPadding
+          anchors.bottom: statusSlot.top
+          anchors.leftMargin: Style.spacing.popupPadding
+          anchors.rightMargin: Style.spacing.popupPadding
+          anchors.bottomMargin: Style.space(8)
           spacing: Style.space(8)
 
           PanelSeparator { foreground: root.ink }
@@ -2989,6 +3066,69 @@ Item {
               label: "Cancel"
               onActivated: root.closeAuthorForm()
             }
+          }
+        }
+
+        Item {
+          id: statusSlot
+          objectName: "statusSlot"
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.leftMargin: Style.spacing.popupPadding
+          anchors.rightMargin: Style.spacing.popupPadding
+          anchors.bottomMargin: Style.spacing.popupPadding
+          implicitHeight: Style.font.bodySmall * 2 + Style.space(4)
+          height: implicitHeight
+
+          Rectangle {
+            id: savedPill
+            objectName: "savedPill"
+            visible: root.statusIsSaved
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(parent.width, savedCheck.implicitWidth + Style.space(6) + statusMessageText.implicitWidth + Style.space(16))
+            height: Math.min(parent.height, Math.max(statusMessageText.implicitHeight, savedCheck.implicitHeight) + Style.space(8))
+            radius: Style.cornerRadius
+            color: Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16)
+            border.width: Math.max(1, Style.space(1))
+            border.color: Commons.Color.accent
+          }
+
+          Text {
+            id: savedCheck
+            objectName: "savedCheck"
+            visible: root.statusIsSaved
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: "✓"
+            color: Commons.Color.accent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+            Accessible.ignored: true
+          }
+
+          Text {
+            id: statusMessageText
+            objectName: "statusMessageText"
+            anchors.left: root.statusIsSaved ? savedCheck.right : parent.left
+            anchors.leftMargin: root.statusIsSaved ? Style.space(6) : 0
+            anchors.right: parent.right
+            anchors.rightMargin: root.statusIsSaved ? Style.space(8) : 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.statusText
+            color: root.errorShownInStatus ? Commons.Color.urgent : (root.statusIsSaved ? root.ink : root.quiet)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            font.bold: root.statusIsSaved
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+            Accessible.role: root.errorShownInStatus ? Accessible.AlertMessage : Accessible.StaticText
+            Accessible.name: root.statusText
+            onTextChanged: if (statusMessageText.text !== "" && statusMessageText.text !== "Loading…" && statusMessageText.text !== "Saving…") Accessible.announce(statusMessageText.text, root.errorShownInStatus ? Accessible.Assertive : Accessible.Polite)
           }
         }
 

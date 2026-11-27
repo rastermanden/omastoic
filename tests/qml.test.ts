@@ -1742,12 +1742,13 @@ Item {
       compare(panel.notice, fallbackNotice)
       compare(panel.statusText, fallbackNotice)
 
+      var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
       var noticeItem = findOne(panel, function(item) {
         return item.text === fallbackNotice && item.visible
       })
-      verify(noticeItem !== null)
-      var noticeInView = noticeItem.mapToItem(scroller, 0, 0)
-      verify(noticeInView.y >= -1 && noticeInView.y + noticeItem.height <= scroller.height + 1)
+      verify(card !== null && noticeItem !== null)
+      var noticeInCard = noticeItem.mapToItem(card, 0, 0)
+      verify(noticeInCard.y >= -1 && noticeInCard.y + noticeItem.height <= card.height + 1)
 
       // Only Marcus Aurelius's row has a visible checkmark; Seneca's row does not.
       var marcusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Marcus Aurelius" })
@@ -3569,6 +3570,399 @@ Item {
       compare(statusTextItem.Accessible.role, Accessible.AlertMessage)
       compare(statusTextItem.Accessible.name, "Could not save that.")
     }
+
+    function test_scroll_cue_visible_only_on_overflow() {
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "seneca", "epictetus", "musonius", "hierocles", "cleanthes"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [{ id: "c01", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Train." }],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "I.1", text: "Claim yourself." },
+          { slug: "epictetus", name: "Epictetus", dates: "c. 50 – 135", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "Ench. 1", text: "In our control." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "VI", text: "Train." },
+          { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "Elem", text: "Circles." },
+          { slug: "cleanthes", name: "Cleanthes", dates: "c. 330 – 230 BC", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "Hymn", text: "Lead me." },
+        ],
+      })), true)
+      panel.userWidth = 0
+      panel.userHeight = 0
+      waitForRendering(panel)
+
+      var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
+      var scroller = findOne(panel, function(item) { return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection") })
+      var scrollCue = findOne(panel, function(item) { return item.objectName === "scrollCue" })
+      var scrollThumb = findOne(panel, function(item) { return item.objectName === "scrollThumb" })
+      verify(card && scroller && scrollCue && scrollThumb)
+
+      // When all content fits, the scroll cue stays hidden.
+      verify(scroller.contentHeight <= scroller.height + 1)
+      compare(scrollCue.visible, false)
+
+      // At compact sizes (400x420 and 400x320), content overflows and the themed scroll cue appears in the right gutter.
+      panel.userWidth = 400
+      panel.userHeight = 420
+      waitForRendering(panel)
+      verify(scroller.contentHeight > scroller.height + 1)
+      compare(scrollCue.visible, true)
+      verify(scrollThumb.height >= 24 && scrollThumb.height < scrollCue.height)
+      var cueInCard = scrollCue.mapToItem(card, 0, 0)
+      var scrollerInCard = scroller.mapToItem(card, 0, 0)
+      verify(cueInCard.x >= scrollerInCard.x + scroller.width)
+      verify(cueInCard.x + scrollCue.width <= card.width)
+
+      var thumbYTop = scrollThumb.y
+      scroller.contentY = scroller.contentHeight - scroller.height
+      waitForRendering(panel)
+      verify(scrollThumb.y > thumbYTop)
+      verify(scrollThumb.y + scrollThumb.height <= scrollCue.height + 0.5)
+
+      panel.userWidth = 400
+      panel.userHeight = 320
+      waitForRendering(panel)
+      verify(scroller.contentHeight > scroller.height + 1)
+      compare(scrollCue.visible, true)
+
+      // Resizing back to a height where everything fits hides the scroll cue again.
+      panel.userWidth = 640
+      panel.userHeight = 720
+      waitForRendering(panel)
+      verify(scroller.contentHeight <= scroller.height + 1)
+      compare(scrollCue.visible, false)
+
+      panel.userWidth = 0
+      panel.userHeight = 0
+      waitForRendering(panel)
+    }
+
+    function test_card_is_centered_horizontally_and_vertically() {
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        ],
+      })), true)
+      panel.userWidth = 0
+      panel.userHeight = 0
+      waitForRendering(panel)
+
+      var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
+      verify(card !== null)
+      verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
+      verify(card.y > 32)
+
+      // Compact persisted sizes (400x420 and 400x320) stay centered in the overlay, not pinned to the top.
+      panel.userWidth = 400
+      panel.userHeight = 420
+      waitForRendering(panel)
+      verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
+      verify(card.y > 100)
+
+      panel.userWidth = 400
+      panel.userHeight = 320
+      waitForRendering(panel)
+      verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
+
+      // Oversized persisted dimensions still clamp inside the overlay margins while staying centered.
+      panel.userWidth = 2000
+      panel.userHeight = 2000
+      waitForRendering(panel)
+      verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
+      verify(card.y >= 31 && card.y + card.height <= harness.height - 31)
+
+      panel.userWidth = 0
+      panel.userHeight = 0
+      waitForRendering(panel)
+    }
+
+    function test_uniform_error_borders_on_all_invalid_fields() {
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+        ],
+      })), true)
+      waitForRendering(panel)
+
+      var scroller = findOne(panel, function(item) { return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection") })
+      verify(scroller !== null)
+
+      var assertFullErrorBorder = function(field, borderItem, label) {
+        verify(field !== null && borderItem !== null, label + " exists")
+        compare(borderItem.border.width, 2, label + " border width")
+        compare(String(borderItem.border.color), String(Commons.Color.urgent), label + " error color")
+        compare(Math.round(borderItem.width), Math.round(field.width), label + " width matches field")
+        compare(Math.round(borderItem.height), Math.round(field.height), label + " height matches field")
+        var pos = borderItem.mapToItem(scroller, 0, 0)
+        verify(pos.x >= -0.5, label + " left border unclipped x=" + pos.x)
+        verify(pos.x + borderItem.width <= scroller.width + 0.5, label + " right border unclipped right=" + (pos.x + borderItem.width) + " scroller=" + scroller.width)
+      }
+
+      var borderForField = function(field) {
+        var childBorder = findOne(field, function(item) { return item.objectName === "fieldBorder" && item.enabled === false })
+        if (childBorder) return childBorder
+        return findOne(field.parent, function(item) { return item.objectName === "fieldBorder" && item.enabled === false })
+      }
+
+      // 1. Empty Add author submit: Name, Portrait image, Citation, and Quote all get identical unclipped 2px urgent borders.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      var addSubmitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(addSubmitBtn !== null)
+      mouseClick(addSubmitBtn)
+      wait(20)
+
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var citationField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var quoteField = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      assertFullErrorBorder(nameField, borderForField(nameField), "authorNameField")
+      assertFullErrorBorder(imageField, borderForField(imageField), "authorImageField")
+      assertFullErrorBorder(citationField, borderForField(citationField), "authorCitationField")
+      assertFullErrorBorder(quoteField, borderForField(quoteField), "authorTextField")
+
+      // All four borders share the same corner radius.
+      compare(borderForField(nameField).radius, borderForField(imageField).radius)
+      compare(borderForField(citationField).radius, borderForField(imageField).radius)
+      compare(borderForField(quoteField).radius, borderForField(imageField).radius)
+
+      // Non-ASCII name also flags Author id with the same unclipped 2px urgent border.
+      nameField.text = "!!!"
+      imageField.text = "/tmp/p.png"
+      citationField.text = "I.1"
+      quoteField.text = "Thought."
+      mouseClick(addSubmitBtn)
+      wait(20)
+      var slugField = findOne(panel, function(item) { return item.objectName === "authorSlugField" && item.visible })
+      assertFullErrorBorder(slugField, borderForField(slugField), "authorSlugField")
+
+      panel.closeAuthorForm()
+      wait(20)
+
+      // 2. Empty Add quote submit: Citation and Quote both get the same unclipped 2px urgent border.
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      verify(addQuoteBtn !== null)
+      mouseClick(addQuoteBtn)
+      waitForRendering(panel)
+      var qSubmit = findOne(panel, function(item) { return item.label === "Add quote" && item.visible })
+      verify(qSubmit !== null)
+      mouseClick(qSubmit)
+      wait(20)
+
+      var qCite = findOne(panel, function(item) { return item.objectName === "quoteCitationField" && item.visible })
+      var qText = findOne(panel, function(item) { return item.objectName === "quoteTextField" && item.visible })
+      assertFullErrorBorder(qCite, borderForField(qCite), "quoteCitationField")
+      assertFullErrorBorder(qText, borderForField(qText), "quoteTextField")
+      compare(borderForField(qCite).radius, borderForField(qText).radius)
+
+      panel.closeQuoteForm()
+      wait(20)
+    }
+
+    function test_saved_confirmation_stays_visible_3s_without_layout_shift() {
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "seneca", "epictetus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [{ id: "c01", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Train." }],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "I.1", text: "Claim yourself." },
+          { slug: "epictetus", name: "Epictetus", dates: "c. 50 – 135", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "Ench. 1", text: "In our control." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "VI", text: "Train." },
+        ],
+      })), true)
+      panel.notice = ""
+      panel.error = ""
+      panel.errorScope = ""
+      panel.userWidth = 400
+      panel.userHeight = 420
+      waitForRendering(panel)
+
+      var card = findOne(panel, function(item) { return item.objectName === "panelCard" })
+      var scroller = findOne(panel, function(item) { return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection") })
+      var content = findOne(panel, function(item) { return item.objectName === "panelContent" })
+      var statusSlot = findOne(panel, function(item) { return item.objectName === "statusSlot" })
+      var savedPill = findOne(panel, function(item) { return item.objectName === "savedPill" })
+      var savedCheck = findOne(panel, function(item) { return item.objectName === "savedCheck" })
+      var statusTextItem = findOne(panel, function(item) { return item.objectName === "statusMessageText" })
+      var marcusRow = findOne(panel, function(item) { return item.Accessible && item.Accessible.name === "Marcus Aurelius" })
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" })
+      verify(card && scroller && content && statusSlot && savedPill && savedCheck && statusTextItem && marcusRow && addAuthorBtn)
+
+      var snapshot = function() {
+        var rPt = marcusRow.mapToItem(card, 0, 0)
+        var aPt = addAuthorBtn.mapToItem(card, 0, 0)
+        var sPt = statusSlot.mapToItem(card, 0, 0)
+        return {
+          cardY: card.y, cardH: card.height,
+          scrollerY: scroller.y, scrollerH: scroller.height,
+          contentH: content.implicitHeight,
+          rowY: rPt.y, addY: aPt.y,
+          slotY: sPt.y, slotH: statusSlot.height,
+        }
+      }
+
+      compare(savedPill.visible, false)
+      compare(panel.savedNoticeMs >= 3000, true)
+      var before = snapshot()
+
+      // Even at compact 400x420 with content overflowing and scrolled to top, Saved appears in the fixed accent status slot.
+      verify(scroller.contentHeight > scroller.height)
+      scroller.contentY = 0
+      panel.saving = true
+      var applyRun = {
+        exited: true,
+        exitCode: 0,
+        stdout: JSON.stringify({
+          settings: { authors: ["marcus", "seneca", "epictetus", "musonius"], interval: 60 },
+          panelSize: { width: 400, height: 420 },
+          portraitFont: 8,
+          portraitLine: 11.2,
+          intervalApplied: true,
+          custom: [{ id: "c01", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Train." }],
+          samples: [
+            { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "II.1", text: "Begin." },
+            { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "I.1", text: "Claim yourself." },
+            { slug: "epictetus", name: "Epictetus", dates: "c. 50 – 135", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "Ench. 1", text: "In our control." },
+            { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "VI", text: "Train." },
+          ],
+        }),
+        stderr: "",
+        streamsLeft: 0,
+      }
+      panel.settleRun(applyRun, "Could not save that.")
+      waitForRendering(panel)
+
+      compare(panel.notice, "Saved")
+      compare(panel.savedTimerRunning, true)
+      compare(savedPill.visible, true)
+      compare(savedCheck.visible, true)
+      compare(String(savedPill.border.color), String(Commons.Color.accent))
+      compare(String(savedCheck.color), String(Commons.Color.accent))
+      compare(statusTextItem.text, "Saved")
+      compare(statusTextItem.Accessible.role, Accessible.StaticText)
+      compare(statusTextItem.Accessible.name, "Saved")
+
+      var slotInCard = statusSlot.mapToItem(card, 0, 0)
+      verify(slotInCard.y >= scroller.y + scroller.height - 1)
+      verify(slotInCard.y + statusSlot.height <= card.height + 1)
+
+      // Showing Saved moves no siblings and does not resize the card or scroller.
+      var during = snapshot()
+      compare(during.cardY, before.cardY)
+      compare(during.cardH, before.cardH)
+      compare(during.scrollerY, before.scrollerY)
+      compare(during.scrollerH, before.scrollerH)
+      compare(during.contentH, before.contentH)
+      compare(during.rowY, before.rowY)
+      compare(during.addY, before.addY)
+      compare(during.slotY, before.slotY)
+      compare(during.slotH, before.slotH)
+
+      // Still visible after 3.05 s, then clears cleanly once the 3.5 s timer finishes without shifting layout.
+      wait(3050)
+      compare(panel.notice, "Saved")
+      compare(savedPill.visible, true)
+      tryCompare(panel, "notice", "", 1500)
+      waitForRendering(panel)
+      compare(savedPill.visible, false)
+
+      var after = snapshot()
+      compare(after.cardY, before.cardY)
+      compare(after.cardH, before.cardH)
+      compare(after.scrollerY, before.scrollerY)
+      compare(after.scrollerH, before.scrollerH)
+      compare(after.contentH, before.contentH)
+      compare(after.rowY, before.rowY)
+      compare(after.addY, before.addY)
+      compare(after.slotY, before.slotY)
+      compare(after.slotH, before.slotH)
+
+      // Making another change clears an active Saved notice immediately without moving siblings.
+      panel.saving = true
+      panel.settleRun(applyRun, "Could not save that.")
+      wait(20)
+      compare(panel.notice, "Saved")
+      compare(savedPill.visible, true)
+      panel.toggleAuthor("seneca")
+      wait(10)
+      compare(panel.notice, "")
+      compare(savedPill.visible, false)
+      compare(panel.savedTimerRunning, false)
+      var afterNextChange = snapshot()
+      compare(afterNextChange.slotY, before.slotY)
+      compare(afterNextChange.scrollerH, before.scrollerH)
+
+      // Adding an author closes the form and leaves Saved visible in the same fixed statusSlot position.
+      var addAuthorBtn2 = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn2 !== null)
+      panel.reveal(addAuthorBtn2)
+      wait(20)
+      mouseClick(addAuthorBtn2)
+      waitForRendering(panel)
+      compare(panel.authorOpen, true)
+      compare(statusSlot.mapToItem(card, 0, 0).y, before.slotY)
+
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var citeField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var quoteArea = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      var submitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(nameField && imageField && citeField && quoteArea && submitBtn)
+      nameField.text = "Chrysippus"
+      imageField.text = "/tmp/chrysippus.png"
+      citeField.text = "Fragments 1"
+      quoteArea.text = "Live in agreement with experience."
+      mouseClick(submitBtn)
+      wait(10)
+      var applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      completeProcess(applyProc, 0, JSON.stringify({
+        settings: { authors: ["marcus", "seneca", "epictetus", "musonius", "chrysippus"], interval: 60 },
+        panelSize: { width: 400, height: 420 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [{ id: "c01", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Train." }],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "II.1", text: "Begin." },
+          { slug: "seneca", name: "Seneca", dates: "c. 4 BC – AD 65", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "I.1", text: "Claim yourself." },
+          { slug: "epictetus", name: "Epictetus", dates: "c. 50 – 135", custom: false, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "Ench. 1", text: "In our control." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "VI", text: "Train." },
+          { slug: "chrysippus", name: "Chrysippus", dates: "", custom: true, portrait: "⣿\\n⣿\\n⣿\\n⣿", citation: "Fragments 1", text: "Live in agreement with experience." },
+        ],
+      }), "", false)
+      waitForRendering(panel)
+      compare(panel.authorOpen, false)
+      compare(panel.notice, "Saved")
+      compare(savedPill.visible, true)
+      compare(panel.savedTimerRunning, true)
+      compare(statusSlot.mapToItem(card, 0, 0).y, before.slotY)
+
+      panel.close()
+      panel.userWidth = 0
+      panel.userHeight = 0
+    }
   }
 }
 `,
@@ -3584,11 +3978,12 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("23 passed, 0 failed");
+    expect(combined, combined).toContain("27 passed, 0 failed");
+    expect(combined, combined).not.toContain("Binding loop");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
-});
+}, 60_000);
 
 test("the panel exposes visible resize handles, min/max clamps, and size persistence outside config.json", () => {
   const source = panel();
@@ -3930,11 +4325,12 @@ Item {
       verify(cornerRightTL.x >= scroller.x + scroller.width || cornerRightTL.y >= scroller.y + scroller.height)
       verify(cornerLeftTR.x <= scroller.x || cornerLeftTR.y >= scroller.y + scroller.height)
 
-      // Default size: 520 wide, centered horizontally.
+      // Default size: 520 wide, centered horizontally and vertically.
       compare(card.width, 520)
       var initialHeight = card.height
       verify(initialHeight > 320 && initialHeight < harness.height - 64)
       verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
 
       // 0. Inactive-axis jitter on single-axis edges keeps auto-size and spawns no size write.
       var cmdsBeforeJitter = sizeCommands().length
@@ -3975,7 +4371,7 @@ Item {
       dragFrom(cardOrigin.x + card.width + 3, cardOrigin.y + card.height + 3, -40, 30, true)
       compare(panel.opened, true)
       verify(Math.abs(card.width - 520) <= 2)
-      verify(Math.abs(card.height - (heightBeforeOuterCorner + 30)) <= 2)
+      verify(Math.abs(card.height - (heightBeforeOuterCorner + 60)) <= 2)
 
       // Reset cleanly before center-handle sequence so step 1 starts from default size.
       panel.resetPanelSize()
@@ -3983,17 +4379,18 @@ Item {
       compare(card.width, 520)
       compare(card.height, initialHeight)
 
-      // 1. Drag bottom-right corner to widen and heighten card 1:1 with pointer.
+      // 1. Drag bottom-right corner to widen and heighten card 1:1 with pointer while staying centered.
       dragHandle(cornerRight, 80, 100)
       compare(panel.opened, true)
       verify(Math.abs(card.width - 680) <= 2)
-      verify(Math.abs(card.height - (initialHeight + 100)) <= 2)
+      verify(Math.abs(card.height - (initialHeight + 200)) <= 2)
       verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
       var cmds = sizeCommands()
       verify(cmds.length >= 1)
       var persisted = JSON.parse(cmds[cmds.length - 1][3])
       verify(Math.abs(persisted.width - 680) <= 2)
-      verify(Math.abs(persisted.height - (initialHeight + 100)) <= 2)
+      verify(Math.abs(persisted.height - (initialHeight + 200)) <= 2)
 
       // 2. Drag left edge outward: card grows symmetrically and stays centered.
       var widthBeforeLeft = card.width
@@ -4002,25 +4399,27 @@ Item {
       verify(Math.abs(card.width - (widthBeforeLeft + 80)) <= 2)
       compare(card.height, heightBeforeLeft)
       verify(Math.abs((card.x + card.width / 2) - harness.width / 2) <= 1)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
 
       // 3. Drag right edge inward: card narrows symmetrically.
       var widthBeforeRight = card.width
       dragHandle(edgeRight, -50, 0)
       verify(Math.abs(card.width - (widthBeforeRight - 100)) <= 2)
 
-      // 4. Drag bottom edge up and down: height tracks without changing width.
+      // 4. Drag bottom edge up and down: height tracks symmetrically without changing width.
       var widthBeforeBottom = card.width
       var heightBeforeBottom = card.height
       dragHandle(edgeBottom, 0, -60)
       compare(card.width, widthBeforeBottom)
-      verify(Math.abs(card.height - (heightBeforeBottom - 60)) <= 2)
+      verify(Math.abs(card.height - (heightBeforeBottom - 120)) <= 2)
+      verify(Math.abs((card.y + card.height / 2) - harness.height / 2) <= 1)
 
       // 4b. Drag bottom-left corner: both width and height change cleanly.
       var widthBeforeBL = card.width
       var heightBeforeBL = card.height
       dragHandle(cornerLeft, -30, 40)
       verify(Math.abs(card.width - (widthBeforeBL + 60)) <= 2)
-      verify(Math.abs(card.height - (heightBeforeBL + 40)) <= 2)
+      verify(Math.abs(card.height - (heightBeforeBL + 80)) <= 2)
 
       // 5. Drag far inward past minimum: clamps to 400 x 320 and content fits with no overflow.
       dragHandle(cornerRight, -500, -500)
