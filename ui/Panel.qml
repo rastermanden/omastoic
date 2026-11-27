@@ -1201,7 +1201,9 @@ Item {
     property bool picked: false
     property bool destructive: false
     property bool available: true
+    property bool tabFocusable: true
     property bool keepsRemoveConfirm: false
+    readonly property bool buttonFocused: inner.activeFocus
     signal activated()
     signal focusLost()
     implicitWidth: Math.max(labelText.implicitWidth, sizeProbe.implicitWidth) + Style.space(28)
@@ -1228,6 +1230,7 @@ Item {
       selected: false
       enabled: host.available
       focusable: true
+      activeFocusOnTab: host.tabFocusable && host.available
       bordered: true
       foreground: root.ink
       accent: host.destructive ? Commons.Color.urgent : Commons.Color.accent
@@ -2603,7 +2606,7 @@ Item {
               color: customCountHover.containsMouse ? Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.06) : "transparent"
               border.width: activeFocus ? 2 : 0
               border.color: Commons.Color.accent
-              activeFocusOnTab: true
+              activeFocusOnTab: !root.authorOpen
               Text {
                 id: customCountLabel
                 anchors.centerIn: parent
@@ -2651,6 +2654,7 @@ Item {
                   }
                   RingButton {
                     label: "Remove"
+                    tabFocusable: !root.authorOpen
                     onActivated: root.removeQuote(customRow.modelData.id)
                   }
                 }
@@ -2710,6 +2714,7 @@ Item {
               onActivated: root.submitAuthor()
             }
             RingButton {
+              id: authorCancelButton
               label: "Cancel"
               onActivated: root.closeAuthorForm()
             }

@@ -491,6 +491,7 @@ Item {
   property string text: ""
   property bool selected: false
   property bool focusable: true
+  activeFocusOnTab: focusable
   property bool bordered: true
   property color foreground: "white"
   property color accent: "#7aa2f7"
@@ -2431,6 +2432,134 @@ Item {
       mouseClick(cancelQuote)
       wait(20)
     }
+
+    function test_author_form_tab_order_skips_custom_quotes_into_footer() {
+      compare(panel.adoptState(JSON.stringify({
+        settings: { authors: ["marcus", "musonius"], interval: 60 },
+        portraitFont: 8,
+        portraitLine: 11.2,
+        intervalApplied: true,
+        custom: [
+          { id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Desk note", text: "One line." },
+          { id: "c02", author: "musonius", name: "Musonius Rufus", citation: "Lectures VI", text: "Two lines." },
+        ],
+        samples: [
+          { slug: "marcus", name: "Marcus Aurelius", dates: "AD 121 – 180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+          { slug: "musonius", name: "Musonius Rufus", dates: "c. AD 30 – 100", custom: true, portrait: "⣿", fullPortrait: "⣶⣶\\n⣶⣶", citation: "VI", text: "Train." },
+        ],
+      })), true)
+      panel.listOpen = true
+      waitForRendering(panel)
+
+      var scroller = findOne(panel, function(item) {
+        return item.hasOwnProperty("contentY") && item.hasOwnProperty("flickableDirection")
+      })
+      var countLabel = findOne(panel, function(item) { return item.text === "▾ 2 custom quotes" && item.visible })
+      verify(scroller !== null && countLabel !== null)
+      var customCountToggle = countLabel.parent
+      compare(customCountToggle.activeFocusOnTab, true)
+      var customRemoveBtns = findAll(panel, function(item) {
+        return item.label === "Remove" && !item.keepsRemoveConfirm && item.hasOwnProperty("tabFocusable") && item.visible
+      })
+      compare(customRemoveBtns.length, 2)
+      compare(customRemoveBtns[0].tabFocusable, true)
+
+      // 1. Add mode (Advanced collapsed): Tab moves from Quote -> Advanced -> Add author -> Cancel, skipping custom list controls.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      compare(customCountToggle.activeFocusOnTab, false)
+      compare(customRemoveBtns[0].tabFocusable, false)
+
+      var quoteArea = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      var advLabel = findOne(panel, function(item) { return item.text === "▸ Advanced" && item.visible })
+      var addSubmitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      var cancelBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(quoteArea && advLabel && addSubmitBtn && cancelBtn)
+      var advToggle = advLabel.parent
+
+      panel.reveal(quoteArea)
+      waitForRendering(panel)
+      quoteArea.takeFocus()
+      wait(10)
+      compare(quoteArea.editFocused, true)
+      var scrollBeforeTab = scroller.contentY
+
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(advToggle.activeFocus, true)
+
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(addSubmitBtn.buttonFocused, true)
+      compare(customCountToggle.activeFocus, false)
+      compare(scroller.contentY, scrollBeforeTab)
+
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(cancelBtn.buttonFocused, true)
+
+      keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+      wait(10)
+      compare(addSubmitBtn.buttonFocused, true)
+
+      // 2. Add mode (Advanced open): Tab moves from Author id directly to Add author and Cancel.
+      mouseClick(advToggle)
+      waitForRendering(panel)
+      var slugField = findOne(panel, function(item) { return item.objectName === "authorSlugField" && item.visible })
+      verify(slugField !== null)
+      panel.reveal(slugField)
+      waitForRendering(panel)
+      slugField.forceActiveFocus()
+      wait(10)
+      compare(slugField.activeFocus, true)
+
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(addSubmitBtn.buttonFocused, true)
+
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(cancelBtn.buttonFocused, true)
+
+      mouseClick(cancelBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+      compare(customCountToggle.activeFocusOnTab, true)
+      compare(customRemoveBtns[0].tabFocusable, true)
+
+      // 3. Edit mode: Tab moves from Replacement quote directly to Save changes and Cancel.
+      var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editBtn !== null)
+      mouseClick(editBtn)
+      waitForRendering(panel)
+      compare(customCountToggle.activeFocusOnTab, false)
+      compare(customRemoveBtns[0].tabFocusable, false)
+
+      var editQuote = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      var saveBtn = findOne(panel, function(item) { return item.label === "Save changes" && item.visible })
+      var cancelEditBtn = findOne(panel, function(item) { return item.label === "Cancel" && item.visible })
+      verify(editQuote && saveBtn && cancelEditBtn)
+      panel.reveal(editQuote)
+      waitForRendering(panel)
+      editQuote.takeFocus()
+      wait(10)
+
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(saveBtn.buttonFocused, true)
+
+      keyClick(Qt.Key_Tab)
+      wait(10)
+      compare(cancelEditBtn.buttonFocused, true)
+
+      mouseClick(cancelEditBtn)
+      wait(20)
+      compare(panel.authorOpen, false)
+      compare(customCountToggle.activeFocusOnTab, true)
+      compare(customRemoveBtns[0].tabFocusable, true)
+    }
   }
 }
 `,
@@ -2446,7 +2575,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("17 passed, 0 failed");
+    expect(combined, combined).toContain("18 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -2598,6 +2727,7 @@ Item {
   property string text: ""
   property bool selected: false
   property bool focusable: true
+  activeFocusOnTab: focusable
   property bool bordered: true
   property color foreground: "white"
   property color accent: "#7aa2f7"
