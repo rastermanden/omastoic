@@ -492,6 +492,9 @@ Item {
   property bool selected: false
   property bool focusable: true
   activeFocusOnTab: focusable
+  Keys.onReturnPressed: if (focusable) root.clicked()
+  Keys.onEnterPressed: if (focusable) root.clicked()
+  Keys.onSpacePressed: if (focusable) root.clicked()
   property bool bordered: true
   property color foreground: "white"
   property color accent: "#7aa2f7"
@@ -2591,6 +2594,273 @@ Item {
       compare(customCountToggle.activeFocusOnTab, true)
       compare(customRemoveBtns[0].tabFocusable, true)
     }
+
+    function test_successful_save_moves_focus_out_of_hidden_forms_and_blocks_hidden_submit() {
+      var existingApply = findProcessFor("apply")
+      if (existingApply) existingApply.command = []
+
+      var baseState = function(customList, sampleList) {
+        return JSON.stringify({
+          settings: { authors: ["marcus", "musonius", "hierocles"], interval: 60 },
+          portraitFont: 8,
+          portraitLine: 11.2,
+          intervalApplied: true,
+          custom: customList || [],
+          samples: sampleList || [
+            { slug: "marcus", name: "Marcus Aurelius", dates: "121–180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+            { slug: "musonius", name: "Musonius Rufus", dates: "c. 30–100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+            { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elem", text: "Circles." },
+          ],
+        })
+      }
+
+      // 1. Add author via clicking submit button: focus leaves hidden Add author, Return/Space keeps Saved and never submits hidden form.
+      var addAuthorBtn = findOne(panel, function(item) { return item.label === "Add an author" && item.visible })
+      verify(addAuthorBtn !== null)
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+
+      var nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      var imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      var citationField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var authorQuoteField = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      var addSubmitBtn = findOne(panel, function(item) { return item.label === "Add author" && item.visible })
+      verify(nameField && imageField && citationField && authorQuoteField && addSubmitBtn)
+
+      nameField.text = "David Hume"
+      imageField.text = "/tmp/hume.png"
+      citationField.text = "Treatise"
+      authorQuoteField.text = "Custom is the great guide."
+      panel.reveal(addSubmitBtn)
+      waitForRendering(panel)
+      mouseClick(addSubmitBtn)
+      wait(10)
+
+      var applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      var addPayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(addPayload.addAuthor.slug, "david-hume")
+
+      completeProcess(applyProc, 0, baseState([], [
+        { slug: "marcus", name: "Marcus Aurelius", dates: "121–180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+        { slug: "musonius", name: "Musonius Rufus", dates: "c. 30–100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elem", text: "Circles." },
+        { slug: "david-hume", name: "David Hume", dates: "", custom: true, portrait: "⣿", citation: "Treatise", text: "Custom is the great guide." },
+      ]), "", false)
+      wait(20)
+
+      compare(panel.authorOpen, false)
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(panel.error, "")
+      compare(panel.errorShownInStatus, false)
+      compare(addSubmitBtn.buttonFocused, false)
+
+      applyProc.command = []
+      keyClick(Qt.Key_Return)
+      keyClick(Qt.Key_Space)
+      wait(20)
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(panel.error, "")
+      compare(panel.errorShownInStatus, false)
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // 2. Edit author (Save changes) via focused submit button: Space/Return after save keeps Saved and never submits hidden form.
+      var editBtn = findOne(panel, function(item) { return item.label === "Edit" && item.visible })
+      verify(editBtn !== null)
+      mouseClick(editBtn)
+      waitForRendering(panel)
+
+      var datesField = findOne(panel, function(item) { return item.objectName === "authorDatesField" && item.visible })
+      var saveBtn = findOne(panel, function(item) { return item.label === "Save changes" && item.visible })
+      verify(datesField && saveBtn)
+      datesField.text = "c. 30–101"
+      saveBtn.takeFocus()
+      wait(10)
+      compare(saveBtn.buttonFocused, true)
+      keyClick(Qt.Key_Space)
+      wait(10)
+
+      applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      var replacePayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(replacePayload.replaceAuthor.slug, "musonius")
+
+      completeProcess(applyProc, 0, baseState([], [
+        { slug: "marcus", name: "Marcus Aurelius", dates: "121–180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+        { slug: "musonius", name: "Musonius Rufus", dates: "c. 30–101", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elem", text: "Circles." },
+        { slug: "david-hume", name: "David Hume", dates: "", custom: true, portrait: "⣿", citation: "Treatise", text: "Custom is the great guide." },
+      ]), "", false)
+      wait(20)
+
+      compare(panel.authorOpen, false)
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(saveBtn.buttonFocused, false)
+
+      applyProc.command = []
+      keyClick(Qt.Key_Space)
+      keyClick(Qt.Key_Return)
+      wait(20)
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(panel.error, "")
+      compare(panel.errorShownInStatus, false)
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // 3. Add quote via clicking submit button: Return/Space after save keeps Saved and never submits hidden form.
+      var addQuoteBtn = findOne(panel, function(item) { return item.label === "Add your own quote" && item.visible })
+      verify(addQuoteBtn !== null)
+      mouseClick(addQuoteBtn)
+      waitForRendering(panel)
+
+      var qCite = findOne(panel, function(item) { return item.objectName === "quoteCitationField" && item.visible })
+      var qText = findOne(panel, function(item) { return item.objectName === "quoteTextField" && item.visible })
+      var qSubmitBtn = findOne(panel, function(item) { return item.label === "Add quote" && item.visible })
+      verify(qCite && qText && qSubmitBtn)
+      qCite.text = "Meditations IV.1"
+      qText.text = "Inward power."
+      panel.reveal(qSubmitBtn)
+      waitForRendering(panel)
+      mouseClick(qSubmitBtn)
+      wait(10)
+
+      applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      var quotePayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(quotePayload.addQuote.citation, "Meditations IV.1")
+
+      completeProcess(applyProc, 0, baseState([
+        { id: "c01", author: "marcus", name: "Marcus Aurelius", citation: "Meditations IV.1", text: "Inward power." },
+      ]), "", false)
+      wait(20)
+
+      compare(panel.quoteOpen, false)
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(qSubmitBtn.buttonFocused, false)
+
+      applyProc.command = []
+      keyClick(Qt.Key_Return)
+      keyClick(Qt.Key_Space)
+      wait(20)
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(panel.error, "")
+      compare(panel.errorShownInStatus, false)
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // 4. Ctrl+Return in authorTextField (QuoteArea): focus leaves hidden QuoteArea so later keystrokes do not go into newAuthorText.
+      mouseClick(addAuthorBtn)
+      waitForRendering(panel)
+      nameField = findOne(panel, function(item) { return item.objectName === "authorNameField" && item.visible })
+      imageField = findOne(panel, function(item) { return item.objectName === "authorImageField" && item.visible })
+      citationField = findOne(panel, function(item) { return item.objectName === "authorCitationField" && item.visible })
+      var authorQuoteArea = findOne(panel, function(item) { return item.objectName === "authorTextField" && item.visible })
+      verify(nameField && imageField && citationField && authorQuoteArea)
+
+      nameField.text = "Epictetus Two"
+      imageField.text = "/tmp/ep2.png"
+      citationField.text = "Discourses"
+      authorQuoteArea.text = "First say to yourself."
+      authorQuoteArea.takeFocus()
+      wait(10)
+      compare(authorQuoteArea.editFocused, true)
+      keyClick(Qt.Key_Return, Qt.ControlModifier)
+      wait(10)
+
+      applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      var ctrlAddAuthorPayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(ctrlAddAuthorPayload.addAuthor.slug, "epictetus-two")
+
+      completeProcess(applyProc, 0, baseState([], [
+        { slug: "marcus", name: "Marcus Aurelius", dates: "121–180", custom: false, portrait: "⣿", citation: "II.1", text: "Begin." },
+        { slug: "musonius", name: "Musonius Rufus", dates: "c. 30–100", custom: true, portrait: "⣿", citation: "VI", text: "Train." },
+        { slug: "hierocles", name: "Hierocles", dates: "", custom: true, portrait: "⣿", citation: "Elem", text: "Circles." },
+        { slug: "epictetus-two", name: "Epictetus Two", dates: "", custom: true, portrait: "⣿", citation: "Discourses", text: "First say to yourself." },
+      ]), "", false)
+      wait(20)
+
+      compare(panel.authorOpen, false)
+      compare(panel.notice, "Saved")
+      compare(authorQuoteArea.editFocused, false)
+      compare(panel.newAuthorText, "")
+
+      applyProc.command = []
+      keyClick(Qt.Key_A)
+      keyClick(Qt.Key_B)
+      keyClick(Qt.Key_C)
+      keyClick(Qt.Key_Return, Qt.ControlModifier)
+      wait(20)
+      compare(panel.newAuthorText, "")
+      compare(authorQuoteArea.text, "")
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(panel.error, "")
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // 5. Ctrl+Return in textField (QuoteArea): focus leaves hidden QuoteArea so later keystrokes do not go into newText.
+      mouseClick(addQuoteBtn)
+      waitForRendering(panel)
+      qCite = findOne(panel, function(item) { return item.objectName === "quoteCitationField" && item.visible })
+      var quoteArea = findOne(panel, function(item) { return item.objectName === "quoteTextField" && item.visible })
+      verify(qCite && quoteArea)
+
+      qCite.text = "Letters II"
+      quoteArea.text = "Settle in one place."
+      quoteArea.takeFocus()
+      wait(10)
+      compare(quoteArea.editFocused, true)
+      keyClick(Qt.Key_Return, Qt.ControlModifier)
+      wait(10)
+
+      applyProc = findProcessFor("apply")
+      verify(applyProc !== null && applyProc.running === true)
+      var ctrlQuotePayload = JSON.parse(applyProc.command[applyProc.command.length - 1])
+      compare(ctrlQuotePayload.addQuote.citation, "Letters II")
+
+      completeProcess(applyProc, 0, baseState([
+        { id: "c02", author: "marcus", name: "Marcus Aurelius", citation: "Letters II", text: "Settle in one place." },
+      ]), "", false)
+      wait(20)
+
+      compare(panel.quoteOpen, false)
+      compare(panel.notice, "Saved")
+      compare(quoteArea.editFocused, false)
+      compare(panel.newText, "")
+
+      applyProc.command = []
+      keyClick(Qt.Key_X)
+      keyClick(Qt.Key_Y)
+      keyClick(Qt.Key_Z)
+      keyClick(Qt.Key_Return, Qt.ControlModifier)
+      wait(20)
+      compare(panel.newText, "")
+      compare(quoteArea.text, "")
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(panel.error, "")
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+
+      // 6. Direct closed-form guard check: submitAuthor() and addQuote() do nothing when closed.
+      panel.submitAuthor()
+      panel.addQuote()
+      wait(10)
+      compare(panel.notice, "Saved")
+      compare(panel.statusText, "Saved")
+      compare(panel.error, "")
+      compare(panel.errorScope, "")
+      compare(panel.saving, false)
+      compare(findProcessFor("apply"), null)
+    }
   }
 }
 `,
@@ -2606,7 +2876,7 @@ Item {
     );
     const combined = `${run.stdout.toString()}\n${run.stderr.toString()}`;
     expect(run.exitCode, combined).toBe(0);
-    expect(combined, combined).toContain("18 passed, 0 failed");
+    expect(combined, combined).toContain("19 passed, 0 failed");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -2759,6 +3029,9 @@ Item {
   property bool selected: false
   property bool focusable: true
   activeFocusOnTab: focusable
+  Keys.onReturnPressed: if (focusable) root.clicked()
+  Keys.onEnterPressed: if (focusable) root.clicked()
+  Keys.onSpacePressed: if (focusable) root.clicked()
   property bool bordered: true
   property color foreground: "white"
   property color accent: "#7aa2f7"

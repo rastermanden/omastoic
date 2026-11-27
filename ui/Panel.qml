@@ -755,9 +755,13 @@ Item {
       quoteValidationError = false
       citationField.text = ""
       textField.text = ""
-      if (closingQuote) restoreFormReturnY()
+      if (closingQuote) {
+        keyCatcher.forceActiveFocus()
+        restoreFormReturnY()
+      }
     }
     if (addingAuthor || replacingAuthor) {
+      let closingAuthor = authorOpen
       clearPortraitPreview()
       authorOpen = false
       authorAdvancedOpen = false
@@ -774,6 +778,7 @@ Item {
       authorImageField.text = ""
       authorCitationField.text = ""
       authorTextField.text = ""
+      if (closingAuthor) keyCatcher.forceActiveFocus()
       restoreFormReturnY()
     } else if (editingAuthorSlug !== "" && !samples.some(function(author) { return author.slug === root.editingAuthorSlug })) {
       closeAuthorForm()
@@ -935,7 +940,7 @@ Item {
   }
 
   function addQuote() {
-    if (root.busy) return
+    if (!root.quoteOpen || root.busy) return
     let missingKeys = []
     let missingLabels = []
     let firstMissingField = null
@@ -1068,7 +1073,7 @@ Item {
   }
 
   function submitAuthor() {
-    if (root.busy || root.pickingImage) return
+    if (!root.authorOpen || root.busy || root.pickingImage) return
     if (editingAuthorSlug !== "") {
       if (newAuthorName.trim() === "") {
         notice = ""
