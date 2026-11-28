@@ -67,13 +67,17 @@ Item {
   property string errorScope: ""
   property string authorListHint: ""
   property bool quoteOpen: false
-  onQuoteOpenChanged: if (quoteOpen) root.revealAfterLayout(quoteForm, quoteForm, citationField)
+  onQuoteOpenChanged: if (quoteOpen) root.revealAfterLayout(quoteForm, quoteForm, citationField, citationField)
   property bool authorOpen: false
-  onAuthorOpenChanged: if (authorOpen) root.revealAfterLayout(authorForm, authorForm, authorNameField)
+  onAuthorOpenChanged: if (authorOpen) root.revealAfterLayout(authorForm, authorForm, authorNameField, authorNameField)
   property bool listOpen: false
+  property string activeAuthorSaveSlug: ""
+  property string activeAuthorRemoveSlug: ""
+  property string activeQuoteRemoveId: ""
   property real formReturnContentY: 0
   property bool hasFormReturnY: false
   property int formScrollSeq: 0
+  property bool revealingAfterLayout: false
   readonly property bool busy: notice === "Loading…" || notice === "Saving…"
   readonly property bool errorShownInStatus: error !== "" && (errorScope === "" || (errorScope === "author" && !authorOpen) || (errorScope === "quote" && !quoteOpen))
   readonly property string statusText: errorShownInStatus ? error : notice
@@ -172,6 +176,9 @@ Item {
   function open(payloadJson) {
     cancelImagePick()
     clearPortraitPreview()
+    error = ""
+    errorScope = ""
+    if (notice !== "Saving…") notice = ""
     opened = true
     hasLocalSize = sizeProcess.running || pendingSizePayload !== ""
     resizing = false
@@ -182,8 +189,6 @@ Item {
     hasFormReturnY = false
     formReturnContentY = 0
     scroller.contentY = 0
-    error = ""
-    errorScope = ""
     authorListHint = ""
     missingAuthorFields = []
     missingQuoteFields = []
@@ -199,6 +204,9 @@ Item {
     pendingReplaceAuthor = null
     pendingRemoveAuthor = ""
     confirmRemoveAuthor = ""
+    activeAuthorSaveSlug = ""
+    activeAuthorRemoveSlug = ""
+    activeQuoteRemoveId = ""
     reload()
     Qt.callLater(function() { if (root.opened) previewButton.takeFocus() })
   }
@@ -212,6 +220,7 @@ Item {
   }
 
   function close() {
+    applyTimer.stop()
     cancelImagePick()
     clearPortraitPreview()
     clearPickerNotice()
@@ -230,6 +239,9 @@ Item {
     confirmRemoveAuthor = ""
     editingAuthorPortrait = ""
     customAuthorSlug = ""
+    activeAuthorSaveSlug = ""
+    activeAuthorRemoveSlug = ""
+    activeQuoteRemoveId = ""
   }
 
   function clearValidationState() {
@@ -319,6 +331,47 @@ Item {
     return dates
   }
 
+  function findAuthorRow(slug) {
+    for (let i = 0; i < authorRows.count; i++) {
+      let rowItem = authorRows.itemAt(i)
+      if (rowItem && rowItem.slug === slug) return rowItem
+    }
+    return null
+  }
+
+  function focusAfterFormClose(kind, slug) {
+    if (!root.opened || root.authorOpen || root.quoteOpen) return
+    if (kind === "author-row") {
+      let rowItem = findAuthorRow(slug)
+      if (rowItem) {
+        rowItem.forceActiveFocus()
+        root.reveal(rowItem)
+        return
+      }
+      addAuthorButton.takeFocus()
+      root.reveal(addAuthorButton)
+      return
+    }
+    if (kind === "author-edit") {
+      let rowItem = findAuthorRow(slug)
+      if (rowItem && typeof rowItem.focusEditButton === "function") {
+        rowItem.focusEditButton()
+        root.reveal(rowItem)
+        return
+      }
+      addAuthorButton.takeFocus()
+      root.reveal(addAuthorButton)
+      return
+    }
+    if (kind === "quote-opener") {
+      addQuoteButton.takeFocus()
+      root.reveal(addQuoteButton)
+      return
+    }
+    addAuthorButton.takeFocus()
+    root.reveal(addAuthorButton)
+  }
+
   function captureFormReturnY() {
     if (!hasFormReturnY) {
       formReturnContentY = scroller.contentY
@@ -326,17 +379,30 @@ Item {
     }
   }
 
-  function restoreFormReturnY() {
-    if (!hasFormReturnY) return
+  function restoreFormReturnY(onDone) {
+    var hasReturn = hasFormReturnY
     var target = formReturnContentY
     hasFormReturnY = false
     formScrollSeq++
     var seq = formScrollSeq
     var clampAndSet = function() {
+      var maxY = 0
+      var prevRevealing = false
       if (seq !== root.formScrollSeq || root.authorOpen || root.quoteOpen) return
       content.forceLayout()
-      var maxY = Math.max(0, scroller.contentHeight - scroller.height)
-      scroller.contentY = Math.max(0, Math.min(target, maxY))
+      if (hasReturn) {
+        maxY = Math.max(0, scroller.contentHeight - scroller.height)
+        scroller.contentY = Math.max(0, Math.min(target, maxY))
+      }
+      if (typeof onDone === "function") {
+        prevRevealing = root.revealingAfterLayout
+        root.revealingAfterLayout = true
+        try {
+          onDone()
+        } finally {
+          root.revealingAfterLayout = prevRevealing
+        }
+      }
     }
     clampAndSet()
     Qt.callLater(clampAndSet)
@@ -560,40 +626,130 @@ Item {
     })
   }
 
-  function isInsideScroller(item) {
+  function isInsideItem(item, ancestor) {
     var cur = item
     while (cur) {
-      if (cur === scroller.contentItem) return true
+      if (cur === ancestor) return true
       cur = cur.parent
     }
     return false
   }
 
-  function reveal(item) {
-    if (!item || !isInsideScroller(item)) return
-    var pos = item.mapToItem(scroller.contentItem, 0, 0)
-    var top = pos.y
-    var bottom = pos.y + item.height
-    if (top < scroller.contentY) scroller.contentY = Math.max(0, top - 8)
-    else if (bottom > scroller.contentY + scroller.height) scroller.contentY = Math.max(0, bottom - scroller.height + 8)
+  function isInsideScroller(item) {
+    return isInsideItem(item, scroller.contentItem)
   }
 
-  function revealAfterLayout(form, first, second) {
+  function syncFormLayout(form) {
+    if (form === quoteForm) authorGrid.forceLayout()
+    if (form === authorForm) {
+      if (authorPortraitPreviewBox.visible) previewBoxColumn.forceLayout()
+      if (advancedFields.visible) advancedFields.forceLayout()
+    }
+    if (form && typeof form.forceLayout === "function") form.forceLayout()
+    if (form === authorForm && authorFooter.visible) authorFooter.forceLayout()
+    content.forceLayout()
+  }
+
+  function labelForControl(item) {
+    if (item === authorNameField) return authorNameLabel
+    if (item === authorDatesField) return authorDatesLabel
+    if (item === authorImageField || item === chooseImageButton) return authorImageLabel
+    if (item === authorCitationField) return authorCitationLabel
+    if (item === authorTextField) return authorTextLabel
+    if (item === authorSlugField) return authorSlugLabel
+    if (item === citationField) return quoteCitationLabel
+    if (item === textField) return quoteTextLabel
+    if (item === secondsField) return secondsLabel
+    return null
+  }
+
+  function reveal(item, labelItem) {
+    if (!item || !isInsideScroller(item)) return
+    if (!root.revealingAfterLayout) root.formScrollSeq++
+    if (root.authorOpen && isInsideItem(item, authorForm)) root.syncFormLayout(authorForm)
+    else if (root.quoteOpen && isInsideItem(item, quoteForm)) root.syncFormLayout(quoteForm)
+    var pos = item.mapToItem(scroller.contentItem, 0, 0)
+    var itemTop = pos.y
+    var itemBottom = pos.y + item.height
+    var top = itemTop
+    var bottom = itemBottom
+    var label = labelItem !== undefined ? labelItem : root.labelForControl(item)
+    var labelPos = null
+    if (label && label.visible && isInsideScroller(label)) {
+      labelPos = label.mapToItem(scroller.contentItem, 0, 0)
+      top = Math.min(top, labelPos.y)
+      bottom = Math.max(bottom, labelPos.y + label.height)
+    }
+    if (bottom - top > scroller.height) {
+      top = itemTop
+      bottom = itemBottom
+    }
+    if (bottom - top > scroller.height) {
+      if (top < scroller.contentY || top > scroller.contentY + scroller.height - 24) {
+        scroller.contentY = Math.max(0, top - 8)
+      }
+    } else {
+      if (top < scroller.contentY) scroller.contentY = Math.max(0, top - 8)
+      else if (bottom > scroller.contentY + scroller.height) scroller.contentY = Math.max(0, bottom - scroller.height + 8)
+      if (top < scroller.contentY) scroller.contentY = Math.max(0, Math.min(top, bottom - scroller.height))
+      if (bottom > scroller.contentY + scroller.height) scroller.contentY = Math.max(0, bottom - scroller.height)
+    }
+    root.clampScroll()
+  }
+
+  function revealAfterLayout(form, first, second, focusTarget) {
     formScrollSeq++
     var seq = formScrollSeq
-    var syncAndReveal = function() {
+    var revealTargets = function() {
       if (seq !== root.formScrollSeq) return
       if (form === authorForm && (!root.opened || !root.authorOpen)) return
-      if (form === quoteForm) authorGrid.forceLayout()
-      if (form === authorForm && authorPortraitPreviewBox.visible) previewBoxColumn.forceLayout()
-      if (form && typeof form.forceLayout === "function") form.forceLayout()
-      if (form === authorForm && authorFooter.visible) authorFooter.forceLayout()
-      content.forceLayout()
-      if (first) root.reveal(first)
-      if (second) root.reveal(second)
+      if (form === quoteForm && (!root.opened || !root.quoteOpen)) return
+      var prevRevealing = root.revealingAfterLayout
+      root.revealingAfterLayout = true
+      try {
+        root.syncFormLayout(form)
+        if (first) root.reveal(first)
+        if (second) root.reveal(second)
+        if (focusTarget && focusTarget.visible && focusTarget !== second) root.reveal(focusTarget)
+      } finally {
+        root.revealingAfterLayout = prevRevealing
+      }
     }
-    syncAndReveal()
-    Qt.callLater(syncAndReveal)
+    revealTargets()
+    Qt.callLater(function() {
+      if (seq !== root.formScrollSeq) return
+      if (form === authorForm && (!root.opened || !root.authorOpen)) return
+      if (form === quoteForm && (!root.opened || !root.quoteOpen)) return
+      var prevRevealing = root.revealingAfterLayout
+      root.revealingAfterLayout = true
+      try {
+        if (focusTarget && focusTarget.visible) root.focusField(focusTarget)
+        revealTargets()
+      } finally {
+        root.revealingAfterLayout = prevRevealing
+      }
+      Qt.callLater(revealTargets)
+    })
+  }
+
+  function toggleAuthorAdvanced() {
+    confirmRemoveAuthor = ""
+    authorAdvancedOpen = !authorAdvancedOpen
+    if (authorAdvancedOpen) {
+      revealAfterLayout(authorForm, advancedFields, authorSlugField, authorSlugField)
+    } else {
+      advancedToggle.forceActiveFocus()
+      root.reveal(advancedToggle)
+    }
+  }
+
+  function toggleCustomList() {
+    confirmRemoveAuthor = ""
+    listOpen = !listOpen
+    if (!listOpen && customCountToggle.visible) {
+      customCountToggle.forceActiveFocus()
+      root.reveal(customCountToggle)
+    }
   }
 
   function portraitFullyVisible(top, height, contentY, viewport) {
@@ -657,7 +813,6 @@ Item {
       notice = ""
       authorValidationError = false
       quoteValidationError = false
-      error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       if ((addingAuthor || replacingAuthor) && authorOpen) {
         errorScope = "author"
       } else if (addingQuote && quoteOpen) {
@@ -665,6 +820,7 @@ Item {
       } else {
         errorScope = ""
       }
+      error = failed ? plainError(run.stderr, fallback) : "Could not read the settings."
       let slugCollision = errorScope === "author" && editingAuthorSlug === "" && /\b(?:slug|bundled author|already exists|reserved)\b/i.test(error)
       if (slugCollision) {
         authorAdvancedOpen = true
@@ -678,8 +834,7 @@ Item {
       confirmRemoveAuthor = ""
       if (errorScope === "author") {
         if (slugCollision) {
-          root.revealAfterLayout(authorForm, authorSlugField, null)
-          Qt.callLater(function() { if (root.opened && root.authorOpen && root.authorAdvancedOpen) root.focusField(authorSlugField) })
+          root.revealAfterLayout(authorForm, advancedFields, authorSlugField, authorSlugField)
         } else {
           root.revealAfterLayout(authorForm, null, null)
         }
@@ -713,6 +868,9 @@ Item {
     addingAuthor = false
     replacingAuthor = false
     addingQuote = false
+    activeAuthorSaveSlug = ""
+    activeAuthorRemoveSlug = ""
+    activeQuoteRemoveId = ""
     if (applyQueued) {
       applyQueued = false
       applyNow()
@@ -756,12 +914,13 @@ Item {
       citationField.text = ""
       textField.text = ""
       if (closingQuote) {
-        keyCatcher.forceActiveFocus()
-        restoreFormReturnY()
+        restoreFormReturnY(function() { root.focusAfterFormClose("quote-opener", "") })
       }
     }
+    var savedSlug = ""
     if (addingAuthor || replacingAuthor) {
       let closingAuthor = authorOpen
+      savedSlug = activeAuthorSaveSlug !== "" ? activeAuthorSaveSlug : editingAuthorSlug
       clearPortraitPreview()
       authorOpen = false
       authorAdvancedOpen = false
@@ -778,10 +937,28 @@ Item {
       authorImageField.text = ""
       authorCitationField.text = ""
       authorTextField.text = ""
-      if (closingAuthor) keyCatcher.forceActiveFocus()
-      restoreFormReturnY()
+      if (closingAuthor) restoreFormReturnY(function() { root.focusAfterFormClose("author-row", savedSlug) })
+      else restoreFormReturnY()
     } else if (editingAuthorSlug !== "" && !samples.some(function(author) { return author.slug === root.editingAuthorSlug })) {
       closeAuthorForm()
+    } else if (activeAuthorRemoveSlug !== "" && !authorOpen && !quoteOpen && root.opened) {
+      let removedGone = !samples.some(function(author) { return author.slug === root.activeAuthorRemoveSlug })
+      if (removedGone) {
+        let firstRow = authorRows.count > 0 ? authorRows.itemAt(0) : null
+        if (firstRow) firstRow.forceActiveFocus()
+        else addAuthorButton.takeFocus()
+      }
+    } else if (activeQuoteRemoveId !== "" && !authorOpen && !quoteOpen && root.opened) {
+      let quoteRemovedGone = !custom.some(function(item) { return item.id === root.activeQuoteRemoveId })
+      if (quoteRemovedGone) {
+        if (custom.length > 0 && customCountToggle.visible) {
+          customCountToggle.forceActiveFocus()
+          root.reveal(customCountToggle)
+        } else {
+          addQuoteButton.takeFocus()
+          root.reveal(addQuoteButton)
+        }
+      }
     }
     if (secondsField.field) secondsField.field.value = interval
     if (!hasLocalSize && !resizing && !sizeProcess.running && pendingSizePayload === "") adoptPanelSize(parsed.panelSize)
@@ -854,6 +1031,7 @@ Item {
         payload.authors = nextAuthors
       }
       if (intervalApplied && interval !== committedInterval) payload.interval = interval
+      activeAuthorSaveSlug = pendingAuthor.slug
       pendingAuthor = null
       addingAuthor = true
       if (pendingReplaceAuthor || pendingRemoveAuthor !== "" || pendingRemove !== "" || pendingQuote) applyQueued = true
@@ -861,6 +1039,7 @@ Item {
       payload.replaceAuthor = pendingReplaceAuthor
       if (selectedAuthors.join(",") !== committedAuthors.join(",")) payload.authors = selectedAuthors
       if (intervalApplied && interval !== committedInterval) payload.interval = interval
+      activeAuthorSaveSlug = pendingReplaceAuthor.slug
       pendingReplaceAuthor = null
       replacingAuthor = true
       if (pendingRemoveAuthor !== "" || pendingRemove !== "" || pendingQuote) applyQueued = true
@@ -874,6 +1053,7 @@ Item {
         applyQueued = true
       } else {
         payload.removeAuthor = removeSlug
+        activeAuthorRemoveSlug = removeSlug
         if (nextWithoutRemoved.length > 0 && nextWithoutRemoved.join(",") !== committedWithoutRemoved.join(",")) {
           payload.authors = nextWithoutRemoved
         }
@@ -886,6 +1066,7 @@ Item {
       if (intervalApplied) payload.interval = interval
       if (pendingRemove !== "") {
         payload.removeQuote = pendingRemove
+        activeQuoteRemoveId = pendingRemove
         pendingRemove = ""
         if (pendingQuote) applyQueued = true
       } else if (pendingQuote) {
@@ -926,17 +1107,18 @@ Item {
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
     quoteOpen = true
-    root.revealAfterLayout(quoteForm, quoteForm, citationField)
+    root.revealAfterLayout(quoteForm, quoteForm, citationField, citationField)
   }
 
   function closeQuoteForm() {
+    var wasOpen = quoteOpen
     quoteOpen = false
     missingQuoteFields = []
     quoteValidationError = false
     error = ""
     errorScope = ""
-    keyCatcher.forceActiveFocus()
-    restoreFormReturnY()
+    if (wasOpen) restoreFormReturnY(function() { root.focusAfterFormClose("quote-opener", "") })
+    else restoreFormReturnY()
   }
 
   function addQuote() {
@@ -958,18 +1140,17 @@ Item {
       notice = ""
       missingQuoteFields = missingKeys
       quoteValidationError = true
-      error = "Fill in " + joinFieldList(missingLabels) + "."
       errorScope = "quote"
-      root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
-      Qt.callLater(function() { if (root.opened && root.quoteOpen) root.focusField(firstMissingField) })
+      error = "Fill in " + joinFieldList(missingLabels) + "."
+      root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow, firstMissingField)
       return
     }
     if (newAuthor === "") {
       notice = ""
       missingQuoteFields = []
       quoteValidationError = false
-      error = "Pick an author."
       errorScope = "quote"
+      error = "Pick an author."
       root.revealAfterLayout(quoteForm, quoteErrorText, quoteSubmitRow)
       return
     }
@@ -1011,7 +1192,7 @@ Item {
     authorCitationField.text = ""
     authorTextField.text = ""
     authorOpen = true
-    root.revealAfterLayout(authorForm, authorForm, authorNameField)
+    root.revealAfterLayout(authorForm, authorForm, authorNameField, authorNameField)
   }
 
   function startEditAuthor(author) {
@@ -1046,10 +1227,12 @@ Item {
     authorCitationField.text = ""
     authorTextField.text = ""
     authorOpen = true
-    root.revealAfterLayout(authorForm, authorForm, authorNameField)
+    root.revealAfterLayout(authorForm, authorForm, authorNameField, authorNameField)
   }
 
   function closeAuthorForm() {
+    var wasOpen = authorOpen
+    var editSlug = editingAuthorSlug
     cancelImagePick()
     clearPortraitPreview()
     clearPickerNotice()
@@ -1064,8 +1247,8 @@ Item {
     editingAuthorOrigDates = ""
     editingAuthorPortrait = ""
     customAuthorSlug = ""
-    keyCatcher.forceActiveFocus()
-    restoreFormReturnY()
+    if (wasOpen) restoreFormReturnY(function() { root.focusAfterFormClose(editSlug !== "" ? "author-edit" : "author-opener", editSlug) })
+    else restoreFormReturnY()
   }
 
   function addAuthor() {
@@ -1079,10 +1262,9 @@ Item {
         notice = ""
         missingAuthorFields = ["name"]
         authorValidationError = true
-        error = "Fill in Name."
         errorScope = "author"
-        root.revealAfterLayout(authorForm, authorNameField, null)
-        Qt.callLater(function() { if (root.opened && root.authorOpen) root.focusField(authorNameField) })
+        error = "Fill in Name."
+        root.revealAfterLayout(authorForm, authorNameField, null, authorNameField)
         return
       }
       let hasCite = newAuthorCitation.trim() !== ""
@@ -1092,10 +1274,9 @@ Item {
         let missingField = hasCite ? authorTextField : authorCitationField
         missingAuthorFields = [hasCite ? "text" : "citation"]
         authorValidationError = true
-        error = hasCite ? "Fill in Quote to match the citation." : "Fill in Citation to match the quote."
         errorScope = "author"
-        root.revealAfterLayout(authorForm, missingField, null)
-        Qt.callLater(function() { if (root.opened && root.authorOpen) root.focusField(missingField) })
+        error = hasCite ? "Fill in Quote to match the citation." : "Fill in Citation to match the quote."
+        root.revealAfterLayout(authorForm, missingField, null, missingField)
         return
       }
       let patch = { slug: editingAuthorSlug }
@@ -1121,8 +1302,8 @@ Item {
         notice = ""
         missingAuthorFields = []
         authorValidationError = false
-        error = noAuthorChangesError
         errorScope = "author"
+        error = noAuthorChangesError
         return
       }
       missingAuthorFields = []
@@ -1166,12 +1347,15 @@ Item {
       notice = ""
       missingAuthorFields = missingKeys
       authorValidationError = true
+      errorScope = "author"
       error = (missingKeys.length === 1 && missingKeys[0] === "slug")
         ? "Use letters or numbers in the name, or set an Author id under Advanced."
         : ("Fill in " + joinFieldList(missingLabels) + ".")
-      errorScope = "author"
-      root.revealAfterLayout(authorForm, firstMissingField, null)
-      Qt.callLater(function() { if (root.opened && root.authorOpen) root.focusField(firstMissingField) })
+      if (firstMissingField === authorSlugField) {
+        root.revealAfterLayout(authorForm, advancedFields, authorSlugField, authorSlugField)
+      } else {
+        root.revealAfterLayout(authorForm, firstMissingField, null, firstMissingField)
+      }
       return
     }
     missingAuthorFields = []
@@ -1218,6 +1402,8 @@ Item {
     id: host
     property string label: ""
     property string sizeLabel: ""
+    property string accessibleName: ""
+    property Item revealLabel: null
     property bool picked: false
     property bool destructive: false
     property bool available: true
@@ -1255,13 +1441,18 @@ Item {
       foreground: root.ink
       accent: host.destructive ? Commons.Color.urgent : Commons.Color.accent
       Accessible.role: Accessible.Button
-      Accessible.name: host.label
+      Accessible.name: host.accessibleName !== "" ? host.accessibleName : host.label
+      Accessible.onPressAction: {
+        if (!host.available) return
+        inner.forceActiveFocus()
+        inner.clicked()
+      }
       onClicked: {
         if (!host.keepsRemoveConfirm) root.confirmRemoveAuthor = ""
         host.activated()
       }
       onActiveFocusChanged: {
-        if (activeFocus) root.reveal(host)
+        if (activeFocus) root.reveal(host, host.revealLabel !== null ? host.revealLabel : undefined)
         else host.focusLost()
       }
     }
@@ -1291,6 +1482,7 @@ Item {
       color: root.ink
       font.family: Style.font.family
       font.pixelSize: Style.font.body
+      Accessible.ignored: true
     }
     MouseArea {
       anchors.fill: parent
@@ -1305,11 +1497,14 @@ Item {
     id: area
     property alias text: edit.text
     property string placeholderText: ""
+    property Item labelItem: null
+    property string accessibleName: ""
     property bool invalid: false
     readonly property bool editFocused: edit.activeFocus
     readonly property real contentHeight: edit.contentHeight
     readonly property real viewportHeight: areaScroll.height
     signal submitted()
+    onLabelItemChanged: edit.syncAccessibleLabel()
 
     readonly property real lineStep: Math.ceil(Style.font.body * 1.35)
     readonly property real padY: Style.space(8)
@@ -1362,10 +1557,18 @@ Item {
         wrapMode: TextEdit.Wrap
         selectByMouse: true
         activeFocusOnTab: true
+        Accessible.role: Accessible.EditableText
+        Accessible.name: area.accessibleName !== "" ? area.accessibleName : (area.labelItem ? String(area.labelItem.text || "") : "")
+        Accessible.description: area.placeholderText
+        Accessible.multiLine: true
+        function syncAccessibleLabel() {
+          if (area.labelItem) edit.Accessible.labelledBy = area.labelItem
+        }
+        Component.onCompleted: syncAccessibleLabel()
         onActiveFocusChanged: {
           if (activeFocus) {
             root.confirmRemoveAuthor = ""
-            root.reveal(area)
+            root.reveal(area, area.labelItem !== null ? area.labelItem : undefined)
           }
         }
         onCursorRectangleChanged: {
@@ -1376,8 +1579,9 @@ Item {
           }
         }
         Keys.onTabPressed: function(event) {
-          var next = edit.nextItemInFocusChain(true)
-          if (next) next.forceActiveFocus(Qt.TabFocusReason)
+          var forward = (event.modifiers & Qt.ShiftModifier) === 0
+          var next = edit.nextItemInFocusChain(forward)
+          if (next) next.forceActiveFocus(forward ? Qt.TabFocusReason : Qt.BacktabFocusReason)
           event.accepted = true
         }
         Keys.onBacktabPressed: function(event) {
@@ -1404,6 +1608,7 @@ Item {
         font.pixelSize: Style.font.body
         font.italic: true
         wrapMode: Text.WordWrap
+        Accessible.ignored: true
       }
     }
 
@@ -1550,8 +1755,8 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         if (String(text || "").trim() !== "") {
-          root.error = root.plainError(text, "Could not open the preview.")
           root.errorScope = ""
+          root.error = root.plainError(text, "Could not open the preview.")
         }
       }
     }
@@ -1967,6 +2172,7 @@ Item {
               }
               Text {
                 id: authorHintText
+                objectName: "authorHintText"
                 visible: root.authorListHint !== ""
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
@@ -1977,19 +2183,27 @@ Item {
                 color: Commons.Color.urgent
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: text
+                readonly property string announcedText: root.opened && visible ? text : ""
+                onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
               }
             }
 
             Repeater {
+              id: authorRows
               model: root.samples
               delegate: Rectangle {
                 id: authorRow
                 required property var modelData
+                readonly property string slug: String(authorRow.modelData.slug || "")
+                readonly property bool selected: root.selectedAuthors.indexOf(authorRow.slug) !== -1
+                function focusEditButton() { editButton.takeFocus() }
                 width: parent.width
                 implicitHeight: row.implicitHeight + Style.space(8)
                 radius: Style.cornerRadius
                 color: {
-                  var on = root.selectedAuthors.indexOf(modelData.slug) !== -1
+                  var on = authorRow.selected
                   if (on) return Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.16)
                   if (rowPress.containsMouse) return Qt.rgba(root.ink.r, root.ink.g, root.ink.b, 0.08)
                   return "transparent"
@@ -1999,6 +2213,11 @@ Item {
                 activeFocusOnTab: true
                 Accessible.name: root.authorDisplayName(authorRow.modelData)
                 Accessible.role: Accessible.CheckBox
+                Accessible.checkable: true
+                Accessible.checked: authorRow.selected
+                Accessible.onToggleAction: root.toggleAuthor(authorRow.modelData.slug)
+                Accessible.onPressAction: root.toggleAuthor(authorRow.modelData.slug)
+                onActiveFocusChanged: if (activeFocus) root.reveal(authorRow)
 
                 MouseArea {
                   id: rowPress
@@ -2020,17 +2239,18 @@ Item {
                     height: Style.space(16)
                     radius: Style.space(3)
                     anchors.verticalCenter: parent.verticalCenter
-                    color: root.selectedAuthors.indexOf(authorRow.modelData.slug) !== -1 ? Commons.Color.accent : "transparent"
+                    color: authorRow.selected ? Commons.Color.accent : "transparent"
                     border.width: Math.max(1, Style.space(1))
-                    border.color: root.selectedAuthors.indexOf(authorRow.modelData.slug) !== -1 ? Commons.Color.accent : root.ink
+                    border.color: authorRow.selected ? Commons.Color.accent : root.ink
                     Text {
                       anchors.centerIn: parent
-                      visible: root.selectedAuthors.indexOf(authorRow.modelData.slug) !== -1
+                      visible: authorRow.selected
                       text: "✓"
                       color: Commons.Color.popups.background
                       font.family: Style.font.family
                       font.pixelSize: Style.font.bodySmall
                       font.bold: true
+                      Accessible.ignored: true
                     }
                   }
                   Column {
@@ -2060,13 +2280,17 @@ Item {
                     spacing: Style.space(6)
                     anchors.verticalCenter: parent.verticalCenter
                     RingButton {
+                      id: editButton
                       label: "Edit"
+                      accessibleName: "Edit " + root.authorDisplayName(authorRow.modelData)
                       picked: root.authorOpen && root.editingAuthorSlug === authorRow.modelData.slug
                       available: !root.busy
                       onActivated: root.startEditAuthor(authorRow.modelData)
                     }
                     RingButton {
+                      id: removeButton
                       label: root.confirmRemoveAuthor === authorRow.modelData.slug ? "Remove?" : "Remove"
+                      accessibleName: "Remove " + root.authorDisplayName(authorRow.modelData) + (root.confirmRemoveAuthor === authorRow.modelData.slug ? "?" : "")
                       sizeLabel: "Remove?"
                       destructive: root.confirmRemoveAuthor === authorRow.modelData.slug
                       available: !root.busy
@@ -2079,6 +2303,7 @@ Item {
 
                 Keys.onPressed: function(event) {
                   if (!authorRow.activeFocus) return
+                  if ((event.modifiers & Qt.ControlModifier) !== 0) return
                   if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     root.toggleAuthor(modelData.slug)
                     event.accepted = true
@@ -2088,12 +2313,16 @@ Item {
             }
 
             Text {
+              id: secondsLabel
+              objectName: "secondsLabel"
               width: parent.width
               visible: root.intervalApplied
               text: "Seconds each quote stays up"
               color: root.quiet
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
+              Accessible.role: Accessible.StaticText
+              Accessible.name: text
             }
 
             Item {
@@ -2102,14 +2331,31 @@ Item {
               visible: root.intervalApplied
               NumberField {
                 id: secondsField
+                objectName: "secondsField"
                 label: ""
                 value: root.interval
                 from: 5
                 to: 3600
                 stepSize: 5
                 foreground: root.ink
+                Component.onCompleted: {
+                  if (secondsField.field) {
+                    secondsField.field.Accessible.name = Qt.binding(function() { return secondsLabel.text })
+                    secondsField.field.Accessible.labelledBy = secondsLabel
+                    if (secondsField.field.contentItem) {
+                      secondsField.field.contentItem.Accessible.name = Qt.binding(function() { return secondsLabel.text })
+                      secondsField.field.contentItem.Accessible.labelledBy = secondsLabel
+                    }
+                  }
+                }
                 onModified: function(value) { root.confirmRemoveAuthor = ""; root.interval = value; root.scheduleApply() }
-                onActiveFocusChanged: if (activeFocus) root.reveal(secondsField)
+                onActiveFocusChanged: if (activeFocus) root.reveal(secondsField, secondsLabel)
+              }
+              Connections {
+                target: secondsField.field
+                function onActiveFocusChanged() {
+                  if (secondsField.field && secondsField.field.activeFocus) root.reveal(secondsField, secondsLabel)
+                }
               }
               Rectangle {
                 anchors.fill: parent
@@ -2128,11 +2374,13 @@ Item {
               width: parent.width
               spacing: Style.space(8)
               RingButton {
+                id: addQuoteButton
                 label: "Add your own quote"
                 picked: root.quoteOpen
                 onActivated: root.toggleQuoteForm()
               }
               RingButton {
+                id: addAuthorButton
                 label: "Add an author"
                 picked: root.authorOpen && root.editingAuthorSlug === ""
                 onActivated: root.openAddAuthor()
@@ -2146,6 +2394,7 @@ Item {
               spacing: Style.space(8)
 
               Text {
+                id: quoteWhoLabel
                 text: "Who said it"
                 color: root.quiet
                 font.family: Style.font.family
@@ -2166,6 +2415,7 @@ Item {
                     property int chipIndex: index
                     width: Math.floor((authorGrid.width - Style.space(12)) / 3)
                     label: root.authorDisplayName(modelData)
+                    revealLabel: chipIndex < authorGrid.columns ? quoteWhoLabel : null
                     picked: root.newAuthor === modelData.slug
                     onActivated: root.newAuthor = modelData.slug
                     Keys.onPressed: function(event) {
@@ -2187,10 +2437,14 @@ Item {
                 }
               }
               Text {
+                id: quoteCitationLabel
+                objectName: "quoteCitationLabel"
                 text: "Citation"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2199,6 +2453,9 @@ Item {
                   id: citationField
                   objectName: "quoteCitationField"
                   width: parent.width
+                  Accessible.name: quoteCitationLabel.text
+                  Accessible.description: placeholderText
+                  Accessible.labelledBy: quoteCitationLabel
                   placeholderText: "Example: Meditations IV.17"
                   placeholderTextColor: root.hint
                   font.italic: text === ""
@@ -2208,7 +2465,7 @@ Item {
                     if (text.trim() !== "") root.clearMissingQuoteField("citation")
                   }
                   Keys.onReturnPressed: root.addQuote()
-                  onActiveFocusChanged: if (activeFocus) root.reveal(citationField)
+                  onActiveFocusChanged: if (activeFocus) root.reveal(citationField, quoteCitationLabel)
                 }
                 Rectangle {
                   anchors.fill: parent
@@ -2221,15 +2478,20 @@ Item {
                 }
               }
               Text {
+                id: quoteTextLabel
+                objectName: "quoteTextLabel"
                 text: "Quote"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               QuoteArea {
                 id: textField
                 objectName: "quoteTextField"
                 width: parent.width
+                labelItem: quoteTextLabel
                 placeholderText: "Type the quote"
                 invalid: root.isQuoteFieldMissing("text")
                 onTextChanged: {
@@ -2257,6 +2519,7 @@ Item {
               }
               Text {
                 id: quoteErrorText
+                objectName: "quoteErrorText"
                 width: parent.width
                 visible: root.error !== "" && root.errorScope === "quote"
                 text: root.error
@@ -2264,6 +2527,10 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: text
+                readonly property string announcedText: root.opened && visible ? text : ""
+                onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
               }
               Row {
                 id: quoteSubmitRow
@@ -2275,6 +2542,7 @@ Item {
                   onActivated: root.addQuote()
                 }
                 RingButton {
+                  id: quoteCancelButton
                   label: "Cancel"
                   onActivated: root.closeQuoteForm()
                 }
@@ -2296,10 +2564,14 @@ Item {
                 font.bold: true
               }
               Text {
+                id: authorNameLabel
+                objectName: "authorNameLabel"
                 text: "Name"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2308,6 +2580,9 @@ Item {
                   id: authorNameField
                   objectName: "authorNameField"
                   width: parent.width
+                  Accessible.name: authorNameLabel.text
+                  Accessible.description: placeholderText
+                  Accessible.labelledBy: authorNameLabel
                   placeholderText: "Example: Musonius Rufus"
                   placeholderTextColor: root.hint
                   font.italic: text === ""
@@ -2323,7 +2598,7 @@ Item {
                       root.authorAdvancedOpen = true
                     }
                   }
-                  onActiveFocusChanged: if (activeFocus) root.reveal(authorNameField)
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorNameField, authorNameLabel)
                 }
                 Rectangle {
                   anchors.fill: parent
@@ -2336,10 +2611,14 @@ Item {
                 }
               }
               Text {
+                id: authorDatesLabel
+                objectName: "authorDatesLabel"
                 text: "Dates (optional)"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2348,6 +2627,9 @@ Item {
                   id: authorDatesField
                   objectName: "authorDatesField"
                   width: parent.width
+                  Accessible.name: authorDatesLabel.text
+                  Accessible.description: placeholderText
+                  Accessible.labelledBy: authorDatesLabel
                   placeholderText: "Example: c. AD 30 – 100"
                   placeholderTextColor: root.hint
                   font.italic: text === ""
@@ -2356,7 +2638,7 @@ Item {
                     root.newAuthorDates = text
                     root.clearNoChangeAuthorError()
                   }
-                  onActiveFocusChanged: if (activeFocus) root.reveal(authorDatesField)
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorDatesField, authorDatesLabel)
                 }
                 Rectangle {
                   anchors.fill: parent
@@ -2369,10 +2651,14 @@ Item {
                 }
               }
               Text {
+                id: authorImageLabel
+                objectName: "authorImageLabel"
                 text: root.editingAuthorSlug !== "" ? "New portrait image (optional, JPEG or PNG)" : "Portrait image (JPEG or PNG)"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Row {
                 id: authorImageRow
@@ -2387,6 +2673,8 @@ Item {
                     width: parent.width
                     anchors.verticalCenter: parent.verticalCenter
                     Accessible.name: root.editingAuthorSlug !== "" ? "New portrait image path" : "Portrait image path"
+                    Accessible.description: placeholderText
+                    Accessible.labelledBy: authorImageLabel
                     placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current portrait" : "Choose or type an image path"
                     placeholderTextColor: root.hint
                     font.italic: text === ""
@@ -2397,11 +2685,11 @@ Item {
                       if (text.trim() !== "") root.clearMissingAuthorField("image")
                       if (root.notice === root.pickerUnavailableNotice || root.notice === root.pickerUnsupportedNotice) {
                         root.clearPickerNotice()
-                        if (activeFocus) root.reveal(authorImageField)
+                        if (activeFocus) root.reveal(authorImageField, authorImageLabel)
                       }
                       root.schedulePortraitPreview(text, false)
                     }
-                    onActiveFocusChanged: if (activeFocus) root.reveal(authorImageField)
+                    onActiveFocusChanged: if (activeFocus) root.reveal(authorImageField, authorImageLabel)
                   }
                   Rectangle {
                     anchors.fill: authorImageField
@@ -2417,6 +2705,7 @@ Item {
                   id: chooseImageButton
                   anchors.verticalCenter: parent.verticalCenter
                   label: "Choose image"
+                  revealLabel: authorImageLabel
                   available: !root.busy && !root.pickingImage
                   onActivated: root.chooseAuthorImage()
                 }
@@ -2479,14 +2768,22 @@ Item {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.bodySmall
                     wrapMode: Text.WordWrap
+                    Accessible.role: Accessible.AlertMessage
+                    Accessible.name: text
+                    readonly property string announcedText: root.opened && visible ? text : ""
+                    onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
                   }
                 }
               }
               Text {
+                id: authorCitationLabel
+                objectName: "authorCitationLabel"
                 text: root.editingAuthorSlug !== "" ? "Replacement citation (optional)" : "Citation"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               Item {
                 width: parent.width
@@ -2495,6 +2792,9 @@ Item {
                   id: authorCitationField
                   objectName: "authorCitationField"
                   width: parent.width
+                  Accessible.name: authorCitationLabel.text
+                  Accessible.description: placeholderText
+                  Accessible.labelledBy: authorCitationLabel
                   placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "Example: Lectures VI"
                   placeholderTextColor: root.hint
                   font.italic: text === ""
@@ -2505,7 +2805,7 @@ Item {
                     if (text.trim() !== "") root.clearMissingAuthorField("citation")
                     else if (root.editingAuthorSlug !== "" && root.newAuthorText.trim() === "") root.clearMissingAuthorField("text")
                   }
-                  onActiveFocusChanged: if (activeFocus) root.reveal(authorCitationField)
+                  onActiveFocusChanged: if (activeFocus) root.reveal(authorCitationField, authorCitationLabel)
                 }
                 Rectangle {
                   anchors.fill: parent
@@ -2518,15 +2818,20 @@ Item {
                 }
               }
               Text {
+                id: authorTextLabel
+                objectName: "authorTextLabel"
                 text: root.editingAuthorSlug !== "" ? "Replacement quote (optional)" : "Quote"
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
               }
               QuoteArea {
                 id: authorTextField
                 objectName: "authorTextField"
                 width: parent.width
+                labelItem: authorTextLabel
                 placeholderText: root.editingAuthorSlug !== "" ? "Leave empty to keep current quotes" : "Type the quote"
                 invalid: root.isAuthorFieldMissing("text")
                 onTextChanged: {
@@ -2539,6 +2844,7 @@ Item {
               }
               Rectangle {
                 id: advancedToggle
+                objectName: "advancedToggle"
                 visible: root.editingAuthorSlug === ""
                 implicitWidth: advancedLabel.implicitWidth + Style.space(8)
                 implicitHeight: advancedLabel.implicitHeight + Style.space(6)
@@ -2547,6 +2853,12 @@ Item {
                 border.width: activeFocus ? 2 : 0
                 border.color: Commons.Color.accent
                 activeFocusOnTab: true
+                Accessible.role: Accessible.Button
+                Accessible.name: "Advanced"
+                Accessible.expandable: true
+                Accessible.expanded: root.authorAdvancedOpen
+                Accessible.onPressAction: root.toggleAuthorAdvanced()
+                onActiveFocusChanged: if (activeFocus) root.reveal(advancedToggle)
                 Text {
                   id: advancedLabel
                   anchors.centerIn: parent
@@ -2554,22 +2866,18 @@ Item {
                   color: root.quiet
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
+                  Accessible.ignored: true
                 }
                 MouseArea {
                   id: advancedHover
                   anchors.fill: parent
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: {
-                    root.confirmRemoveAuthor = ""
-                    root.authorAdvancedOpen = !root.authorAdvancedOpen
-                    if (root.authorAdvancedOpen) Qt.callLater(function() { root.reveal(authorSlugField) })
-                  }
+                  onClicked: root.toggleAuthorAdvanced()
                 }
                 Keys.onPressed: function(event) {
                   if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    root.authorAdvancedOpen = !root.authorAdvancedOpen
-                    if (root.authorAdvancedOpen) Qt.callLater(function() { root.reveal(authorSlugField) })
+                    root.toggleAuthorAdvanced()
                     event.accepted = true
                   }
                 }
@@ -2580,10 +2888,14 @@ Item {
                 visible: root.editingAuthorSlug === "" && root.authorAdvancedOpen
                 spacing: Style.space(6)
                 Text {
+                  id: authorSlugLabel
+                  objectName: "authorSlugLabel"
                   text: "Author id"
                   color: root.quiet
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
+                  Accessible.role: Accessible.StaticText
+                  Accessible.name: text
                 }
                 Item {
                   width: parent.width
@@ -2592,6 +2904,9 @@ Item {
                     id: authorSlugField
                     objectName: "authorSlugField"
                     width: parent.width
+                    Accessible.name: authorSlugLabel.text
+                    Accessible.description: placeholderText
+                    Accessible.labelledBy: authorSlugLabel
                     placeholderText: root.derivedAuthorSlug !== "" ? ("From name: " + root.derivedAuthorSlug) : "Example: musonius"
                     placeholderTextColor: root.hint
                     font.italic: text === ""
@@ -2600,7 +2915,7 @@ Item {
                       root.customAuthorSlug = text
                       if (text.trim() !== "") root.clearMissingAuthorField("slug")
                     }
-                    onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField)
+                    onActiveFocusChanged: if (activeFocus) root.reveal(authorSlugField, authorSlugLabel)
                   }
                   Rectangle {
                     anchors.fill: parent
@@ -2617,6 +2932,7 @@ Item {
 
             Rectangle {
               id: customCountToggle
+              objectName: "customCountToggle"
               visible: root.custom.length > 0
               implicitWidth: customCountLabel.implicitWidth + Style.space(6)
               implicitHeight: customCountLabel.implicitHeight + Style.space(6)
@@ -2625,6 +2941,12 @@ Item {
               border.width: activeFocus ? 2 : 0
               border.color: Commons.Color.accent
               activeFocusOnTab: !root.authorOpen
+              Accessible.role: Accessible.Button
+              Accessible.name: root.custom.length === 1 ? "1 custom quote" : (root.custom.length + " custom quotes")
+              Accessible.expandable: true
+              Accessible.expanded: root.listOpen
+              Accessible.onPressAction: root.toggleCustomList()
+              onActiveFocusChanged: if (activeFocus) root.reveal(customCountToggle)
               Text {
                 id: customCountLabel
                 anchors.centerIn: parent
@@ -2632,20 +2954,18 @@ Item {
                 color: root.quiet
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
+                Accessible.ignored: true
               }
               MouseArea {
                 id: customCountHover
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                  root.confirmRemoveAuthor = ""
-                  root.listOpen = !root.listOpen
-                }
+                onClicked: root.toggleCustomList()
               }
               Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                  root.listOpen = !root.listOpen
+                  root.toggleCustomList()
                   event.accepted = true
                 }
               }
@@ -2672,6 +2992,7 @@ Item {
                   }
                   RingButton {
                     label: "Remove"
+                    accessibleName: "Remove " + root.authorDisplayNameBySlug(customRow.modelData.author, customRow.modelData.name) + ", " + customRow.modelData.citation
                     tabFocusable: !root.authorOpen
                     onActivated: root.removeQuote(customRow.modelData.id)
                   }
@@ -2684,6 +3005,8 @@ Item {
               width: parent.width
               implicitHeight: Style.font.bodySmall * 2 + Style.space(4)
               Text {
+                id: statusMessageText
+                objectName: "statusMessageText"
                 width: parent.width
                 text: root.statusText
                 color: root.errorShownInStatus ? Commons.Color.urgent : root.quiet
@@ -2692,6 +3015,10 @@ Item {
                 wrapMode: Text.WordWrap
                 maximumLineCount: 2
                 elide: Text.ElideRight
+                Accessible.role: root.errorShownInStatus ? Accessible.AlertMessage : Accessible.StaticText
+                Accessible.name: root.statusText
+                readonly property string announcedText: root.opened && text !== "" && text !== "Loading…" && text !== "Saving…" ? text : ""
+                onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, root.errorShownInStatus ? Accessible.Assertive : Accessible.Polite)
               }
             }
           }
@@ -2719,6 +3046,10 @@ Item {
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: text
+            readonly property string announcedText: root.opened && visible ? text : ""
+            onAnnouncedTextChanged: if (announcedText !== "") Accessible.announce(announcedText, Accessible.Assertive)
           }
 
           Row {
