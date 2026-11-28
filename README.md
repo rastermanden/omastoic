@@ -24,6 +24,11 @@ passes `--input` pointed at the same file and `--include-effects` with a calm
 effect set. The quote does not change while the overlay is up. This path does
 not need `ttfx`.
 
+Colours and background come from `omarchy-screensaver`, not from Omastoic, and
+do not follow the Omarchy theme yet: the saver draws on black in each effect's
+own palette, so Gruvbox, Latte and Tokyo Night look alike. Omastoic only writes
+the text (tracked in #109).
+
 **Terminal (older Omarchy).** The saver rereads the branding file between
 effects, and the service swaps the quote on your interval while a screensaver
 window is open. Audited on Omarchy 4.5.0rc3 against host
