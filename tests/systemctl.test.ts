@@ -329,6 +329,24 @@ test("setup on shell load avoids redundant enable/start/restart when already act
     expect(s.log()).toContain("restart omastoic-prune.path");
     expect(s.log()).not.toContain("enable --now omastoic-prune.path");
 
+    // When omastoic-prune.path is enabled but inactive, setup starts it without redundant enable or restart.
+    rmSync(join(s.home, "omastoic-prune.path.active"), { force: true });
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await setup(["setup", "--quiet"])).code).toBe(0);
+    expect(s.log()).toContain("start omastoic-prune.path");
+    expect(s.log()).not.toContain("enable ");
+    expect(s.log()).not.toContain("restart ");
+    expect(existsSync(join(s.home, "omastoic-prune.path.active"))).toBe(true);
+
+    // When omastoic-prune.path is active but disabled, setup enables it without redundant start or restart.
+    rmSync(join(s.home, "omastoic-prune.path.enabled"), { force: true });
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await setup(["setup", "--quiet"])).code).toBe(0);
+    expect(s.log()).toContain("enable omastoic-prune.path");
+    expect(s.log()).not.toContain("start ");
+    expect(s.log()).not.toContain("restart ");
+    expect(existsSync(join(s.home, "omastoic-prune.path.enabled"))).toBe(true);
+
     // When enabled but currently inactive, setup starts it without redundant enable or restart.
     rmSync(join(s.home, "omastoic.service.active"), { force: true });
     s.put(join(s.home, "systemctl.log"), "");
@@ -715,7 +733,7 @@ test("repeated prune.sh runs while disabled skip redundant disable calls once om
     expect((await s.prune()).code).toBe(0);
     expect(s.log()).toContain("disable --now omastoic.service");
 
-    // Second run while still disabled must not invoke disable again.
+    // Second run while still disabled must not invoke disable again once positively inactive+disabled.
     s.put(join(s.home, "systemctl.log"), "");
     expect((await s.prune()).code).toBe(0);
     expect(s.log()).not.toContain("disable --now omastoic.service");
@@ -723,3 +741,85 @@ test("repeated prune.sh runs while disabled skip redundant disable calls once om
     s.cleanup();
   }
 }, 15000);
+
+test("prune.sh fails closed on systemctl errors and non-inactive states instead of skipping disable", async () => {
+  const s = sandbox();
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+
+    // When systemctl fails (e.g. user bus unavailable), prune.sh must still attempt disable,
+    // exit non-zero, and keep written.sha and the owned unit record intact.
+    s.put(join(s.home, "systemctl.log"), "");
+    const failed = await s.prune({ SYSTEMCTL_FAIL: "--user" });
+    expect(failed.code).toBe(1);
+    expect(s.log()).toContain("disable --now omastoic.service");
+    expect(existsSync(join(s.state, "written.sha"))).toBe(true);
+    expect(existsSync(join(s.state, "owned/unit"))).toBe(true);
+
+    // When is-active reports activating (e.g. Restart=on-failure) and is-enabled reports linked,
+    // prune.sh must still call disable --now omastoic.service.
+    s.stub(
+      "systemctl",
+      `echo "$*" >> "$HOME/systemctl.log"
+if [[ " $* " == *" is-active "* ]]; then echo "activating"; exit 3; fi
+if [[ " $* " == *" is-enabled "* ]]; then echo "linked"; exit 1; fi
+exit 0`,
+    );
+    s.put(join(s.home, "systemctl.log"), "");
+    const activating = await s.prune();
+    expect(activating.code).toBe(0);
+    expect(s.log()).toContain("disable --now omastoic.service");
+  } finally {
+    s.cleanup();
+  }
+}, 15000);
+
+test("setup retries pending daemon-reload and omastoic-prune.path restart after a mid-upgrade systemctl failure", async () => {
+  const s = sandbox();
+  const prunePath = join(s.config, "systemd/user/omastoic-prune.path");
+  const legacyPrunePath = `[Unit]\nDescription=Watch for omastoic plugin removal\n\n[Path]\nPathChanged=${join(s.config, "omarchy/plugins")}\nUnit=omastoic-prune.service\n\n[Install]\nWantedBy=default.target\n`;
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+
+    // 1. Fail daemon-reload after owned.write() has already written the upgraded prune-path unit.
+    s.put(prunePath, legacyPrunePath);
+    rmSync(join(s.state, "owned/prune-path"), { force: true });
+    const failedReload = await s.cli(["setup", "--quiet"], { SYSTEMCTL_FAIL: "daemon-reload" });
+    expect(failedReload.code).toBe(1);
+
+    // Retry must still run daemon-reload even though owned.write() now sees identical bytes on disk.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+    expect(s.log()).toContain("daemon-reload");
+
+    // Once retry succeeded, a subsequent unchanged setup performs no mutating systemctl calls.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+    expect(s.log()).not.toContain("daemon-reload");
+    expect(s.log()).not.toContain("enable ");
+    expect(s.log()).not.toContain("start ");
+    expect(s.log()).not.toContain("restart ");
+
+    // 2. Fail restart omastoic-prune.path after daemon-reload succeeds; if the unit remains active,
+    // retry must still restart omastoic-prune.path without repeating daemon-reload.
+    s.put(prunePath, legacyPrunePath);
+    rmSync(join(s.state, "owned/prune-path"), { force: true });
+    const failedRestart = await s.cli(["setup", "--quiet"], { SYSTEMCTL_FAIL: "restart omastoic-prune.path" });
+    expect(failedRestart.code).toBe(1);
+    // Simulate omastoic-prune.path remaining active and enabled across the failed attempt.
+    s.put(join(s.home, "omastoic-prune.path.active"), "");
+    s.put(join(s.home, "omastoic-prune.path.enabled"), "");
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+    expect(s.log()).not.toContain("daemon-reload");
+    expect(s.log()).toContain("restart omastoic-prune.path");
+
+    // Subsequent unchanged setup makes zero mutating calls again.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["setup", "--quiet"])).code).toBe(0);
+    expect(s.log()).not.toContain("restart ");
+  } finally {
+    s.cleanup();
+  }
+});

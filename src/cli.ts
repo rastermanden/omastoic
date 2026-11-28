@@ -113,6 +113,8 @@ const USER_ART_DIR = join(USER_CONFIG, "art");
 const owned = new OwnedFiles(STATE);
 const DISPLACED = join(STATE, "displaced.kind");
 const PANEL_SIZE_FILE = join(STATE, "panel-size.json");
+const PENDING_RELOAD = join(STATE, "pending-daemon-reload");
+const PENDING_PRUNE_RESTART = join(STATE, "pending-prune-restart");
 
 async function bundledBook(): Promise<BundledQuote[]> {
   return indexBundled(parseQuotes(await Bun.file(join(ROOT, "data/quotes.tsv")).text()));
@@ -680,18 +682,25 @@ async function setup(opts: SetupOpts = {}): Promise<number> {
       if (id === "unit" && wrote) unitChanged = true;
       if (id === "prune-path" && wrote) prunePathChanged = true;
     }
+    if (unitFilesChanged) atomicWrite(PENDING_RELOAD, "1\n");
+    if (prunePathChanged) atomicWrite(PENDING_PRUNE_RESTART, "1\n");
     chmodSync(PRUNE_SCRIPT, 0o755);
     await addMenuRows(opts.quiet);
-    if (unitFilesChanged) await checkedSystemctl(["daemon-reload"]);
+    if (unitFilesChanged || existsSync(PENDING_RELOAD)) {
+      await checkedSystemctl(["daemon-reload"]);
+      rmSync(PENDING_RELOAD, { force: true });
+    }
+    const needsPruneRestart = prunePathChanged || existsSync(PENDING_PRUNE_RESTART);
     const pruneActive = isUnitActive("omastoic-prune.path");
     const pruneEnabled = isUnitEnabled("omastoic-prune.path");
     if (!pruneEnabled && !pruneActive) {
       await checkedSystemctl(["enable", "--now", "omastoic-prune.path"]);
     } else {
       if (!pruneEnabled) await checkedSystemctl(["enable", "omastoic-prune.path"]);
-      if (prunePathChanged && pruneActive) await checkedSystemctl(["restart", "omastoic-prune.path"]);
+      if (needsPruneRestart && pruneActive) await checkedSystemctl(["restart", "omastoic-prune.path"]);
       else if (!pruneActive) await checkedSystemctl(["start", "omastoic-prune.path"]);
     }
+    rmSync(PENDING_PRUNE_RESTART, { force: true });
     if (opts.onFirst && first) {
       const code = await on();
       if (code) throw new Error("could not activate the Stoics");

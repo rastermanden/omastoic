@@ -120,13 +120,19 @@ run_systemctl() {
   systemctl "$@"
 }
 
-unit_active_or_enabled() {
+unit_needs_disable() {
   if should_skip_systemctl; then return 1; fi
-  systemctl --user is-active --quiet "$1" 2>/dev/null || systemctl --user is-enabled --quiet "$1" 2>/dev/null
+  local active_state enabled_state
+  active_state=$(systemctl --user is-active "$1" 2>/dev/null || true)
+  enabled_state=$(systemctl --user is-enabled "$1" 2>/dev/null || true)
+  case "$active_state:$enabled_state" in
+    inactive:disabled|inactive:not-found|failed:disabled|failed:not-found) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 # Fail loudly and retain units/records if systemd cannot stop the service.
-if owns unit "$UNIT" && unit_active_or_enabled omastoic.service; then run_systemctl --user disable --now omastoic.service; fi
+if owns unit "$UNIT" && unit_needs_disable omastoic.service; then run_systemctl --user disable --now omastoic.service; fi
 if command -v omarchy-toggle >/dev/null 2>&1; then omarchy-toggle omastoic off; fi
 
 still_ours() {
