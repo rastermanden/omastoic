@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+import { compose } from "../src/canvas.ts";
 import {
   cleanTranscodeError,
   isPhotographicPgm,
@@ -1063,3 +1064,179 @@ test.skipIf(!hasImageMagick)("transcodePortrait routes photo PNGs through halfto
     s.cleanup();
   }
 }, 20000);
+
+function brailleMetrics(art: string): {
+  cols: number;
+  rows: number;
+  minLead: number;
+  inkCols: number;
+  centerDotDensity: number;
+  borderFillRate: number;
+} {
+  const lines = art.replace(/\n+$/, "").split("\n");
+  const rows = lines.length;
+  const cols = Math.max(0, ...lines.map((line) => [...line].length));
+  let minLead = Infinity;
+  let minC = cols;
+  let maxC = -1;
+  const c0 = Math.floor(cols / 3);
+  const c1 = Math.ceil((cols * 2) / 3);
+  const r0 = Math.floor(rows / 3);
+  const r1 = Math.ceil((rows * 2) / 3);
+  let ctrDots = 0;
+  let ctrCells = 0;
+  let bdrFilled = 0;
+  let bdrCells = 0;
+  for (let r = 0; r < rows; r++) {
+    const chars = [...(lines[r] ?? "")];
+    const firstInk = chars.findIndex((ch) => (ch.codePointAt(0) ?? 0) >= 0x2801);
+    if (firstInk !== -1 && firstInk < minLead) minLead = firstInk;
+    for (let c = 0; c < cols; c++) {
+      const cp = (chars[c] ?? " ").codePointAt(0) ?? 0;
+      const bits = cp >= 0x2800 && cp <= 0x28ff ? cp - 0x2800 : 0;
+      if (bits !== 0) {
+        if (c < minC) minC = c;
+        if (c > maxC) maxC = c;
+      }
+      let dots = 0;
+      for (let b = bits; b; b &= b - 1) dots += 1;
+      if (c >= c0 && c < c1 && r >= r0 && r < r1) {
+        ctrCells += 1;
+        ctrDots += dots;
+      }
+      if (r < 2 || c < 2 || c >= cols - 2) {
+        bdrCells += 1;
+        if (bits !== 0) bdrFilled += 1;
+      }
+    }
+  }
+  return {
+    cols,
+    rows,
+    minLead: Number.isFinite(minLead) ? minLead : 0,
+    inkCols: maxC >= minC ? maxC - minC + 1 : 0,
+    centerDotDensity: ctrDots / Math.max(1, ctrCells * 8),
+    borderFillRate: bdrFilled / Math.max(1, bdrCells),
+  };
+}
+
+test("pgmToHalftoneBraille keeps dark-background halo portraits detailed without lighting the outer border", () => {
+  // Locke-class dark baroque portrait: dark backdrop (~26), a localized warm halo
+  // peeking into the side border (driving p85 high while p50..p75 stay dark),
+  // a lit oval face with eye cutouts, hair, and wider shoulders/collar below.
+  const haloPgm = makePgm(136, 160, (x, y) => {
+    const dx = x - 68;
+    const dy = y - 46;
+    const leftEye = (x - 62) ** 2 + (y - 43) ** 2 <= 5;
+    const rightEye = (x - 74) ** 2 + (y - 43) ** 2 <= 5;
+    if (leftEye || rightEye) return 28;
+    if ((dx * dx) / (15 * 15) + (dy * dy) / (20 * 20) <= 1) {
+      return Math.max(110, Math.min(220, Math.round(212 - Math.hypot(dx, dy) * 3.0)));
+    }
+    // Mid-tone hair framing the face, narrower at the crown
+    if ((dx * dx) / (20 * 20) + ((y - 50) ** 2) / (22 * 22) <= 1) {
+      return Math.max(82, Math.round(118 - Math.hypot(dx, y - 50) * 1.1));
+    }
+    // Bright cravat/collar and wider mid-tone shoulders below (real head-and-shoulders silhouette)
+    if (y >= 70 && y <= 104 && Math.abs(dx) <= 11) {
+      return Math.round(182 - Math.abs(dx) * 6);
+    }
+    if (y >= 78 && y <= 120) {
+      const shoulderW = 18 + Math.min(26, (y - 78) * 0.9);
+      if (Math.abs(dx) <= shoulderW) {
+        return Math.max(68, Math.round(108 - (Math.abs(dx) / shoulderW) * 34));
+      }
+    }
+    // Localized warm background halo behind the left side of the head (pushes border p85 up)
+    const haloDist = Math.hypot((x - 36) / 22, (y - 60) / 18);
+    if (haloDist < 1) return Math.round(26 + (1 - haloDist) * 56);
+    return 26;
+  });
+
+  const art = pgmToHalftoneBraille(haloPgm);
+  const m = brailleMetrics(art);
+  expect(m.rows).toBeLessThanOrEqual(PORTRAIT_ROWS);
+  expect(m.cols).toBeLessThanOrEqual(PORTRAIT_COLS);
+  expect(m.minLead).toBe(0);
+  expect(m.inkCols).toBeGreaterThanOrEqual(25);
+  expect(m.centerDotDensity).toBeGreaterThanOrEqual(0.35);
+  expect(m.borderFillRate).toBeLessThan(0.2);
+});
+
+test("pgmToHalftoneBraille preserves both lit and shaded halves on chiaroscuro dark-background portraits", () => {
+  // Hume-class chiaroscuro portrait: dark backdrop (~24), bright left face (~185),
+  // shaded right cheek (~96), and distinct eye cutouts on both sides.
+  const chiaroscuroPgm = makePgm(136, 160, (x, y) => {
+    const dx = x - 68;
+    const dy = y - 56;
+    if ((x - 56) ** 2 + (y - 50) ** 2 <= 14 || (x - 80) ** 2 + (y - 50) ** 2 <= 14) return 24;
+    if ((dx * dx) / (28 * 28) + (dy * dy) / (36 * 36) <= 1) {
+      const sideShade = dx < 0 ? 190 - Math.abs(dx) * 1.4 : 148 - dx * 2.1;
+      return Math.max(78, Math.min(215, Math.round(sideShade - Math.abs(dy) * 0.7)));
+    }
+    if (y >= 98 && Math.abs(dx) <= 44) return 110;
+    return 24;
+  });
+
+  const art = pgmToHalftoneBraille(chiaroscuroPgm);
+  const m = brailleMetrics(art);
+  expect(m.rows).toBeLessThanOrEqual(PORTRAIT_ROWS);
+  expect(m.cols).toBeLessThanOrEqual(PORTRAIT_COLS);
+  expect(m.minLead).toBe(0);
+
+  const lines = art.split("\n");
+  const faceRows = lines.slice(Math.floor(m.rows * 0.25), Math.ceil(m.rows * 0.7));
+  const midCol = Math.floor(m.cols / 2);
+  let leftFaceInk = 0;
+  let rightFaceInk = 0;
+  for (const row of faceRows) {
+    const chars = [...row];
+    for (let c = 0; c < chars.length; c++) {
+      if ((chars[c]!.codePointAt(0) ?? 0) < 0x2801) continue;
+      if (c < midCol) leftFaceInk += 1;
+      else rightFaceInk += 1;
+    }
+  }
+  expect(leftFaceInk).toBeGreaterThan(20);
+  expect(rightFaceInk).toBeGreaterThan(20);
+  expect(lines[0]!.startsWith("⣿")).toBe(false);
+});
+
+test("pgmToHalftoneBraille trims common leading blank columns and centres cleanly in canvas and panel preview", () => {
+  const shiftedPgm = makePgm(136, 160, (x, y) => {
+    // Narrow bright head shifted right so the raw 34-col render would carry leading blank columns.
+    const dx = x - 86;
+    const dy = y - 58;
+    if ((x - 79) ** 2 + (y - 52) ** 2 <= 9 || (x - 93) ** 2 + (y - 52) ** 2 <= 9) return 20;
+    if ((dx * dx) / (18 * 18) + (dy * dy) / (26 * 26) <= 1) {
+      return Math.max(100, Math.min(215, Math.round(205 - Math.hypot(dx, dy) * 2.2)));
+    }
+    return 20;
+  });
+
+  const art = pgmToHalftoneBraille(shiftedPgm);
+  const m = brailleMetrics(art);
+  expect(m.minLead).toBe(0);
+  expect(m.cols).toBe(m.inkCols);
+  expect(m.cols).toBeLessThanOrEqual(PORTRAIT_COLS);
+  expect(m.rows).toBeLessThanOrEqual(PORTRAIT_ROWS);
+
+  const preview = panelPreviewPortrait(art);
+  expect(preview).not.toContain(" ");
+  const previewLines = preview.split("\n");
+  expect(new Set(previewLines.map((line) => [...line].length)).size).toBe(1);
+  expect([...previewLines[0]!].length).toBe(m.inkCols);
+
+  const plate = compose(
+    { id: "c01", author: "locke", citation: "Essay, II.i", text: "No man's knowledge here can go beyond his experience." },
+    { slug: "locke", name: "John Locke", dates: "1632 – 1704" },
+    { cols: 100, rows: 30, art: art.split("\n") },
+  );
+  expect(plate).toContain("J O H N   L O C K E");
+  expect(plate).toContain("1632 – 1704");
+  expect(plate).toMatch(/[\u2801-\u28ff]/);
+
+  // Shipped art/*.txt portraits remain untouched by halftone leading-column trimming.
+  const marcusShipped = readFileSync(join(root, "art/marcus.txt"), "utf8");
+  expect(panelPreviewPortrait(marcusShipped).split("\n").length).toBeLessThanOrEqual(PORTRAIT_ROWS);
+});

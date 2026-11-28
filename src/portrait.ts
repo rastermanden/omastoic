@@ -624,10 +624,26 @@ function findHeadCrop(
   return { x0, y0, cropW, cropH };
 }
 
+function trimLeadingBlankColumns(art: string): string {
+  if (!art) return "";
+  const lines = art.split("\n");
+  let minLead = Infinity;
+  for (const line of lines) {
+    const chars = [...line];
+    const firstInk = chars.findIndex((ch) => ch !== " " && ch !== "\u2800");
+    if (firstInk !== -1 && firstInk < minLead) minLead = firstInk;
+  }
+  if (!Number.isFinite(minLead) || minLead <= 0) return art;
+  return lines
+    .map((line) => [...line].slice(minLead).join("").replace(/[ \u2800]+$/u, ""))
+    .join("\n");
+}
+
 /**
  * Convert a continuous-tone grayscale PGM into 34x20 braille art via
  * head-and-shoulders framing, local contrast sharpening, dark/light-background-aware
- * levels, a soft corner vignette, and Atkinson halftone dithering.
+ * levels, a soft corner vignette, Atkinson halftone dithering, and common
+ * leading-blank column trimming so the inked portrait centres cleanly.
  */
 export function pgmToHalftoneBraille(input: string | ParsedPgm): string {
   const { width: w, height: h, values } = asParsedPgm(input);
@@ -666,6 +682,7 @@ export function pgmToHalftoneBraille(input: string | ParsedPgm): string {
 
   const cb = sampleBorder(smooth, workW, workH);
   const cropBMed = cb[Math.floor(cb.length / 2)]!;
+  const cropB75 = cb[Math.floor(cb.length * 0.75)]!;
   const cropB85 = cb[Math.floor(cb.length * 0.85)]!;
   const cropB15 = cb[Math.floor(cb.length * 0.15)]!;
   const cropBSpread = cropB85 - cropB15;
@@ -688,9 +705,11 @@ export function pgmToHalftoneBraille(input: string | ParsedPgm): string {
   let blackPt: number;
   let whitePt: number;
   if (isDarkBg) {
-    const safeBorderHi = Math.min(cropB85, cropBMed + 36);
-    const bgFloor = safeBorderHi + Math.max(8, Math.min(24, cropBSpread * 0.35));
-    blackPt = Math.min(p03 + span * 0.45, Math.max(bgFloor, p03 + span * 0.14));
+    // Use lower border quantiles (p50..p75) so uneven halos behind the head do not clip mid-tone faces.
+    const upperSpread = Math.max(0, cropB75 - cropBMed);
+    const bgFloor = cropBMed + Math.max(14, Math.min(36, upperSpread * 0.7 + 14));
+    const darkCap = Math.min(p03 + span * 0.45, Math.max(cropBMed + 38, otsu * 0.65));
+    blackPt = Math.min(darkCap, Math.max(bgFloor, p03 + span * 0.12));
     whitePt = Math.max(blackPt + 24, p97);
   } else {
     const safeBorderLo = Math.max(cropB15, cropBMed - 36);
@@ -711,12 +730,12 @@ export function pgmToHalftoneBraille(input: string | ParsedPgm): string {
       ) / 4;
       let t = Math.max(0, Math.min(1, (v - blackPt) / (whitePt - blackPt)));
       if (!isDarkBg) t = 1 - t;
-      t = Math.pow(t, 1.12);
-      const nx = (x + 0.5 - dstW / 2) / (dstW * 0.53);
-      const ny = (y + 0.5 - dstH / 2) / (dstH * 0.53);
+      t = Math.pow(t, isDarkBg ? 1.12 : 0.88);
+      const nx = (x + 0.5 - dstW / 2) / (dstW * 0.56);
+      const ny = (y + 0.5 - dstH / 2) / (dstH * 0.54);
       const r = Math.hypot(nx, ny);
-      if (r > 0.85) {
-        const fade = Math.max(0, 1 - (r - 0.85) / 0.25);
+      if (r > 0.86) {
+        const fade = Math.max(0, 1 - (r - 0.86) / 0.25);
         t *= fade * fade * (3 - 2 * fade);
       }
       grid[y * dstW + x] = t;
@@ -742,7 +761,7 @@ export function pgmToHalftoneBraille(input: string | ParsedPgm): string {
       if (y + 2 < dstH) buf[idx + dstW * 2]! += err;
     }
   }
-  return pbmToBraille(`P1\n${dstW} ${dstH}\n${bits.join("")}`);
+  return trimLeadingBlankColumns(pbmToBraille(`P1\n${dstW} ${dstH}\n${bits.join("")}`));
 }
 
 /**
