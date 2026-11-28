@@ -47,6 +47,10 @@ for (const failure of ["completion conflict", "enable --now omastoic-prune.path"
       const marker = readFileSync(join(s.state, "installed"), "utf8");
       const originalCompletion = readFileSync(completion, "utf8");
       if (failure === "completion conflict") s.put(completion, "user completion\n");
+      else {
+        rmSync(join(s.home, "omastoic-prune.path.active"), { force: true });
+        rmSync(join(s.home, "omastoic-prune.path.enabled"), { force: true });
+      }
       const failed = await s.cli(["setup", "--on-first", "--quiet"], failure === "completion conflict" ? {} : { SYSTEMCTL_FAIL: failure });
       expect(failed.code).toBe(1);
       expect(readFileSync(join(s.state, "installed"), "utf8")).toBe(marker);
