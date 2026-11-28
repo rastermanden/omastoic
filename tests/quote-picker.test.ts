@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { EventEmitter } from "node:events";
 import { pickQuotes, pickQuotesPlain, pickQuotesTui, quoteChoiceLabel } from "../src/quote-picker.ts";
+import { cellWidth } from "../src/canvas.ts";
 
 const rows = [
   { id: "q01", citation: "Meditations II.5", text: "Say only what your nature tells you." },
@@ -466,4 +467,62 @@ test("a Stoic with no quotes still draws a row and saves an empty set", async ()
   h.send("\r");
   expect(await picked).toEqual([]);
   expect(h.text()).toContain("(no quotes)");
+});
+
+test("quote picker fits 40, 60, 80 and 120 columns by display width and redraws cleanly", async () => {
+  const wideQuotes = [
+    ...rows,
+    { id: "c01", citation: "論語 第二章", text: "知之為知之不知為不知是知也學而不思則罔思而不學則殆" },
+  ];
+  const parseFrame = (raw: string) => raw.replace(/\x1b\[\d*A/g, "").replace(/\r/g, "").split("\n");
+
+  for (const cols of [40, 60, 80, 120]) {
+    const h = harness({ columns: cols, rows: 24 });
+    const picked = pickQuotesTui("Lucius Annaeus Seneca the Younger", wideQuotes, null, h.io);
+    h.send(" ");
+    h.send("\r");
+    expect(await picked).toEqual(wideQuotes.slice(1).map((r) => r.id));
+
+    const parts = h.text().split("\x1b[J");
+    const first = parseFrame(parts[1]!);
+    const second = parseFrame(parts[2]!);
+    expect(first.length).toBe(second.length);
+    for (const line of [...first, ...second]) {
+      expect(cellWidth(line), `${cols} cols: ${line}`).toBeLessThanOrEqual(cols - 1);
+    }
+    const cjkRow = first.find((line) => line.includes("4 [x]"))!;
+    if (cols <= 60) expect(cjkRow.endsWith("…")).toBe(true);
+
+    const upOnRedraw = /\x1b\[(\d+)A\r$/.exec(parts[1]!);
+    const upOnClear = /\x1b\[(\d+)A\r$/.exec(parts[2]!);
+    expect(Number(upOnRedraw?.[1])).toBe(first.length - 1);
+    expect(Number(upOnClear?.[1])).toBe(second.length - 1);
+
+    const joined = first.join(" ");
+    for (const hint of ["space/x/tab toggle", "1-9", "j/k", "/ filter", "a all", "n none", "enter save", "q cancel"]) {
+      expect(joined, `${cols} cols`).toContain(hint);
+    }
+    if (cols >= 80) {
+      expect(first.at(-1)).toBe("space/x/tab toggle, 1-9, j/k, / filter, a all, n none, enter save, q cancel");
+    }
+  }
+
+  // Narrow + short terminal keeps every frame within both width and height, and resize 40 -> 80 -> 40 matches cursor-up.
+  const narrowShort = harness({ columns: 40, rows: 6 });
+  const shortPick = pickQuotesTui("Marcus Aurelius", many, [], narrowShort.io);
+  narrowShort.send(" ");
+  narrowShort.setColumns(80);
+  narrowShort.resize();
+  narrowShort.setColumns(40);
+  narrowShort.resize();
+  narrowShort.send("\r");
+  expect(await shortPick).toEqual(["q01"]);
+  const parts = narrowShort.text().split("\x1b[J").slice(1, -1);
+  expect(parts.length).toBe(4);
+  for (const part of parts) {
+    const drawn = parseFrame(part);
+    expect(drawn.length).toBeLessThanOrEqual(6);
+    const up = /\x1b\[(\d+)A\r$/.exec(part);
+    expect(Number(up?.[1])).toBe(drawn.length - 1);
+  }
 });

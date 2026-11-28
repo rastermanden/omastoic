@@ -115,6 +115,21 @@ export function wrap(text: string, width: number): string[] {
   return lines;
 }
 
+/** Display-cell-aware single-line truncation with `…`, never splitting a grapheme. */
+export function truncateCells(text: string, maxWidth: number): string {
+  if (!Number.isInteger(maxWidth) || maxWidth < 1) return "";
+  if (cellWidth(text) <= maxWidth) return text;
+  if (maxWidth === 1) return "…";
+  const budget = maxWidth - 1;
+  let out = "";
+  for (const { segment } of graphemes.segment(text)) {
+    if (cellWidth(out + segment) > budget) break;
+    out += segment;
+  }
+  const trimmed = out.replace(/ +$/, "");
+  return `${trimmed.length ? trimmed : out}…`;
+}
+
 const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - cellWidth(s)));
 const centre = (s: string, w: number) => pad(" ".repeat(Math.max(0, Math.floor((w - cellWidth(s)) / 2))) + s, w);
 const right = (s: string, w: number) => pad(" ".repeat(Math.max(0, w - cellWidth(s))) + s, w);

@@ -255,3 +255,87 @@ test("status keeps count and portrait columns aligned with long and wide custom 
     expect(renderedNames.map((n) => n.replace(/\s+/g, ""))).toContain(unbrokenName);
   } finally { s.cleanup(); }
 });
+
+test("status fits 40, 60, 80 and 120 column TTYs while keeping 120-col and piped output unchanged", async () => {
+  const s = sandbox();
+  const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
+  const longName = "Lucius Annaeus Seneca the Younger of Corduba in Hispania";
+  const cjkName = "孔子孟子老子莊子荀子墨子";
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(
+      join(s.config, "omastoic/authors.tsv"),
+      `seneca-corduba\t${longName}\tc. 4 BC – AD 65\nkongzi\t${cjkName}\t551 – 479 BC\n`,
+    );
+    s.put(
+      join(s.config, "omastoic/quotes.tsv"),
+      "seneca-corduba\tLetters I.1\tWe suffer more often in imagination than in reality.\n" +
+      "kongzi\tAnalects II.17\tReal knowledge is to know the extent of one's ignorance.\n",
+    );
+
+    const piped = await s.cli(["status"]);
+    expect(piped.code).toBe(0);
+    expect(piped.stderr).toBe("");
+
+    for (const cols of [40, 60, 80, 120]) {
+      const tty = await pty(s, ["status"], [], { NO_COLOR: "1", TERM: "xterm-256color", PTY_COLS: String(cols), PTY_ROWS: "24" });
+      expect(tty.code, `${cols} cols`).toBe(0);
+      const plain = stripAnsi(tty.stdout).replace(/\r\n/g, "\n");
+      const lines = plain.trimEnd().split("\n");
+
+      for (const line of lines) {
+        expect(cellWidth(line), `${cols} cols: ${line}`).toBeLessThanOrEqual(cols);
+      }
+
+      // Column alignment for author counts and portrait status stays intact at every width.
+      const headerIdx = lines.findIndex((line) => /^\d+ quotes?:$/.test(line));
+      expect(headerIdx, `${cols} cols`).toBeGreaterThan(0);
+      const bookRows = lines.slice(headerIdx + 1);
+      const dataRows = bookRows.filter((line) => /\s+\d+\s+(?:no )?portrait$/.test(line));
+      expect(dataRows.length).toBeGreaterThan(1);
+      const countEnds = new Set<number>();
+      const artStarts = new Set<number>();
+      for (const row of dataRows) {
+        const match = /^(.*?\s+\d+)(\s+)((?:no )?portrait)$/.exec(row);
+        expect(match, row).not.toBeNull();
+        countEnds.add(cellWidth(match![1]!));
+        artStarts.add(cellWidth(match![1]! + match![2]!));
+      }
+      expect(countEnds.size, `${cols} cols`).toBe(1);
+      expect(artStarts.size, `${cols} cols`).toBe(1);
+
+      // Full long name survives indented wrapping.
+      const rebuiltNames: string[] = [];
+      for (const row of bookRows) {
+        if (row.startsWith("    ")) {
+          rebuiltNames[rebuiltNames.length - 1] += ` ${row.trim()}`;
+        } else {
+          const match = /^  (.*?)\s+\d+\s+(?:no )?portrait$/.exec(row);
+          if (match) rebuiltNames.push(match[1]!);
+        }
+      }
+      expect(rebuiltNames, `${cols} cols`).toContain(longName);
+      expect(rebuiltNames.map((name) => name.replace(/\s+/g, "")), `${cols} cols`).toContain(cjkName);
+
+      if (cols === 40 || cols === 60) {
+        // `backend:` wraps onto a continuation line with a 10-space hanging indent.
+        const backendIdx = lines.findIndex((line) => line.startsWith("backend:  "));
+        expect(backendIdx, `${cols} cols`).toBeGreaterThan(0);
+        expect(lines[backendIdx + 1]?.startsWith("          "), `${cols} cols`).toBe(true);
+      }
+
+      if (cols === 120) {
+        // At 120 columns, output is byte-for-byte identical to piped output.
+        expect(plain).toBe(piped.stdout);
+      }
+    }
+
+    // Narrow TTY also wraps long summary lines and --verbose fields cleanly within 40 cols.
+    expect((await s.cli(["config", "--authors", "marcus,seneca", "--interval", "90"])).code).toBe(0);
+    const verbose40 = await pty(s, ["status", "--verbose"], [], { NO_COLOR: "", TERM: "xterm-256color", PTY_COLS: "40", PTY_ROWS: "24" });
+    expect(verbose40.code).toBe(0);
+    for (const line of stripAnsi(verbose40.stdout).replace(/\r\n/g, "\n").trimEnd().split("\n")) {
+      expect(cellWidth(line), `verbose 40 cols: ${line}`).toBeLessThanOrEqual(40);
+    }
+  } finally { s.cleanup(); }
+});

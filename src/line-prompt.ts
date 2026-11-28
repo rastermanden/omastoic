@@ -4,6 +4,7 @@
 // terminal can still finish the flow.
 
 import { ChunkSource, rawTtyUsable, writeTerminal, type PickerIo } from "./author-picker.ts";
+import { truncateCells } from "./canvas.ts";
 
 export type LinePrompt = { header: string; value?: string; charLimit?: number };
 
@@ -23,7 +24,7 @@ type Frame = {
 
 function clip(text: string, columns: number | undefined): string {
   const width = Number.isInteger(columns) && (columns ?? 0) > 4 ? (columns as number) - 1 : FALLBACK_COLUMNS - 1;
-  return text.length > width ? text.slice(0, width) : text;
+  return truncateCells(text, width);
 }
 
 /**
@@ -58,14 +59,14 @@ function startFrame(io: PickerIo, redraw: () => void): Frame {
   return {
     source,
     draw(lines) {
-      const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
+      const up = drawn > 1 ? `\x1b[${drawn - 1}A` : "";
       drawn = lines.length;
       writeTerminal(output, `${up}\r\x1b[J${lines.join("\n")}`);
     },
     done() {
       if (ownsSource) source.close();
       try {
-        const up = drawn > 0 ? `\x1b[${drawn - 1}A` : "";
+        const up = drawn > 1 ? `\x1b[${drawn - 1}A` : "";
         writeTerminal(output, `${up}\r\x1b[J${SHOW_CURSOR}`);
       } catch { /* the tty is already gone */ }
       if (!wasRaw) {
@@ -286,7 +287,7 @@ export async function askText(prompt: LinePrompt, io: PickerIo): Promise<string 
   let text = prompt.value ?? "";
   let frame: Frame;
   const redraw = () => {
-    const lines = [`${prompt.header}:`, ...text.split("\n").map((line) => clip(`| ${line}`, output.columns))];
+    const lines = [clip(`${prompt.header}:`, output.columns), ...text.split("\n").map((line) => clip(`| ${line}`, output.columns))];
     frame.draw(lines);
   };
   frame = startFrame(io, redraw);
