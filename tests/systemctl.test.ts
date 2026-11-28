@@ -298,13 +298,36 @@ test("setup on shell load avoids redundant enable/start/restart when already act
     expect(existsSync(join(s.home, "omastoic.service.active"))).toBe(true);
     expect(existsSync(join(s.home, "omastoic.service.enabled"))).toBe(true);
 
-    // Unchanged shell reloads (both --on-first and plain setup) must not enable, start, or restart omastoic.service.
+    // Unchanged shell reloads (both --on-first and plain setup) must not enable, start, restart, or daemon-reload any unit.
     s.put(join(s.home, "systemctl.log"), "");
     expect((await setup(["setup", "--on-first", "--quiet"])).code).toBe(0);
     expect((await setup(["setup", "--quiet"])).code).toBe(0);
-    expect(s.log()).not.toContain("enable omastoic.service");
-    expect(s.log()).not.toContain("start omastoic.service");
-    expect(s.log()).not.toContain("restart omastoic.service");
+    expect(s.log()).not.toContain("enable ");
+    expect(s.log()).not.toContain("start ");
+    expect(s.log()).not.toContain("restart ");
+    expect(s.log()).not.toContain("daemon-reload");
+
+    // Updating a non-unit owned artifact (shell completion) does not trigger daemon-reload.
+    const bashCompletion = join(s.data, "bash-completion/completions/omastoic");
+    const prevCompletion = readFileSync(bashCompletion, "utf8");
+    s.put(join(copy, "completions/omastoic.bash"), `${readFileSync(join(copy, "completions/omastoic.bash"), "utf8")}\n# completion tweak\n`);
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await setup(["setup", "--quiet"])).code).toBe(0);
+    expect(readFileSync(bashCompletion, "utf8")).not.toBe(prevCompletion);
+    expect(s.log()).not.toContain("daemon-reload");
+    expect(s.log()).not.toContain("enable ");
+    expect(s.log()).not.toContain("restart ");
+
+    // Upgrading omastoic-prune.path while active runs daemon-reload and restarts the path unit.
+    const prunePath = join(s.config, "systemd/user/omastoic-prune.path");
+    const legacyPrunePath = `[Unit]\nDescription=Watch for omastoic plugin removal\n\n[Path]\nPathChanged=${join(s.config, "omarchy/plugins")}\nUnit=omastoic-prune.service\n\n[Install]\nWantedBy=default.target\n`;
+    s.put(prunePath, legacyPrunePath);
+    rmSync(join(s.state, "owned/prune-path"), { force: true });
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await setup(["setup", "--quiet"])).code).toBe(0);
+    expect(s.log()).toContain("daemon-reload");
+    expect(s.log()).toContain("restart omastoic-prune.path");
+    expect(s.log()).not.toContain("enable --now omastoic-prune.path");
 
     // When enabled but currently inactive, setup starts it without redundant enable or restart.
     rmSync(join(s.home, "omastoic.service.active"), { force: true });
@@ -622,3 +645,81 @@ assert_true should_skip_systemctl
     s.cleanup();
   }
 });
+
+test("native backend ignores interval changes for daemon restarts while still restarting on rotation changes", async () => {
+  const s = sandbox();
+  s.stub("omarchy-launch-screensaver", "# /usr/lib/omarchy-screensaver/omarchy-screensaver\nexit 0");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect(existsSync(join(s.home, "omastoic.service.active"))).toBe(true);
+
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["config", "--interval", "90"])).code).toBe(0);
+    expect((await s.cli(["panel", "apply", JSON.stringify({ interval: 120 })])).code).toBe(0);
+    expect(s.log()).not.toContain("restart omastoic.service");
+
+    // Active rotation changes on native backend still restart the active daemon.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["config", "--authors", "marcus"])).code).toBe(0);
+    expect(s.log()).toContain("restart omastoic.service");
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("case-only display-name edits on a selected author do not restart omastoic.service", async () => {
+  const s = sandbox();
+  const pngA = join(s.home, "a.png");
+  writeTestPng(pngA, 220, "box");
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    expect(
+      (
+        await s.cli([
+          "config",
+          "--add-author",
+          "musonius",
+          "--name",
+          "Musonius Rufus",
+          "--image",
+          pngA,
+          "--citation",
+          "Lectures VI",
+          "--text",
+          "Case test line.",
+        ])
+      ).code,
+    ).toBe(0);
+    expect((await s.cli(["config", "--authors", "musonius"])).code).toBe(0);
+
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["config", "--replace-author", "musonius", "--name", "MUSONIUS RUFUS"])).code).toBe(0);
+    expect(s.log()).not.toContain("restart omastoic.service");
+
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.cli(["config", "--replace-author", "musonius", "--name", "C. Musonius Rufus"])).code).toBe(0);
+    expect(s.log()).toContain("restart omastoic.service");
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("repeated prune.sh runs while disabled skip redundant disable calls once omastoic.service is stopped", async () => {
+  const s = sandbox();
+  try {
+    expect((await s.cli(["setup", "--on-first", "--quiet"])).code).toBe(0);
+    s.put(join(s.config, "omarchy/shell.json"), '{"plugins":[]}');
+
+    // First run after host disable stops and disables the active service.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.prune()).code).toBe(0);
+    expect(s.log()).toContain("disable --now omastoic.service");
+
+    // Second run while still disabled must not invoke disable again.
+    s.put(join(s.home, "systemctl.log"), "");
+    expect((await s.prune()).code).toBe(0);
+    expect(s.log()).not.toContain("disable --now omastoic.service");
+  } finally {
+    s.cleanup();
+  }
+}, 15000);
