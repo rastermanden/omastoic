@@ -1375,6 +1375,41 @@ function jpegWithMidScanCorruptionBeforeEoi(source: Buffer): Buffer {
   throw new Error("expected SOS marker 0xFF 0xDA in JPEG fixture");
 }
 
+/** Zero the tail of a progressive scan followed by DHT from 20% onward so libjpeg finishes MCUs early and warns only before 0xC4. */
+function jpegWithMidScanCorruptionBeforeDht(source: Buffer): Buffer {
+  let pos = 2; // Skip SOI (0xFF 0xD8).
+  let scanStart: number | null = null;
+  while (pos + 1 < source.length) {
+    if (source[pos] !== 0xff) { pos++; continue; }
+    const markerPos = pos;
+    while (pos < source.length && source[pos] === 0xff) pos++;
+    if (pos >= source.length) break;
+    const marker = source[pos]!;
+    if (marker === 0x00 || (marker >= 0xd0 && marker <= 0xd7)) { pos++; continue; } // Stuffed 0xFF or RST inside scan.
+    if (scanStart !== null) {
+      if (marker === 0xc4) {
+        const scanLen = markerPos - scanStart;
+        const corrupted = Buffer.from(source);
+        const offset = scanStart + Math.floor(scanLen * 0.2);
+        corrupted.fill(0x00, offset, markerPos);
+        return corrupted;
+      }
+      scanStart = null;
+    }
+    if (marker === 0xd9) break;
+    if (marker === 0xd8 || marker === 0x01) {
+      pos++;
+      continue;
+    }
+    const segmentLength = (source[pos + 1]! << 8) | source[pos + 2]!;
+    if (marker === 0xda) {
+      scanStart = pos + 1 + segmentLength;
+    }
+    pos = pos + 1 + segmentLength;
+  }
+  throw new Error("expected progressive scan followed by DHT marker 0xFF 0xC4 in JPEG fixture");
+}
+
 test.skipIf(!hasImageMagick)("truncated JPEG fails cleanly on add, replace, and panel apply without overwriting existing portrait", async () => {
   const s = sandbox();
   const pngA = join(s.home, "a.png");
@@ -1651,6 +1686,136 @@ test.skipIf(!hasImageMagick)("mid-scan corrupted JPEG emitting extraneous bytes 
       "--citation", "Lectures VI",
       "--text", "Original intact line.",
     ]), "seed musonius");
+
+    const artPath = join(s.config, "omastoic/art/musonius.txt");
+    const authorsPath = join(s.config, "omastoic/authors.tsv");
+    const quotesPath = join(s.config, "omastoic/quotes.tsv");
+    const artBefore = readFileSync(artPath, "utf8");
+    const authorsBefore = readFileSync(authorsPath, "utf8");
+    const quotesBefore = readFileSync(quotesPath, "utf8");
+
+    // 3. --replace-author fails cleanly, rolls back, and leaves portrait and metadata untouched.
+    const failedReplace = await s.cli([
+      "config",
+      "--replace-author", "musonius",
+      "--name", "Should Not Land",
+      "--image", corruptJpeg,
+      "--citation", "Broken",
+      "--text", "Must not overwrite.",
+    ]);
+    expect(failedReplace.code).toBe(1);
+    expect(failedReplace.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedReplace.stderr).not.toContain("omastoic-portrait-");
+    expect(failedReplace.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedReplace.stderr).not.toContain("@ warning/");
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+
+    // 4. panel apply replaceAuthor fails cleanly, rolls back, and leaves portrait and metadata untouched.
+    const failedPanelReplace = await s.cli(["panel", "apply", JSON.stringify({
+      replaceAuthor: {
+        slug: "musonius",
+        name: "Panel Should Not Land",
+        image: corruptJpeg,
+      },
+    })]);
+    expect(failedPanelReplace.code).toBe(1);
+    expect(failedPanelReplace.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedPanelReplace.stderr).not.toContain("omastoic-portrait-");
+    expect(failedPanelReplace.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedPanelReplace.stderr).not.toContain("@ warning/");
+    expect(readFileSync(artPath, "utf8")).toBe(artBefore);
+    expect(readFileSync(authorsPath, "utf8")).toBe(authorsBefore);
+    expect(readFileSync(quotesPath, "utf8")).toBe(quotesBefore);
+  } finally { s.cleanup(); }
+}, 30000);
+
+test.skipIf(!hasImageMagick)("progressive JPEG with mid-scan corruption emitting extraneous bytes before 0xC4 fails cleanly on add, replace, and panel apply", async () => {
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 5 extraneous bytes before marker 0xc4")).toBe(true);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 47 extraneous bytes before marker 0xC4")).toBe(true);
+  expect(hasDecodeWarning([
+    "magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xda",
+    "magick: Corrupt JPEG data: 5 extraneous bytes before marker 0xc4",
+  ].join("\n"))).toBe(true);
+  // Header SOF markers remain exempted alongside SOS, APP, and COM.
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xc0")).toBe(false);
+  expect(hasDecodeWarning("magick: Corrupt JPEG data: 4 extraneous bytes before marker 0xc2")).toBe(false);
+
+  const s = sandbox();
+  try {
+    const progJpeg = join(s.home, "prog-intact.jpg");
+    const corruptJpeg = join(s.home, "prog-mid-scan-dht.jpg");
+    const magick = Bun.which("magick") ?? Bun.which("convert")!;
+    const gen = Bun.spawnSync([magick, sampleJpeg, "-interlace", "Plane", progJpeg]);
+    expect(gen.exitCode).toBe(0);
+    writeFileSync(corruptJpeg, jpegWithMidScanCorruptionBeforeDht(readFileSync(progJpeg)));
+
+    // Confirm the fixture triggers only libjpeg's extraneous-bytes-before-0xC4 warning while exiting 0.
+    const probe = Bun.spawnSync([
+      magick, "-background", "white",
+      "-define", `jpeg:size=${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}`,
+      corruptJpeg, "-auto-orient", "-alpha", "remove", "-alpha", "off",
+      "-colorspace", "Gray",
+      "-resize", `${PORTRAIT_COLS * 8}x${PORTRAIT_ROWS * 16}^>`,
+      "-blur", "0x0.6",
+      "-resize", `${PORTRAIT_COLS * 4}x${PORTRAIT_ROWS * 8}`,
+      "-compress", "none", "pgm:-",
+    ]);
+    const probeStderr = probe.stderr.toString().trim();
+    const warningLines = probeStderr.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    expect(probe.exitCode).toBe(0);
+    expect(warningLines.length).toBeGreaterThan(0);
+    expect(warningLines.every((line) => /Corrupt JPEG data:\s*\d+\s+extraneous bytes? before marker 0xc4\b/i.test(line))).toBe(true);
+    expect(probeStderr).not.toMatch(/Premature end|bad Huffman code|premature end of data segment|before marker 0xd9\b/i);
+    expect(hasDecodeWarning(probeStderr)).toBe(true);
+
+    // 1. --add-author rejects the progressive mid-scan 0xC4 corrupted JPEG and writes nothing.
+    const failedAdd = await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", corruptJpeg,
+      "--citation", "Lectures VI",
+      "--text", "Train both soul and body.",
+    ]);
+    expect(failedAdd.code).toBe(1);
+    expect(failedAdd.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedAdd.stderr).not.toContain("omastoic-portrait-");
+    expect(failedAdd.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedAdd.stderr).not.toContain("@ warning/");
+    expect(existsSync(join(s.config, "omastoic/authors.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
+
+    // 2. panel apply addAuthor rejects the progressive mid-scan 0xC4 corrupted JPEG and writes nothing.
+    const failedPanelAdd = await s.cli(["panel", "apply", JSON.stringify({
+      addAuthor: {
+        slug: "musonius",
+        name: "Musonius Rufus",
+        image: corruptJpeg,
+        citation: "Lectures VI",
+        text: "Train both soul and body.",
+      },
+    })]);
+    expect(failedPanelAdd.code).toBe(1);
+    expect(failedPanelAdd.stderr.toLowerCase()).toContain("looks damaged or truncated");
+    expect(failedPanelAdd.stderr).not.toContain("omastoic-portrait-");
+    expect(failedPanelAdd.stderr).not.toContain("JPEGWarningHandler");
+    expect(failedPanelAdd.stderr).not.toContain("@ warning/");
+    expect(existsSync(join(s.config, "omastoic/authors.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/quotes.tsv"))).toBe(false);
+    expect(existsSync(join(s.config, "omastoic/art"))).toBe(false);
+
+    // Seed a valid custom author using the intact progressive JPEG.
+    expectOk(await s.cli([
+      "config",
+      "--add-author", "musonius",
+      "--name", "Musonius Rufus",
+      "--image", progJpeg,
+      "--citation", "Lectures VI",
+      "--text", "Original intact line.",
+    ]), "seed musonius with intact progressive JPEG");
 
     const artPath = join(s.config, "omastoic/art/musonius.txt");
     const authorsPath = join(s.config, "omastoic/authors.tsv");

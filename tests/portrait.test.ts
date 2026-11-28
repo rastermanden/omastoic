@@ -295,6 +295,12 @@ test("cleanTranscodeError limits the unreadable JPEG/PNG wording to decode failu
       "corrupt.jpg",
     ),
   ).toBe('could not convert portrait image: "corrupt.jpg" looks damaged or truncated');
+  expect(
+    cleanTranscodeError(
+      "magick: Corrupt JPEG data: 47 extraneous bytes before marker 0xc4 `/tmp/omastoic-portrait-abc/source.jpg' @ warning/jpeg.c/JPEGWarningHandler/670.\n",
+      "corrupt-prog.jpg",
+    ),
+  ).toBe('could not convert portrait image: "corrupt-prog.jpg" looks damaged or truncated');
 
   // Non-decode failures keep a faithful reason and strip temp paths and ImageMagick internals.
   const policyErr = cleanTranscodeError(
